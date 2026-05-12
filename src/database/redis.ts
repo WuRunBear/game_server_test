@@ -1,4 +1,4 @@
-import type { Repository } from "./repository";
+import type { Repository } from "database/repository";
 
 export interface RedisOptions {
   url: string;

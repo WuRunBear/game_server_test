@@ -1,4 +1,4 @@
-import type { EntityId } from "../world";
+import type { EntityId } from "src/world";
 
 export type BlackboardKey = string;
 

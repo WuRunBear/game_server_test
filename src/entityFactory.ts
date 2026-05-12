@@ -1,7 +1,7 @@
 import { addComponent, addEntity } from "bitecs";
 
-import { Acceleration, Health, NetworkId, Player, Transform, Velocity } from "./components";
-import type { EntityId, GameWorld } from "./world";
+import { Acceleration, Health, NetworkId, Player, Transform, Velocity } from "components";
+import type { EntityId, GameWorld } from "world";
 
 export interface CreatePlayerOptions {
   x: number;

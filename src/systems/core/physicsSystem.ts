@@ -1,7 +1,7 @@
 import { query } from "bitecs";
 
-import { Acceleration, Velocity } from "../../components";
-import type { GameWorld } from "../../world";
+import { Acceleration, Velocity } from "components";
+import type { GameWorld } from "world";
 
 export function physicsSystem(world: GameWorld): GameWorld {
   const dtSec = world.time.dtMs / 1000;

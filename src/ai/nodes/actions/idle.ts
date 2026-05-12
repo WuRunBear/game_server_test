@@ -1,6 +1,6 @@
-import type { BehaviorNode, NodeStatus } from "../../btRunner";
-import type { Blackboard } from "../../blackboard";
-import type { EntityId, GameWorld } from "../../../world";
+import type { BehaviorNode, NodeStatus } from "ai/btRunner";
+import type { Blackboard } from "ai/blackboard";
+import type { EntityId, GameWorld } from "src/world";
 
 export function idleAction(): BehaviorNode {
   return {

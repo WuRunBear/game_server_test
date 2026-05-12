@@ -1,7 +1,7 @@
 import { query } from "bitecs";
 
-import { Transform, Velocity } from "../../components";
-import type { GameWorld } from "../../world";
+import { Transform, Velocity } from "components";
+import type { GameWorld } from "world";
 
 /**
  * 移动系统：把速度积分到位置上。

@@ -1,5 +1,5 @@
-import type { BehaviorNode } from "./btRunner";
-import { idleAction } from "./nodes/actions/idle";
+import type { BehaviorNode } from "ai/btRunner";
+import { idleAction } from "ai/nodes/actions/idle";
 
 export function createDefaultNpcTree(): BehaviorNode {
   return idleAction();

@@ -1,5 +1,5 @@
-import type { Blackboard } from "./blackboard";
-import type { EntityId, GameWorld } from "../world";
+import type { Blackboard } from "ai/blackboard";
+import type { EntityId, GameWorld } from "src/world";
 
 export type NodeStatus = "success" | "failure" | "running";
 

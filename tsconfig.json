@@ -7,6 +7,30 @@
     "noEmitOnError": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "src": ["src"],
+      "src/*": ["src/*"],
+      "ai": ["src/ai"],
+      "ai/*": ["src/ai/*"],
+      "components": ["src/components"],
+      "components/*": ["src/components/*"],
+      "world": ["src/world"],
+      "world/*": ["src/world/*"],
+      "config": ["src/config"],
+      "config/*": ["src/config/*"],
+      "database": ["src/database"],
+      "database/*": ["src/database/*"],
+      "network": ["src/network"],
+      "network/*": ["src/network/*"],
+      "systems": ["src/systems"],
+      "systems/*": ["src/systems/*"],
+      "utils": ["src/utils"],
+      "utils/*": ["src/utils/*"],
+    }
+  },
+  "tsc-alias": {
+    "resolveFullPaths": true
   },
   "include": ["src"]
 }

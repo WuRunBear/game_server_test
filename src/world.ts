@@ -3,8 +3,9 @@
  */
 import { createWorld } from "bitecs";
 
-import { createMetrics, type Metrics } from "./metrics";
-import type { NetworkRuntime } from "./network/server";
+import { createMetrics, type Metrics } from "src/metrics";
+import type { NetworkRuntime } from "network/server";
+import { createLogger, type Logger } from "utils/logger";
 
 export type EntityId = number;
 export type Tick = number;
@@ -18,6 +19,7 @@ export interface GameTime {
 export type GameWorld = ReturnType<typeof createWorld> & {
   time: GameTime;
   metrics: Metrics;
+  logger: Logger;
   net?: NetworkRuntime;
 };
 
@@ -37,6 +39,7 @@ export function createGameWorld(fixedDtMs: number): GameWorld {
       fixedDtMs,
     },
     metrics: createMetrics(),
+    logger: createLogger("world"),
   }) as GameWorld;
 
   return world;

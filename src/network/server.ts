@@ -2,9 +2,9 @@ import http from "node:http";
 
 import WebSocket, { WebSocketServer, type RawData } from "ws";
 
-import type { ClientToServerInput, ServerToClientMessage, ServerToClientSnapshot } from "./protocol";
-import { decodeClientMessage, encodeServerMessage } from "./serializers";
-import type { Logger } from "../utils/logger";
+import type { ClientToServerInput, ServerToClientMessage, ServerToClientSnapshot } from "network/protocol";
+import { decodeClientMessage, encodeServerMessage } from "network/serializers";
+import type { Logger } from "utils/logger";
 
 /**
  * 单个客户端的运行期状态。

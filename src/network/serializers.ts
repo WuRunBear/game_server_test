@@ -1,4 +1,4 @@
-import type { ClientToServerMessage, ServerToClientMessage } from "./protocol";
+import type { ClientToServerMessage, ServerToClientMessage } from "network/protocol";
 
 /**
  * 序列化工具（JSON）。

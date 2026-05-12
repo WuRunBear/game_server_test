@@ -1,5 +1,5 @@
-import { recordTick } from "./metrics";
-import type { GameWorld, System } from "./world";
+import { recordTick } from "src/metrics";
+import type { GameWorld, System } from "src/world";
 
 /**
  * 游戏循环的最小接口：启动/停止。
@@ -40,18 +40,29 @@ export function createGameLoop(
 
     for (const system of systems) system(world);
 
-    recordTick(world.metrics, performance.now() - start);
+    const tickMs = performance.now() - start;
+    recordTick(world.metrics, tickMs);
+
+    if (tickMs > fixedDtMs * 1.5) {
+      world.logger.warn("单帧耗时过高", {
+        tick: world.time.tick,
+        tickMs,
+        fixedDtMs,
+      });
+    }
   };
 
   return {
     start() {
       if (timer) return;
+      world.logger.info("游戏循环已启动", { tickRate: options.tickRate });
       timer = setInterval(step, fixedDtMs);
     },
     stop() {
       if (!timer) return;
       clearInterval(timer);
       timer = undefined;
+      world.logger.info("游戏循环已停止");
     },
   };
 }

@@ -1,4 +1,4 @@
-import type { GameWorld } from "../../world";
+import type { GameWorld } from "src/world";
 
 export function broadcastSystem(world: GameWorld): GameWorld {
   if (!world.net) return world;

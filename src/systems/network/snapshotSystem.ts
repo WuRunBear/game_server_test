@@ -1,8 +1,8 @@
 import { query } from "bitecs";
 
-import { Health, NetworkId, Transform } from "../../components";
-import type { ServerToClientSnapshot } from "../../network/protocol";
-import type { GameWorld } from "../../world";
+import { Health, NetworkId, Transform } from "components";
+import type { ServerToClientSnapshot } from "network/protocol";
+import type { GameWorld } from "src/world";
 
 /**
  * 快照系统：把需要同步的数据收集成一帧快照，交给广播系统发送。
