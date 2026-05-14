@@ -1,5 +1,6 @@
-import { gameConfig, serverConfig } from "config";
-import { createPlayer } from "factories";
+import { gameConfig, getMapSourceFromConfig, serverConfig } from "config";
+import { createNpc, createPlayer } from "factories";
+import { buildMapRuntime } from "map";
 import { createGameLoop } from "src/gameLoop";
 import { startNetworkServer } from "network/server";
 import { createSystems } from "systems";
@@ -22,7 +23,14 @@ export function main(): void {
 
   world.net = net.runtime;
 
-  createPlayer(world, { x: 0, y: 0 });
+  world.map = buildMapRuntime(getMapSourceFromConfig());
+
+  const playerSpawn = world.map.spawns.player ?? { x: 0, y: 0 };
+  createPlayer(world, { x: playerSpawn.x, y: playerSpawn.y });
+
+  for (const spawn of world.map.spawns.npcs) {
+    createNpc(world, { x: spawn.pos.x, y: spawn.pos.y, kind: spawn.kind });
+  }
 
   loop.start();
 }

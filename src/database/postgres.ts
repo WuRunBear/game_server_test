@@ -10,5 +10,9 @@ export function createPostgresRepository(_options: PostgresOptions): Repository 
     async loadPlayer() {
       return null;
     },
+    async saveMapInstance() {},
+    async loadMapInstance() {
+      return null;
+    },
   };
 }

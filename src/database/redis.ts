@@ -10,5 +10,9 @@ export function createRedisRepository(_options: RedisOptions): Repository {
     async loadPlayer() {
       return null;
     },
+    async saveMapInstance() {},
+    async loadMapInstance() {
+      return null;
+    },
   };
 }

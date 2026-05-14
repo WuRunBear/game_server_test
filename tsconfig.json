@@ -29,6 +29,8 @@
       "systems/*": ["src/systems/*"],
       "utils": ["src/utils"],
       "utils/*": ["src/utils/*"],
+      "map": ["src/map"],
+      "map/*": ["src/map/*"],
     }
   },
   "tsc-alias": {
