@@ -37,7 +37,9 @@ src/
   world.ts                 # GameWorld 类型 + createGameWorld
   gameLoop.ts              # 固定 tick 主循环（setInterval）
   metrics.ts               # 简单 tick 性能指标
-  entityFactory.ts         # 实体创建工厂（示例：createPlayer）
+  factories/               # 实体创建工厂（按实体类型拆分）
+    index.ts               # 统一导出
+    playerFactory.ts       # 玩家实体工厂（createPlayer）
 
   components/              # 组件层（数据）
     index.ts               # 统一导出
@@ -127,7 +129,7 @@ export const Boss = {}
 
 1. 在 `src/components/` 新建文件
 2. 在 `src/components/index.ts` 统一导出
-3. 在 `entityFactory.ts` 创建实体时 `addComponent(world, eid, Mana)`
+3. 在 `src/factories/` 的对应实体工厂里创建实体时 `addComponent(world, eid, Mana)`
 
 ### B. 新增一个系统（并控制顺序）
 
@@ -140,7 +142,7 @@ export const Boss = {}
 
 ### C. 新增一种实体（工厂函数）
 
-在 [entityFactory.ts](src/entityFactory.ts) 里添加 `createNpc/createEnemy/...`，集中完成：
+在 `src/factories/` 下按实体类型新增 `xxxFactory.ts`（例如 `npcFactory.ts` / `enemyFactory.ts`），并在 [factories/index.ts](src/factories/index.ts) 统一导出；每个工厂函数集中完成：
 
 - `addEntity`
 - `addComponent`
@@ -179,4 +181,3 @@ ws.on("message", (data) => {
   console.log("server:", data.toString("utf-8"));
 });
 ```
-

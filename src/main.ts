@@ -1,5 +1,5 @@
 import { gameConfig, serverConfig } from "config";
-import { createPlayer } from "src/entityFactory";
+import { createPlayer } from "factories";
 import { createGameLoop } from "src/gameLoop";
 import { startNetworkServer } from "network/server";
 import { createSystems } from "systems";

@@ -21,6 +21,8 @@
       "config/*": ["src/config/*"],
       "database": ["src/database"],
       "database/*": ["src/database/*"],
+      "factories": ["src/factories"],
+      "factories/*": ["src/factories/*"],
       "network": ["src/network"],
       "network/*": ["src/network/*"],
       "systems": ["src/systems"],
