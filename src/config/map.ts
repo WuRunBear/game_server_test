@@ -2,23 +2,56 @@ import fs from "node:fs";
 
 import type { MapSource } from "map";
 
+/**
+ * 读取并解析 JSON 文件。
+ *
+ * @param filePath 文件路径
+ * @returns 解析后的 JSON 值
+ * @throws Error 当文件读取失败或 JSON 解析失败时抛出
+ */
 function readJsonFile(filePath: string): unknown {
   const text = fs.readFileSync(filePath, "utf-8");
   return JSON.parse(text) as unknown;
 }
 
+/**
+ * 判断值是否为普通对象（Record）。
+ *
+ * @param value 任意值
+ * @returns 是否为对象且非数组
+ */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * 把 unknown 转为 number（有限数）或返回 null。
+ *
+ * @param value 任意值
+ * @returns number 或 null
+ */
 function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+/**
+ * 把 unknown 转为 string 或返回 null。
+ *
+ * @param value 任意值
+ * @returns string 或 null
+ */
 function asString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+/**
+ * 从配置对象中按候选键读取 number，找不到则返回默认值。
+ *
+ * @param entry 配置对象
+ * @param keys 候选键列表（按优先级顺序）
+ * @param fallback 默认值
+ * @returns 读取到的 number
+ */
 function getNumber(entry: Record<string, unknown>, keys: string[], fallback: number): number {
   for (const key of keys) {
     const v = asNumber(entry[key]);
@@ -27,10 +60,25 @@ function getNumber(entry: Record<string, unknown>, keys: string[], fallback: num
   return fallback;
 }
 
+/**
+ * 从配置对象读取 string 字段。
+ *
+ * @param entry 配置对象
+ * @param key 字段名
+ * @returns string 或 null
+ */
 function getString(entry: Record<string, unknown>, key: string): string | null {
   return asString(entry[key]);
 }
 
+/**
+ * 从地图清单文件中解析出 MapSource。
+ *
+ * @param registryPath 地图清单路径
+ * @param mapId 指定 mapId；为 null 则按 default/第一个可用 mapId 选择
+ * @returns MapSource
+ * @throws Error 当清单格式错误或无法选择地图时抛出
+ */
 function mapSourceFromRegistryFile(
   registryPath: string,
   mapId: string | null,
@@ -82,6 +130,12 @@ function mapSourceFromRegistryFile(
   throw new Error(`地图清单 kind 不支持：maps.${selectedId}.kind=${String(kind)}`);
 }
 
+/**
+ * 从项目配置读取地图来源（MapSource）。
+ *
+ * @returns MapSource
+ * @throws Error 当地图清单读取或解析失败时抛出
+ */
 export function getMapSourceFromConfig(): MapSource {
   const registryPath = "config/maps.registry.json";
   return mapSourceFromRegistryFile(registryPath, null);

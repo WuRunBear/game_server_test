@@ -2,6 +2,12 @@ import type { MapRuntime, MapSource } from "map/types";
 import { generateSimpleMap } from "map/generated/simple";
 import { mapRuntimeFromTiled } from "map/tiled";
 
+/**
+ * 根据地图来源构建运行时地图数据。
+ *
+ * @param source 地图来源（tiled 或 generated）
+ * @returns MapRuntime
+ */
 export function buildMapRuntime(source: MapSource): MapRuntime {
   if (source.kind === "tiled") {
     return mapRuntimeFromTiled(source.id, source.name, source.json);

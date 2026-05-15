@@ -21,6 +21,13 @@ export interface BtInstance<TAgent extends BtAgent = BtAgent> {
   agent: TAgent;
 }
 
+/**
+ * 推进一次行为树，并返回当前行为树状态。
+ *
+ * @param instance 行为树实例
+ * @param ctx 本次 tick 的上下文（world/self/bb）
+ * @returns 行为树执行后的状态
+ */
 export function stepBehaviourTree<TAgent extends BtAgent>(
   instance: BtInstance<TAgent>,
   ctx: BtContext,

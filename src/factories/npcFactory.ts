@@ -9,6 +9,13 @@ export interface CreateNpcOptions {
   kind: string;
 }
 
+/**
+ * 创建一个最小的 NPC 实体，并初始化必要组件的默认值。
+ *
+ * @param world ECS World
+ * @param options 初始位置与 NPC 类型
+ * @returns 新创建的实体 id
+ */
 export function createNpc(world: GameWorld, options: CreateNpcOptions): EntityId {
   const eid = addEntity(world);
 
