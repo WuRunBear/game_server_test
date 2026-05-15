@@ -63,7 +63,7 @@ src/
     protocol.ts            # 消息类型定义（JSON）
     serializers.ts         # 序列化/反序列化 + 最小校验
 
-  ai/                      # 行为树最小骨架（占位）
+  ai/                      # 行为树（Mistreevous）
     blackboard.ts
     btRunner.ts
     btFactory.ts
@@ -160,11 +160,24 @@ export const Boss = {}
 
 ### E. 行为树 / AI（建议的接入方式）
 
-当前 `src/ai/` 只有最小骨架。建议做法：
+当前 `src/ai/` 基于 [Mistreevous](https://www.npmjs.com/package/mistreevous) 提供行为树的最小接入。建议做法：
 
 - 行为树系统每 tick 同步推进（轻量）
 - 大模型推理放到异步任务里，产出高层意图写入 blackboard/组件
 - 执行系统消费意图并做“可执行性校验”，失败就回退到行为树 fallback
+
+最小示例（为某个实体推进一帧行为树）：
+
+```ts
+import { createDefaultNpcTree } from "ai/btFactory";
+import { createBlackboard } from "ai/blackboard";
+import { stepBehaviourTree } from "ai/btRunner";
+
+const bt = createDefaultNpcTree();
+const bb = createBlackboard(eid);
+
+stepBehaviourTree(bt, { world, self: eid, bb });
+```
 
 ## 最小客户端示例（Node.js）
 
