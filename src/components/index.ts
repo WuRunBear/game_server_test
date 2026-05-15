@@ -6,7 +6,8 @@
  * - Tag 组件使用空对象表示
  */
 export { Transform } from "components/transform";
-export { Velocity, Acceleration, Collider } from "components/physics";
+export { Size } from "components/size";
+export { Velocity, Acceleration, Collider, ColliderShape } from "components/physics";
 export { Health, Attack, Defense, Team } from "components/combat";
 export { AIState, BlackboardRef, Target } from "components/ai";
 export { Inventory, type InventorySlots } from "components/inventory";

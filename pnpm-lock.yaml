@@ -11,6 +11,9 @@ importers:
       bitecs:
         specifier: ^0.4.0
         version: 0.4.0
+      check2d:
+        specifier: ^9.36.4
+        version: 9.36.4
       mistreevous:
         specifier: ^4.3.1
         version: 4.3.1
@@ -213,6 +216,12 @@ packages:
   '@types/node@22.19.17':
     resolution: {integrity: sha512-wGdMcf+vPYM6jikpS/qhg6WiqSV/OhG+jeeHT/KlVqxYfD40iYJf9/AE1uQxVWFvU7MipKRkRv8NSHiCGgPr8Q==}
 
+  '@types/rbush@4.0.0':
+    resolution: {integrity: sha512-+N+2H39P8X+Hy1I5mC6awlTX54k3FhiUmvt7HWzGJZvF+syUAAxP/stwppS8JE84YHqFgRMv6fCy31202CMFxQ==}
+
+  '@types/sat@0.0.35':
+    resolution: {integrity: sha512-e6hhgprjvfncsniUtblt2Q8yV+cMf/Vqxl4CrnhkwPML4Lb7F+1fMNZs+UJ4L6yp2j/vDH8oHpNaubM0rgHXTQ==}
+
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
@@ -234,6 +243,9 @@ packages:
   braces@3.0.3:
     resolution: {integrity: sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==}
     engines: {node: '>=8'}
+
+  check2d@9.36.4:
+    resolution: {integrity: sha512-z1p2X7V3Mw1PwW/QRIe58ehDbUPNHmUwr3v3b5IeylOZDMoVOm3o1AJaFUZFs9EKMgzPuviC3/F745jhrr3ccQ==}
 
   chokidar@3.6.0:
     resolution: {integrity: sha512-7VT13fmjotKpGipCW9JEQAusEPE+Ei8nl6/g4FBAmIm0GOOLMua9NDDo/DWp0ZAxCr3cPq5ZpBqmPAQgDda2Pw==}
@@ -333,6 +345,9 @@ packages:
     resolution: {integrity: sha512-B7+VDyb8Tl6oMJT9oSO2CW8XC/T4UcJGrwOVoNGwOQsQYhlpfajmrMj5xeejqaASq3V/EqThyOeATEOMuSEXiA==}
     engines: {node: '>=12'}
 
+  poly-decomp-es@0.4.2:
+    resolution: {integrity: sha512-akjZkaTeyfECMNkMqv0g9gFiU2HjpZ5ubJA/aczw1ILdgWQbv1OPwCi05/9JbY2GnGpjm9k85Jdbd/j/p/lg/g==}
+
   queue-lit@1.5.2:
     resolution: {integrity: sha512-tLc36IOPeMAubu8BkW8YDBV+WyIgKlYU7zUNs0J5Vk9skSZ4JfGlPOqplP0aHdfv7HL0B2Pg6nwiq60Qc6M2Hw==}
     engines: {node: '>=12'}
@@ -353,6 +368,9 @@ packages:
 
   run-parallel@1.2.0:
     resolution: {integrity: sha512-5l4VyZR86LZ/lDxZTR6jqL8AFE2S0IFLMP26AbjsLVADxHdhB/c0GUsH+y39UfCi3dzz8OlQuPmnaJOMoDHQBA==}
+
+  sat@0.9.0:
+    resolution: {integrity: sha512-mxdv5RZJO4tdMnUURGU3gAMcnDUEwcNJwE+lPO0/V+rBeDvFLH3wEZEOR0fH7cTN0zQaNxBEbHnyQL9DzupwQQ==}
 
   slash@3.0.0:
     resolution: {integrity: sha512-g9Q1haeby36OSStwb4ntCGGGaKsaVSjQ68fBxoQcutl5fS1vuY18H3wSt3jFyFtrkx+Kz0V1G85A4MyAdDMi2Q==}
@@ -490,6 +508,10 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
+  '@types/rbush@4.0.0': {}
+
+  '@types/sat@0.0.35': {}
+
   '@types/ws@8.18.1':
     dependencies:
       '@types/node': 22.19.17
@@ -508,6 +530,13 @@ snapshots:
   braces@3.0.3:
     dependencies:
       fill-range: 7.1.1
+
+  check2d@9.36.4:
+    dependencies:
+      '@types/rbush': 4.0.0
+      '@types/sat': 0.0.35
+      poly-decomp-es: 0.4.2
+      sat: 0.9.0
 
   chokidar@3.6.0:
     dependencies:
@@ -631,6 +660,8 @@ snapshots:
     dependencies:
       queue-lit: 1.5.2
 
+  poly-decomp-es@0.4.2: {}
+
   queue-lit@1.5.2: {}
 
   queue-microtask@1.2.3: {}
@@ -646,6 +677,8 @@ snapshots:
   run-parallel@1.2.0:
     dependencies:
       queue-microtask: 1.2.3
+
+  sat@0.9.0: {}
 
   slash@3.0.0: {}
 
