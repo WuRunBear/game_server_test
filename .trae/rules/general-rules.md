@@ -59,3 +59,13 @@ For multi-step tasks, state a brief plan:
 ```
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+## 5. 注释要求
+
+**默认必须为代码补充注释，至少函数必须有注释。**
+
+- 所有新增/修改的导出函数必须添加中文 JSDoc（`/** ... */`），并放在函数声明正上方，保持一行空隙。
+- 导出类/方法也必须有对应的中文 JSDoc；复杂逻辑的私有/内部函数同样需要补充注释。
+- 注释应简洁明了，准确描述功能与关键实现点，避免无意义复述代码。
+- 注释必须包含必要的 `@param`、`@returns`；若函数会显式抛出异常，补充 `@throws`。
+- 避免在注释中使用英文或其他语言（专有名词/协议字段名等无法替代的情况除外）。
