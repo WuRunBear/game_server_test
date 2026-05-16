@@ -1,7 +1,7 @@
 import { query } from "bitecs";
 
 import { Collider, ColliderShape, Transform } from "components";
-import { System as Check2dSystem, type Box, type Circle } from "check2d";
+import Check2d, { type Box, type Circle, type System } from "check2d";
 import type { EntityId, GameWorld } from "src/world";
 
 type CircleBody = Circle<{ eid: EntityId }>;
@@ -20,7 +20,7 @@ type BodyRecord = {
  * - 使用 WeakMap 确保 World 被释放时缓存可被 GC 回收
  */
 type CollisionRuntime = {
-  system: Check2dSystem;
+  system: System;
   bodies: Map<EntityId, BodyRecord>;
 };
 
@@ -37,7 +37,7 @@ function getRuntime(world: GameWorld): CollisionRuntime {
   if (existing) return existing;
 
   const created: CollisionRuntime = {
-    system: new Check2dSystem(),
+    system: new Check2d.System(),
     bodies: new Map(),
   };
   runtimeByWorld.set(world, created);
