@@ -1,5 +1,5 @@
 {
-  "name": "ts-backend",
+  "name": "game_server_test",
   "version": "0.1.0",
   "private": true,
   "type": "module",
