@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.12.1" orientation="orthogonal" renderorder="right-down" width="30" height="20" tilewidth="16" tileheight="16" infinite="1" nextlayerid="6" nextobjectid="1">
+ <editorsettings>
+  <export target="base.json" format="json"/>
+ </editorsettings>
+ <tileset firstgid="1" source="../Tileset/Tileset Spring.tsx"/>
+ <layer id="1" name="ground" width="30" height="20">
+  <data encoding="csv"/>
+ </layer>
+ <layer id="2" name="decoration" width="30" height="20">
+  <data encoding="csv"/>
+ </layer>
+ <layer id="3" name="collision" width="30" height="20">
+  <data encoding="csv"/>
+ </layer>
+ <objectgroup id="4" name="objects"/>
+ <objectgroup id="5" name="zones"/>
+</map>
