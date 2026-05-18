@@ -8,11 +8,11 @@
             "scaleInEditor": 1
         },
         "Map/base.tmx": {
-            "scale": 0.015625,
-            "selectedLayer": 0,
+            "scale": 0.125,
+            "selectedLayer": 1,
             "viewCenter": {
-                "x": -3808,
-                "y": -2016
+                "x": 3752,
+                "y": 2620
             }
         },
         "Tileset/Tileset Spring.tsx": {
