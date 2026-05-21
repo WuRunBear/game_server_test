@@ -1,6 +1,9 @@
 {
-    "activeFile": "",
+    "activeFile": "Map/base.tmx",
     "expandedProjectPaths": [
+        ".",
+        "Map",
+        "Tileset"
     ],
     "file.lastUsedOpenFilter": "全部文件 (*)",
     "fileStates": {
@@ -12,8 +15,8 @@
             "scale": 0.125,
             "selectedLayer": 1,
             "viewCenter": {
-                "x": 3752,
-                "y": 2620
+                "x": 1372,
+                "y": 1276
             }
         },
         "Tileset/Tileset Spring.tsx": {
@@ -33,6 +36,7 @@
     "map.tileHeight": 16,
     "map.tileWidth": 16,
     "openFiles": [
+        "Map/base.tmx"
     ],
     "project": "maps.tiled-project",
     "recentFiles": [

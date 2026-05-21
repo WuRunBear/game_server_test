@@ -1,28 +1,34 @@
 import type { MapRuntime, MapZone, Vec2 } from "map/types";
 
-type TiledLayer =
-  | {
-      type: "tilelayer";
-      name: string;
-      width: number;
-      height: number;
-      data?: number[];
-    }
-  | {
-      type: "objectgroup";
-      name: string;
-      objects?: Array<{
-        id: number;
-        name?: string;
-        type?: string;
-        x: number;
-        y: number;
-        width?: number;
-        height?: number;
-        polygon?: Array<{ x: number; y: number }>;
-        properties?: Array<{ name: string; type: string; value: unknown }>;
-      }>;
-    };
+type TiledProperty = { name: string; type: string; value: unknown };
+
+type TiledObject = {
+  id: number;
+  name?: string;
+  type?: string;
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+  polygon?: Array<{ x: number; y: number }>;
+  properties?: TiledProperty[];
+};
+
+type TiledTileLayer = {
+  type: "tilelayer";
+  name: string;
+  width: number;
+  height: number;
+  data?: number[];
+};
+
+type TiledObjectGroupLayer = {
+  type: "objectgroup";
+  name: string;
+  objects?: TiledObject[];
+};
+
+type TiledLayer = TiledTileLayer | TiledObjectGroupLayer;
 
 type TiledMap = {
   width: number;
@@ -60,7 +66,7 @@ function asString(value: unknown): string | null {
  * @returns 属性值；不存在时返回 undefined
  */
 function getProp(
-  props: Array<{ name: string; type: string; value: unknown }> | undefined,
+  props: TiledProperty[] | undefined,
   name: string,
 ): unknown {
   if (!props) return undefined;
@@ -86,7 +92,7 @@ function emptyBlocked(width: number, height: number): Uint8Array {
  */
 function parseCollision(map: TiledMap): Uint8Array {
   const layers = map.layers ?? [];
-  const collision = layers.find((l): l is Extract<TiledLayer, { type: "tilelayer" }> => {
+  const collision = layers.find((l): l is TiledTileLayer => {
     return l.type === "tilelayer" && l.name === "collision";
   });
 
@@ -107,7 +113,7 @@ function parseCollision(map: TiledMap): Uint8Array {
 function parseZones(map: TiledMap): MapZone[] {
   const zones: MapZone[] = [];
   const layers = map.layers ?? [];
-  const zoneLayer = layers.find((l): l is Extract<TiledLayer, { type: "objectgroup" }> => {
+  const zoneLayer = layers.find((l): l is TiledObjectGroupLayer => {
     return l.type === "objectgroup" && l.name === "zones";
   });
   if (!zoneLayer?.objects) return zones;
@@ -147,7 +153,7 @@ function parseZones(map: TiledMap): MapZone[] {
  */
 function parseSpawns(map: TiledMap): MapRuntime["spawns"] {
   const layers = map.layers ?? [];
-  const objectsLayer = layers.find((l): l is Extract<TiledLayer, { type: "objectgroup" }> => {
+  const objectsLayer = layers.find((l): l is TiledObjectGroupLayer => {
     return l.type === "objectgroup" && l.name === "objects";
   });
 
