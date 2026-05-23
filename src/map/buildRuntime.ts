@@ -1,4 +1,5 @@
 import type { MapRuntime, MapSource } from "map/types";
+import { exportGeneratedMapArtifacts } from "map/exportGenerated";
 import { generateSimpleMap } from "map/generated/simple";
 import { mapRuntimeFromTiled } from "map/tiled";
 
@@ -13,7 +14,7 @@ export function buildMapRuntime(source: MapSource): MapRuntime {
     return mapRuntimeFromTiled(source.id, source.name, source.json);
   }
 
-  return generateSimpleMap({
+  const runtime = generateSimpleMap({
     id: source.id,
     name: source.name,
     seed: source.seed,
@@ -22,4 +23,8 @@ export function buildMapRuntime(source: MapSource): MapRuntime {
     tileWidth: source.tileWidth,
     tileHeight: source.tileHeight,
   });
+
+  exportGeneratedMapArtifacts(runtime);
+
+  return runtime;
 }
