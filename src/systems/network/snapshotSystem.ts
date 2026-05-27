@@ -1,7 +1,8 @@
 import { query } from "bitecs";
+import { create } from "@bufbuild/protobuf";
 
 import { Health, NetworkId, Transform } from "components";
-import type { ServerToClientSnapshot } from "network/protocol";
+import { SnapshotEntitySchema, SnapshotSchema, type ServerToClientSnapshot } from "network/protocol";
 import type { GameWorld } from "src/world";
 
 /**
@@ -13,19 +14,18 @@ export function snapshotSystem(world: GameWorld): GameWorld {
   const entities: ServerToClientSnapshot["entities"] = [];
 
   for (const eid of query(world, [NetworkId, Transform, Health])) {
-    entities.push({
+    entities.push(create(SnapshotEntitySchema, {
       id: NetworkId.value[eid],
       x: Transform.x[eid],
       y: Transform.y[eid],
       hp: Health.current[eid],
-    });
+    }));
   }
 
-  world.net.pendingSnapshot = {
-    t: "snapshot",
+  world.net.pendingSnapshot = create(SnapshotSchema, {
     tick: world.time.tick,
     entities,
-  };
+  });
 
   return world;
 }

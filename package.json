@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "proto:gen": "buf generate",
+    "proto:lint": "buf lint",
+    "proto:format": "buf format -w"
   },
   "engines": {
     "node": ">=22"
@@ -15,14 +18,20 @@
     "@tsconfig/node22": "^22.0.0",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",
+    "@bufbuild/buf": "^1.70.0",
+    "@bufbuild/protoc-gen-es": "^2.12.0",
     "tsc-alias": "^1.8.16",
     "tsx": "^4.20.0",
     "typescript": "^5.8.0"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "^2.12.0",
     "bitecs": "^0.4.0",
     "check2d": "^9.36.4",
     "mistreevous": "^4.3.1",
     "ws": "^8.18.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["@bufbuild/buf"]
   }
 }

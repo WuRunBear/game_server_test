@@ -1,38 +1,26 @@
-import type { ClientToServerMessage, ServerToClientMessage } from "network/protocol";
+import { fromBinary, toBinary } from "@bufbuild/protobuf";
+
+import { ClientMessageSchema, ServerMessageSchema, type ClientToServerMessage, type ServerToClientMessage } from "network/protocol";
 
 /**
- * 序列化工具（JSON）。
+ * 将服务端消息序列化为 Protobuf 二进制。
+ *
+ * @param message 服务端消息
+ * @returns 可直接通过 WebSocket 发送的二进制数据
  */
-export function encodeServerMessage(message: ServerToClientMessage): string {
-  return JSON.stringify(message);
+export function encodeServerMessage(message: ServerToClientMessage): Uint8Array {
+  return toBinary(ServerMessageSchema, message);
 }
 
 /**
- * 反序列化客户端消息，并做最小的字段校验。
+ * 反序列化客户端消息（Protobuf 二进制）。
+ *
+ * @param bytes 客户端发送的二进制数据
+ * @returns 客户端消息；解析失败返回 null
  */
-export function decodeClientMessage(text: string): ClientToServerMessage | null {
+export function decodeClientMessage(bytes: Uint8Array): ClientToServerMessage | null {
   try {
-    const obj = JSON.parse(text) as unknown;
-    if (!obj || typeof obj !== "object") return null;
-    if ((obj as { t?: unknown }).t !== "input") return null;
-
-    const input = obj as {
-      t: "input";
-      seq: unknown;
-      moveX: unknown;
-      moveY: unknown;
-    };
-
-    if (typeof input.seq !== "number") return null;
-    if (typeof input.moveX !== "number") return null;
-    if (typeof input.moveY !== "number") return null;
-
-    return {
-      t: "input",
-      seq: input.seq,
-      moveX: input.moveX,
-      moveY: input.moveY,
-    };
+    return fromBinary(ClientMessageSchema, bytes);
   } catch {
     return null;
   }

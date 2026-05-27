@@ -1,32 +1,12 @@
-import type { EntityId, Tick } from "../world";
+import type { ClientMessage, Input, ServerMessage, Snapshot, SnapshotEntity } from "network/gen/game/v1/network_pb";
+
+export { ClientMessageSchema, InputSchema, ServerMessageSchema, SnapshotEntitySchema, SnapshotSchema } from "network/gen/game/v1/network_pb";
+export type { ClientMessage, Input, ServerMessage, Snapshot, SnapshotEntity } from "network/gen/game/v1/network_pb";
 
 /**
- * 网络协议（最小示例，使用 JSON 文本）。
- *
- * 约定：
- * - t 为消息类型
- * - 所有数值字段均为 number（序列化时由 JSON 处理）
+ * 为了减少业务代码改动，保留原有命名的类型别名。
  */
-export type ClientToServerMessage = ClientToServerInput;
-
-export interface ClientToServerInput {
-  t: "input";
-  seq: number;
-  moveX: number;
-  moveY: number;
-}
-
-export type ServerToClientMessage = ServerToClientSnapshot;
-
-export interface ServerToClientSnapshot {
-  t: "snapshot";
-  tick: Tick;
-  entities: SnapshotEntity[];
-}
-
-export interface SnapshotEntity {
-  id: EntityId;
-  x: number;
-  y: number;
-  hp: number;
-}
+export type ClientToServerInput = Input;
+export type ClientToServerMessage = ClientMessage;
+export type ServerToClientSnapshot = Snapshot;
+export type ServerToClientMessage = ServerMessage;

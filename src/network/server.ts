@@ -6,6 +6,13 @@ import type { ClientToServerInput, ServerToClientMessage, ServerToClientSnapshot
 import { decodeClientMessage, encodeServerMessage } from "network/serializers";
 import type { Logger } from "utils/logger";
 
+function rawDataToBytes(data: RawData): Uint8Array {
+  if (typeof data === "string") return Buffer.from(data, "utf-8");
+  if (Array.isArray(data)) return Buffer.concat(data);
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  return data;
+}
+
 /**
  * 单个客户端的运行期状态。
  */
@@ -84,13 +91,15 @@ export function startNetworkServer(options: StartNetworkServerOptions): NetworkS
     options.logger.info("客户端已连接", { id });
 
     ws.on("message", (data: RawData) => {
-      const text = typeof data === "string" ? data : data.toString("utf-8");
-      const message = decodeClientMessage(text);
+      const message = decodeClientMessage(rawDataToBytes(data));
       if (!message) return;
 
-      if (message.seq <= client.lastInputSeq) return;
-      client.lastInputSeq = message.seq;
-      runtime.latestInputByClientId.set(id, message);
+      if (message.payload.case !== "input") return;
+      const input: ClientToServerInput = message.payload.value;
+
+      if (input.seq <= client.lastInputSeq) return;
+      client.lastInputSeq = input.seq;
+      runtime.latestInputByClientId.set(id, input);
     });
 
     ws.on("close", () => {
