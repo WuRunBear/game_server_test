@@ -1,6 +1,6 @@
 import { addComponent, addEntity } from "bitecs";
 
-import { Collider, ColliderShape, Health, NPC, NetworkId, Size, Transform } from "components";
+import { Collider, ColliderShape, Health, NPC, NetworkId, Size, Transform, Velocity } from "components";
 import type { EntityId, GameWorld } from "world";
 
 export interface CreateNpcOptions {
@@ -25,6 +25,7 @@ export function createNpc(world: GameWorld, options: CreateNpcOptions): EntityId
 
   addComponent(world, eid, Transform);
   addComponent(world, eid, Size);
+  addComponent(world, eid, Velocity);
   addComponent(world, eid, Collider);
   addComponent(world, eid, Health);
   addComponent(world, eid, NetworkId);
@@ -34,6 +35,9 @@ export function createNpc(world: GameWorld, options: CreateNpcOptions): EntityId
   Transform.y[eid] = options.y;
   Transform.rot[eid] = 0;
   Transform.scale[eid] = 1;
+
+  Velocity.vx[eid] = 0;
+  Velocity.vy[eid] = 0;
 
   const defaultW = world.map ? world.map.grid.tileWidth * 0.6 : 16;
   const defaultH = world.map ? world.map.grid.tileHeight * 0.6 : 16;

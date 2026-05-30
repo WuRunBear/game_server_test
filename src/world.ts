@@ -4,7 +4,6 @@
 import { createWorld } from "bitecs";
 
 import { createMetrics, type Metrics } from "src/metrics";
-import type { NetworkRuntime } from "network/server";
 import { createLogger, type Logger } from "utils/logger";
 import type { MapRuntime } from "map";
 
@@ -22,7 +21,6 @@ export type GameWorld = ReturnType<typeof createWorld> & {
   metrics: Metrics;
   logger: Logger;
   map?: MapRuntime;
-  net?: NetworkRuntime;
 };
 
 export type System = (world: GameWorld) => GameWorld;

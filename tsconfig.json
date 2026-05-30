@@ -5,6 +5,8 @@
     "outDir": "dist",
     "sourceMap": true,
     "noEmitOnError": true,
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
     "module": "ESNext",
     "moduleResolution": "bundler",
     "baseUrl": ".",

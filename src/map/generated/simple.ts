@@ -72,9 +72,9 @@ export function generateSimpleMap(options: SimpleGeneratorOptions): MapRuntime {
   /**
    * 默认出生点：用像素坐标表示。
    */
-  const player = { x: options.tileWidth * 2, y: options.tileHeight * 2 };
+  const player = { x: options.tileWidth * (options.width * 0.5), y: options.tileHeight * (options.height * 0.5) };
   const npcs = [
-    { kind: "villager", pos: { x: options.tileWidth * 4, y: options.tileHeight * 4 } },
+    { kind: "villager", pos: { x: options.tileWidth * (options.width * 0.5 + 2), y: options.tileHeight * (options.height * 0.5) } },
   ];
 
   return {

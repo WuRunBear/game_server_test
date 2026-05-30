@@ -230,16 +230,6 @@ export function collisionSystem(world: GameWorld): GameWorld {
   }
 
   /**
-   * 检查所有碰撞。
-   *
-   * checkAll() 会触发所有碰撞检测，包括已处理的碰撞。
-   * 这里仅用于调试，实际应用中应注释掉。
-   */
-  rt.system.checkAll(result => {
-    world.logger.info(JSON.stringify(result));
-  });
-
-  /**
    * 执行分离（解穿透）。
    *
    * separate() 会修改每个 body 的位置，使其不再与其他 body 重叠。
