@@ -3,10 +3,20 @@ import { query } from "bitecs";
 import { Collider, ColliderShape, Transform } from "components";
 import Check2d, { type Box, type Circle, type System } from "check2d";
 import type { EntityId, GameWorld } from "src/world";
+import type { MapRuntime } from "map";
 
 type CircleBody = Circle<{ eid: EntityId }>;
 type BoxBody = Box<{ eid: EntityId }>;
 type CollisionBody = CircleBody | BoxBody;
+
+/**
+ * 地图静态碰撞体。
+ *
+ * 说明：
+ * - 地图碰撞体不属于 ECS 实体，不写入 rt.bodies，避免被“未存活清理”误删
+ * - userData 仅用于调试区分来源
+ */
+type MapBody = Box<{ kind: "map" }>;
 
 type BodyRecord = {
   /**
@@ -29,10 +39,25 @@ type BodyRecord = {
  *
  * - 每个 World 维护一份 check2d System 与 “实体 -> 碰撞体” 的映射
  * - 使用 WeakMap 确保 World 被释放时缓存可被 GC 回收
+ * - 地图阻挡（blocked）会被转换为一批静态碰撞体缓存到 mapBodies
  */
 type CollisionRuntime = {
   system: System;
   bodies: Map<EntityId, BodyRecord>;
+
+  /**
+   * 地图碰撞体缓存 key。
+   *
+   * 用于判断是否需要重建 mapBodies（例如地图切换或地图网格尺寸变化）。
+   */
+  mapKey?: string;
+
+  /**
+   * 地图静态碰撞体列表（由 blocked 网格生成）。
+   *
+   * 这些碰撞体会被插入到 check2d System，参与 separate()，但不会被移动（isStatic）。
+   */
+  mapBodies: MapBody[];
 };
 
 const runtimeByWorld = new WeakMap<GameWorld, CollisionRuntime>();
@@ -54,9 +79,136 @@ function getRuntime(world: GameWorld): CollisionRuntime {
   const created: CollisionRuntime = {
     system: new Check2d.System(),
     bodies: new Map(),
+    mapBodies: [],
   };
   runtimeByWorld.set(world, created);
   return created;
+}
+
+/**
+ * 生成地图碰撞体缓存 key。
+ *
+ * key 的设计目标：
+ * - 同一张地图（id）与同一套网格参数下可复用已生成的 mapBodies
+ * - 当地图 id 或网格参数变化时，触发重建
+ *
+ * @param map 地图运行时数据
+ * @returns 用于缓存命中的字符串 key
+ */
+function mapKeyOf(map: MapRuntime): string {
+  const g = map.grid;
+  return `${map.id}:${g.width}x${g.height}:${g.tileWidth}x${g.tileHeight}`;
+}
+
+/**
+ * blocked 网格合并后的矩形（以 tile 坐标表示，闭区间）。
+ */
+type TileRect = { x0: number; x1: number; y0: number; y1: number };
+
+/**
+ * 将阻挡网格（blocked）合并为更少的矩形。
+ *
+ * 合并策略：
+ * - 先按行提取连续的阻挡区间 [x0, x1]
+ * - 再把相邻行中区间完全相同的部分向下扩展，形成更大的矩形
+ *
+ * 这样通常能显著减少 check2d 中静态碰撞体数量，提高分离性能。
+ *
+ * @param blocked 阻挡网格（0=可走，1=阻挡），长度应为 width*height
+ * @param width 网格宽度（tile 数）
+ * @param height 网格高度（tile 数）
+ * @returns 合并后的矩形列表（tile 坐标）
+ */
+function blockedToRects(blocked: Uint8Array, width: number, height: number): TileRect[] {
+  const out: TileRect[] = [];
+  let active = new Map<string, TileRect>();
+
+  for (let y = 0; y < height; y++) {
+    const next = new Map<string, TileRect>();
+
+    let x = 0;
+    while (x < width) {
+      const idx = y * width + x;
+      if (blocked[idx] !== 1) {
+        x++;
+        continue;
+      }
+
+      const x0 = x;
+      x++;
+      while (x < width && blocked[y * width + x] === 1) x++;
+      const x1 = x - 1;
+
+      const key = `${x0},${x1}`;
+      const existing = active.get(key);
+      if (existing) {
+        existing.y1 = y;
+        next.set(key, existing);
+      } else {
+        next.set(key, { x0, x1, y0: y, y1: y });
+      }
+    }
+
+    for (const [key, rect] of active) {
+      if (next.has(key)) continue;
+      out.push(rect);
+    }
+
+    active = next;
+  }
+
+  for (const rect of active.values()) out.push(rect);
+  return out;
+}
+
+/**
+ * 清理并移除当前缓存的地图静态碰撞体。
+ *
+ * @param rt 碰撞运行期缓存
+ */
+function clearMapBodies(rt: CollisionRuntime): void {
+  for (const body of rt.mapBodies) rt.system.remove(body);
+  rt.mapBodies.length = 0;
+  rt.mapKey = undefined;
+}
+
+/**
+ * 确保地图静态碰撞体已构建并插入到 check2d System。
+ *
+ * 行为：
+ * - map 不存在：清空已构建的地图碰撞体
+ * - map 存在且 mapKey 变化：重建地图碰撞体
+ * - map 存在且 mapKey 未变化：复用已有碰撞体
+ *
+ * @param rt 碰撞运行期缓存
+ * @param map 当前 World 的地图运行时数据
+ */
+function ensureMapBodies(rt: CollisionRuntime, map: MapRuntime | undefined): void {
+  if (!map) {
+    if (rt.mapBodies.length > 0) clearMapBodies(rt);
+    return;
+  }
+
+  const key = mapKeyOf(map);
+  if (rt.mapKey === key) return;
+
+  clearMapBodies(rt);
+
+  const g = map.grid;
+  const rects = blockedToRects(map.blocked, g.width, g.height);
+  for (const r of rects) {
+    const w = (r.x1 - r.x0 + 1) * g.tileWidth;
+    const h = (r.y1 - r.y0 + 1) * g.tileHeight;
+    const cx = ((r.x0 + r.x1 + 1) * 0.5) * g.tileWidth;
+    const cy = ((r.y0 + r.y1 + 1) * 0.5) * g.tileHeight;
+    const box = rt.system.createBox({ x: cx, y: cy }, w, h, {
+      isStatic: true,
+      userData: { kind: "map" },
+    }) as MapBody;
+    rt.mapBodies.push(box);
+  }
+
+  rt.mapKey = key;
 }
 
 /**
@@ -78,6 +230,7 @@ function getRuntime(world: GameWorld): CollisionRuntime {
  */
 export function collisionSystem(world: GameWorld): GameWorld {
   const rt = getRuntime(world);
+  ensureMapBodies(rt, world.map);
 
   /**
    * 本 tick 仍然存活、且应当保留碰撞体的实体集合。
