@@ -4,7 +4,6 @@ import { collisionSystem } from "systems/core/collisionSystem";
 import { movementSystem } from "systems/core/movementSystem";
 import { physicsSystem } from "systems/core/physicsSystem";
 import { aiSystem } from "systems/gameplay/aiSystem";
-import { npcWanderSystem } from "systems/gameplay/npcWanderSystem";
 import { combatSystem } from "systems/gameplay/combatSystem";
 import { interactionSystem } from "systems/gameplay/interactionSystem";
 import { inventorySystem } from "systems/gameplay/inventorySystem";
@@ -15,7 +14,6 @@ import { inventorySystem } from "systems/gameplay/inventorySystem";
 export function createSystems(): System[] {
   return [
     aiSystem,
-    npcWanderSystem,
     physicsSystem,
     movementSystem,
     collisionSystem,
@@ -27,7 +25,6 @@ export function createSystems(): System[] {
 
 export {
   aiSystem,
-  npcWanderSystem,
   physicsSystem,
   movementSystem,
   collisionSystem,

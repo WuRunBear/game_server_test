@@ -15,6 +15,10 @@ type CollisionBody = CircleBody | BoxBody;
  * 说明：
  * - 地图碰撞体不属于 ECS 实体，不写入 rt.bodies，避免被“未存活清理”误删
  * - userData 仅用于调试区分来源
+ *
+ * 数据约定：
+ * - 这里统一用 Box 作为地图阻挡的表达形式（由 blocked 网格合并生成）
+ * - 坐标采用世界坐标系，原点与 Transform 一致
  */
 type MapBody = Box<{ kind: "map" }>;
 
@@ -92,6 +96,10 @@ function getRuntime(world: GameWorld): CollisionRuntime {
  * - 同一张地图（id）与同一套网格参数下可复用已生成的 mapBodies
  * - 当地图 id 或网格参数变化时，触发重建
  *
+ * 注意：
+ * - blocked 的内容理论上也可能变化，但在本项目里通常随地图/网格一起变化
+ * - 如果未来存在“同一地图 id 下动态改 blocked”的需求，需要把版本号或 blocked 的哈希也纳入 key
+ *
  * @param map 地图运行时数据
  * @returns 用于缓存命中的字符串 key
  */
@@ -102,6 +110,14 @@ function mapKeyOf(map: MapRuntime): string {
 
 /**
  * blocked 网格合并后的矩形（以 tile 坐标表示，闭区间）。
+ *
+ * 字段说明：
+ * - x0/x1：水平方向起止 tile 下标（包含端点）
+ * - y0/y1：垂直方向起止 tile 下标（包含端点）
+ *
+ * 为什么用闭区间：
+ * - 合并时更直观（例如连续 3 个 tile：x0=2, x1=4）
+ * - 转换到世界尺寸时使用 (x1 - x0 + 1) 直接得到 tile 数
  */
 type TileRect = { x0: number; x1: number; y0: number; y1: number };
 
@@ -114,16 +130,40 @@ type TileRect = { x0: number; x1: number; y0: number; y1: number };
  *
  * 这样通常能显著减少 check2d 中静态碰撞体数量，提高分离性能。
  *
+ * 细节说明：
+ * - blocked 是一维数组，索引规则为 idx = y * width + x
+ * - 第一步（按行扫描）得到若干“水平区间”，用 key=`${x0},${x1}` 表示该区间形状
+ * - 第二步（纵向合并）仅在“上一行与当前行区间完全一致”时向下延伸
+ *   - 这是一种简单高效的合并方式，能覆盖大多数矩形阻挡布局
+ *   - 它不会尝试更复杂的拼接（例如部分重叠/错位的区间），以避免算法复杂度与额外拆分成本
+ *
  * @param blocked 阻挡网格（0=可走，1=阻挡），长度应为 width*height
  * @param width 网格宽度（tile 数）
  * @param height 网格高度（tile 数）
  * @returns 合并后的矩形列表（tile 坐标）
  */
 function blockedToRects(blocked: Uint8Array, width: number, height: number): TileRect[] {
+  /**
+   * 合并后的输出矩形列表。
+   */
   const out: TileRect[] = [];
+
+  /**
+   * 上一行仍“处于延伸状态”的矩形集合。
+   *
+   * key 为 `${x0},${x1}`，表示该矩形的水平范围；
+   * value 为正在向下合并的矩形（其 y1 会随行数增长）。
+   */
   let active = new Map<string, TileRect>();
 
   for (let y = 0; y < height; y++) {
+    /**
+     * 当前行能够继续延伸（或新创建）的矩形集合。
+     *
+     * 扫描完这一行后：
+     * - next 中存在的矩形：会成为下一轮循环的 active（继续尝试向下延伸）
+     * - active 中缺失于 next 的矩形：说明在这一行“断开了”，需要结算到 out
+     */
     const next = new Map<string, TileRect>();
 
     let x = 0;
@@ -134,6 +174,9 @@ function blockedToRects(blocked: Uint8Array, width: number, height: number): Til
         continue;
       }
 
+      /**
+       * 从当前位置开始向右吃掉连续的阻挡 tile，得到本行的一个水平区间 [x0, x1]。
+       */
       const x0 = x;
       x++;
       while (x < width && blocked[y * width + x] === 1) x++;
@@ -142,13 +185,24 @@ function blockedToRects(blocked: Uint8Array, width: number, height: number): Til
       const key = `${x0},${x1}`;
       const existing = active.get(key);
       if (existing) {
+        /**
+         * 上一行也存在完全相同的水平区间，说明可以把矩形向下扩展一行：
+         * - 直接修改 existing.y1
+         * - 放入 next，表示该矩形仍处于延伸状态
+         */
         existing.y1 = y;
         next.set(key, existing);
       } else {
+        /**
+         * 上一行没有同形状区间：从当前行新开一个矩形。
+         */
         next.set(key, { x0, x1, y0: y, y1: y });
       }
     }
 
+    /**
+     * 结算在上一行活跃、但在本行无法继续延伸的矩形。
+     */
     for (const [key, rect] of active) {
       if (next.has(key)) continue;
       out.push(rect);
@@ -157,12 +211,19 @@ function blockedToRects(blocked: Uint8Array, width: number, height: number): Til
     active = next;
   }
 
+  /**
+   * 扫描结束后，仍处于活跃状态的矩形需要统一结算。
+   */
   for (const rect of active.values()) out.push(rect);
   return out;
 }
 
 /**
  * 清理并移除当前缓存的地图静态碰撞体。
+ *
+ * 说明：
+ * - rt.mapBodies 中的每个 body 都已经被插入到 rt.system
+ * - 清理时必须先从 system 移除，再清空数组，避免残留参与 separate()
  *
  * @param rt 碰撞运行期缓存
  */
@@ -180,6 +241,17 @@ function clearMapBodies(rt: CollisionRuntime): void {
  * - map 存在且 mapKey 变化：重建地图碰撞体
  * - map 存在且 mapKey 未变化：复用已有碰撞体
  *
+ * 坐标换算说明（tile 坐标 -> 世界坐标）：
+ * - 合并后的矩形 r 使用 tile 下标表示，且为闭区间
+ * - 世界尺寸：
+ *   - w = (x1 - x0 + 1) * tileWidth
+ *   - h = (y1 - y0 + 1) * tileHeight
+ * - 世界中心点：
+ *   - cx = ((x0 + x1 + 1) / 2) * tileWidth
+ *   - cy = ((y0 + y1 + 1) / 2) * tileHeight
+ *   其中 +1 的原因是：tile 的“中心”位于 (index + 0.5) * tileSize
+ *   例如单个 tile：x0=x1=0，则中心应为 0.5*tileWidth，对应 (0+0+1)/2=0.5
+ *
  * @param rt 碰撞运行期缓存
  * @param map 当前 World 的地图运行时数据
  */
@@ -189,9 +261,17 @@ function ensureMapBodies(rt: CollisionRuntime, map: MapRuntime | undefined): voi
     return;
   }
 
+  /**
+   * mapKey 用于判断“是否需要重建地图碰撞体”。
+   *
+   * 命中缓存时直接返回，避免每 tick 都把 blocked 重扫并重新创建大量静态碰撞体。
+   */
   const key = mapKeyOf(map);
   if (rt.mapKey === key) return;
 
+  /**
+   * 地图变化：先移除旧碰撞体，再按新的 blocked 重建。
+   */
   clearMapBodies(rt);
 
   const g = map.grid;
@@ -201,6 +281,11 @@ function ensureMapBodies(rt: CollisionRuntime, map: MapRuntime | undefined): voi
     const h = (r.y1 - r.y0 + 1) * g.tileHeight;
     const cx = ((r.x0 + r.x1 + 1) * 0.5) * g.tileWidth;
     const cy = ((r.y0 + r.y1 + 1) * 0.5) * g.tileHeight;
+    /**
+     * 创建静态 box：
+     * - isStatic=true：不参与移动，只作为其他动态碰撞体的阻挡
+     * - userData.kind=map：用于调试区分来源（与实体碰撞体的 userData.eid 区分）
+     */
     const box = rt.system.createBox({ x: cx, y: cy }, w, h, {
       isStatic: true,
       userData: { kind: "map" },
