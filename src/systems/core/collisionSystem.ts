@@ -19,6 +19,7 @@ type CollisionBody = CircleBody | BoxBody;
  * 数据约定：
  * - 这里统一用 Box 作为地图阻挡的表达形式（由 blocked 网格合并生成）
  * - 坐标采用世界坐标系，原点与 Transform 一致
+ * - check2d 的 Box 使用“左上角坐标”作为位置（x/y 为左上角，width/height 为尺寸）
  */
 type MapBody = Box<{ kind: "map" }>;
 
@@ -246,16 +247,16 @@ function clearMapBodies(rt: CollisionRuntime): void {
  * - 世界尺寸：
  *   - w = (x1 - x0 + 1) * tileWidth
  *   - h = (y1 - y0 + 1) * tileHeight
- * - 世界中心点：
- *   - cx = ((x0 + x1 + 1) / 2) * tileWidth
- *   - cy = ((y0 + y1 + 1) / 2) * tileHeight
- *   其中 +1 的原因是：tile 的“中心”位于 (index + 0.5) * tileSize
- *   例如单个 tile：x0=x1=0，则中心应为 0.5*tileWidth，对应 (0+0+1)/2=0.5
+ * - 世界左上角：
+ *   - x = x0 * tileWidth
+ *   - y = y0 * tileHeight
+ *   说明：check2d 的 Box 位置语义为左上角，因此这里直接使用左上角坐标创建静态墙体
  *
  * @param rt 碰撞运行期缓存
  * @param map 当前 World 的地图运行时数据
  */
-function ensureMapBodies(rt: CollisionRuntime, map: MapRuntime | undefined): void {
+function ensureMapBodies(rt: CollisionRuntime, world: GameWorld): void {
+  const map = world.map;
   if (!map) {
     if (rt.mapBodies.length > 0) clearMapBodies(rt);
     return;
@@ -279,14 +280,14 @@ function ensureMapBodies(rt: CollisionRuntime, map: MapRuntime | undefined): voi
   for (const r of rects) {
     const w = (r.x1 - r.x0 + 1) * g.tileWidth;
     const h = (r.y1 - r.y0 + 1) * g.tileHeight;
-    const cx = ((r.x0 + r.x1 + 1) * 0.5) * g.tileWidth;
-    const cy = ((r.y0 + r.y1 + 1) * 0.5) * g.tileHeight;
+    const x = r.x0 * g.tileWidth;
+    const y = r.y0 * g.tileHeight;
     /**
      * 创建静态 box：
      * - isStatic=true：不参与移动，只作为其他动态碰撞体的阻挡
      * - userData.kind=map：用于调试区分来源（与实体碰撞体的 userData.eid 区分）
      */
-    const box = rt.system.createBox({ x: cx, y: cy }, w, h, {
+    const box = rt.system.createBox({ x, y }, w, h, {
       isStatic: true,
       userData: { kind: "map" },
     }) as MapBody;
@@ -306,6 +307,11 @@ function ensureMapBodies(rt: CollisionRuntime, map: MapRuntime | undefined): voi
  *   2) 分离：调用 separate() 让 check2d 计算并执行推开（解穿透）
  *   3) 回写：把 body 的最终位置写回 Transform，作为本 tick 的碰撞结果
  *
+ * 坐标语义约定：
+ * - Transform.x/y：实体中心点世界坐标
+ * - check2d Circle：x/y 为圆心
+ * - check2d Box：x/y 为左上角（因此 Box 需要在“中心点 <-> 左上角”之间换算）
+ *
  * 形状判定规则：
  * - 如果 Collider.shape 显式设置为 Circle/Box，则以其为准
  * - 否则根据参数推断：halfW/halfH 有效则为 Box；radius 有效则为 Circle；都无效则视为无碰撞体
@@ -315,7 +321,7 @@ function ensureMapBodies(rt: CollisionRuntime, map: MapRuntime | undefined): voi
  */
 export function collisionSystem(world: GameWorld): GameWorld {
   const rt = getRuntime(world);
-  ensureMapBodies(rt, world.map);
+  ensureMapBodies(rt, world);
 
   /**
    * 本 tick 仍然存活、且应当保留碰撞体的实体集合。
@@ -406,6 +412,8 @@ export function collisionSystem(world: GameWorld): GameWorld {
 
       /**
        * 盒子碰撞体：尺寸无效时移除已有 body；有效时同步位置并更新尺寸。
+       *
+       * 注意：check2d 的 Box 位置语义为左上角，而 Transform 为中心点，因此需要换算 boxX/boxY。
        */
       if (width <= 0 || height <= 0) {
         if (existing) {
@@ -419,13 +427,15 @@ export function collisionSystem(world: GameWorld): GameWorld {
 
       const x = Transform.x[eid];
       const y = Transform.y[eid];
+      const boxX = x - width * 0.5;
+      const boxY = y - height * 0.5;
 
       if (!existing || existing.shape !== ColliderShape.Box) {
         /**
          * 该实体首次创建盒子 body，或原本是 Circle 需要切换形状。
          */
         if (existing) rt.system.remove(existing.body);
-        const box = rt.system.createBox({ x, y }, width, height, { userData: { eid } }) as BoxBody;
+        const box = rt.system.createBox({ x: boxX, y: boxY }, width, height, { userData: { eid } }) as BoxBody;
         rt.bodies.set(eid, { shape: ColliderShape.Box, body: box });
         continue;
       }
@@ -436,7 +446,7 @@ export function collisionSystem(world: GameWorld): GameWorld {
        */
       if (box.width !== width) box.width = width;
       if (box.height !== height) box.height = height;
-      box.setPosition(x, y, false);
+      box.setPosition(boxX, boxY, false);
       box.updateBody();
       continue;
     }
@@ -478,11 +488,111 @@ export function collisionSystem(world: GameWorld): GameWorld {
    * 将 check2d 的结果位置回写到 ECS Transform。
    *
    * 约定：Transform 是权威位置；本系统在每 tick 的末尾把碰撞分离后的结果写回，供后续系统使用。
+   * 注意：Box 的 x/y 为左上角，回写时需要转换为中心点坐标。
    */
   for (const [eid, record] of rt.bodies) {
+    if (record.shape === ColliderShape.Box) {
+      const body = record.body as BoxBody;
+      Transform.x[eid] = body.x + body.width * 0.5;
+      Transform.y[eid] = body.y + body.height * 0.5;
+      continue;
+    }
+
     Transform.x[eid] = record.body.x;
     Transform.y[eid] = record.body.y;
   }
 
   return world;
+}
+
+export type CollisionDebugMapBody = {
+  kind: "map";
+  shape: "box";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type CollisionDebugEntityBody =
+  | {
+      kind: "entity";
+      shape: "circle";
+      eid: EntityId;
+      x: number;
+      y: number;
+      r: number;
+    }
+  | {
+      kind: "entity";
+      shape: "box";
+      eid: EntityId;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+
+export type CollisionDebugBody = CollisionDebugMapBody | CollisionDebugEntityBody;
+
+export type CollisionDebugSnapshot = {
+  tick: number;
+  bodies: CollisionDebugBody[];
+};
+
+/**
+ * 获取当前 World 的碰撞调试快照（用于可视化真实参与碰撞的刚体）。
+ *
+ * 说明：
+ * - 数据来源于 check2d System 内部维护的 body（而不是从 blocked 重新推导）
+ * - 用于定位“墙体可穿透 / 碰撞位置偏移”等问题，便于前端叠加绘制
+ * - 对于 Box：x/y 为左上角坐标（与 check2d 一致），前端绘制时如需以中心点定位需自行换算
+ *
+ * @param world ECS World
+ * @returns 可序列化的碰撞体列表与当前 tick
+ */
+export function getCollisionDebugSnapshot(world: GameWorld): CollisionDebugSnapshot {
+  const rt = getRuntime(world);
+  ensureMapBodies(rt, world);
+
+  const bodies: CollisionDebugBody[] = [];
+
+  for (const box of rt.mapBodies) {
+    bodies.push({
+      kind: "map",
+      shape: "box",
+      x: box.x,
+      y: box.y,
+      width: box.width,
+      height: box.height,
+    });
+  }
+
+  for (const [eid, record] of rt.bodies) {
+    if (record.shape === ColliderShape.Circle) {
+      const circle = record.body as CircleBody;
+      bodies.push({
+        kind: "entity",
+        shape: "circle",
+        eid,
+        x: circle.x,
+        y: circle.y,
+        r: circle.r,
+      });
+      continue;
+    }
+
+    const box = record.body as BoxBody;
+    bodies.push({
+      kind: "entity",
+      shape: "box",
+      eid,
+      x: box.x,
+      y: box.y,
+      width: box.width,
+      height: box.height,
+    });
+  }
+
+  return { tick: world.time.tick, bodies };
 }

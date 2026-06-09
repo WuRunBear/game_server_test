@@ -1,6 +1,6 @@
 import http from "node:http";
 
-import { Server } from "@colyseus/core";
+import { Server, matchMaker } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 
 import { getMapSourceFromConfig, serverConfig } from "config";
@@ -43,6 +43,7 @@ export interface StartColyseusServerOptions {
 export function startColyseusServer(options: StartColyseusServerOptions): ColyseusServer {
   const transport = new WebSocketTransport();
   let cachedMapRuntimeJson: unknown | undefined;
+  let persistentRoomId: string | undefined;
 
   const gameServer = new Server({
     transport,
@@ -93,6 +94,24 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
 
         res.status(200).json(cachedMapRuntimeJson);
       });
+
+      app.get("/debug/colliders", (_req: any, res: any) => {
+        if (!persistentRoomId) {
+          res.status(404).json({ error: "room_not_ready" });
+          return;
+        }
+
+        void matchMaker
+          .remoteRoomCall<GameRoom>(persistentRoomId, "getCollisionDebugSnapshot")
+          .then(
+            (snapshot) => {
+              res.status(200).json(snapshot);
+            },
+            (err) => {
+              res.status(500).json({ error: String(err) });
+            },
+          );
+      });
     },
   });
 
@@ -101,6 +120,15 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
   void gameServer.listen(serverConfig.port).then(
     () => {
       options.logger.info("服务器已启动", { port: serverConfig.port });
+      void matchMaker.createRoom("game", {}).then(
+        (room) => {
+          persistentRoomId = room.roomId;
+          options.logger.info("常驻房间已创建", { roomId: room.roomId });
+        },
+        (err) => {
+          options.logger.error("常驻房间创建失败", { error: String(err) });
+        },
+      );
     },
     (err) => {
       options.logger.error("服务器启动失败", { error: String(err) });

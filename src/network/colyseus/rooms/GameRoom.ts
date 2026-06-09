@@ -10,6 +10,7 @@ import { RoomState } from "network/colyseus/state/RoomState";
 import { PlayerState } from "network/colyseus/state/PlayerState";
 import { recordTick } from "src/metrics";
 import { createSystems } from "systems";
+import { getCollisionDebugSnapshot, type CollisionDebugSnapshot } from "systems/core/collisionSystem";
 import { createLogger } from "utils/logger";
 import { createGameWorld, type EntityId, type GameWorld, type System } from "world";
 
@@ -75,6 +76,7 @@ export class GameRoom extends Room<{ state: RoomState }> {
    * 房间创建回调：初始化 World、系统列表与地图/NPC，并启动 tick。
    */
   onCreate(): void {
+    this.autoDispose = false;
     const fixedDtMs = Math.max(1, Math.floor(1000 / gameConfig.tickRate));
 
     this.state = new RoomState();
@@ -132,6 +134,15 @@ export class GameRoom extends Room<{ state: RoomState }> {
     this.lastSeqBySessionId.delete(client.sessionId);
     this.latestInputBySessionId.delete(client.sessionId);
     this.state.players.delete(client.sessionId);
+  }
+
+  /**
+   * 获取服务端当前帧的碰撞调试快照。
+   *
+   * @returns 可序列化的碰撞体列表与 tick 信息
+   */
+  getCollisionDebugSnapshot(): CollisionDebugSnapshot {
+    return getCollisionDebugSnapshot(this.world);
   }
 
   /**

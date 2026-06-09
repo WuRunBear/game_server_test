@@ -42,8 +42,8 @@ export function createPlayer(world: GameWorld, options: CreatePlayerOptions): En
   Acceleration.ax[eid] = 0;
   Acceleration.ay[eid] = 0;
 
-  const defaultW = world.map ? world.map.grid.tileWidth * 0.6 : 16;
-  const defaultH = world.map ? world.map.grid.tileHeight * 0.6 : 16;
+  const defaultW = world.map ? world.map.grid.tileWidth : 16;
+  const defaultH = world.map ? world.map.grid.tileHeight : 16;
   const w = options.w ?? defaultW;
   const h = options.h ?? defaultH;
   Size.w[eid] = w;
@@ -58,8 +58,8 @@ export function createPlayer(world: GameWorld, options: CreatePlayerOptions): En
     Collider.halfH[eid] = 0;
   } else {
     Collider.radius[eid] = 0;
-    Collider.halfW[eid] = w * 0.5;
-    Collider.halfH[eid] = h * 0.5;
+    Collider.halfW[eid] = w;
+    Collider.halfH[eid] = h;
   }
 
   Health.current[eid] = 100;
