@@ -3,7 +3,7 @@
  *
  * 约定：
  * - 组件用 SoA（对象里放数组）或 AoS（数组里放对象）的形式表达
- * - Tag 组件使用空对象表示
+ * - Tag 组件使用 bitecs 的空组件表示
  */
 export { Transform } from "components/transform";
 export { Size } from "components/size";

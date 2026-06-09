@@ -2,6 +2,7 @@ import { BehaviourTree, type State } from "mistreevous";
 
 import type { BtAgent, BtInstance } from "ai/btRunner";
 import { createIdleAction } from "ai/nodes/actions/idle";
+import { createWanderAction } from "ai/nodes/actions/wander";
 
 export type BtDefinitionJson =
   | { type: string; [key: string]: unknown }
@@ -9,6 +10,7 @@ export type BtDefinitionJson =
 
 export interface NpcBtAgent extends BtAgent {
   Idle: () => State;
+  Wander: () => State;
 }
 
 /**
@@ -39,11 +41,12 @@ function parseJsonIfLooksLikeJson(text: string): unknown | null {
  * @returns 行为树实例（包含 tree 与 agent）
  */
 export function createNpcTree(
-  definition: string | BtDefinitionJson = `root { action [Idle] }`,
+  definition: string | BtDefinitionJson = `root { action [Wander] }`,
 ): BtInstance<NpcBtAgent> {
   const agent: NpcBtAgent = {
     ctx: null,
     Idle: createIdleAction(),
+    Wander: createWanderAction(),
   };
 
   const normalizedDefinition =
