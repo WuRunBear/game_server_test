@@ -1,510 +1,12 @@
-import { query } from "bitecs";
+import { hasComponent, query } from "bitecs";
+import check2d, { type Body, type Box, type Circle, type Response } from "check2d";
 
-import { Collider, ColliderShape, Transform } from "components";
-import Check2d, { type Box, type Circle, type System } from "check2d";
+import { Collider, ColliderShape, Transform, Velocity } from "components";
 import type { EntityId, GameWorld } from "src/world";
-import type { MapRuntime } from "map";
-
-type CircleBody = Circle<{ eid: EntityId }>;
-type BoxBody = Box<{ eid: EntityId }>;
-type CollisionBody = CircleBody | BoxBody;
 
 /**
- * 地图静态碰撞体。
- *
- * 说明：
- * - 地图碰撞体不属于 ECS 实体，不写入 rt.bodies，避免被“未存活清理”误删
- * - userData 仅用于调试区分来源
- *
- * 数据约定：
- * - 这里统一用 Box 作为地图阻挡的表达形式（由 blocked 网格合并生成）
- * - 坐标采用世界坐标系，原点与 Transform 一致
- * - check2d 的 Box 使用“左上角坐标”作为位置（x/y 为左上角，width/height 为尺寸）
+ * 碰撞系统调试里的地图占位结构。
  */
-type MapBody = Box<{ kind: "map" }>;
-
-type BodyRecord = {
-  /**
-   * 该实体当前使用的碰撞形状。
-   *
-   * 这里使用 ColliderShape 的数值枚举存储，便于快速判断是否需要重建 body。
-   */
-  shape: number;
-
-  /**
-   * check2d 中对应的刚体对象。
-   *
-   * 通过 userData.eid 与 ECS 实体关联；位置会在每 tick 同步与回写。
-   */
-  body: CollisionBody;
-};
-
-/**
- * 碰撞系统运行期缓存。
- *
- * - 每个 World 维护一份 check2d System 与 “实体 -> 碰撞体” 的映射
- * - 使用 WeakMap 确保 World 被释放时缓存可被 GC 回收
- * - 地图阻挡（blocked）会被转换为一批静态碰撞体缓存到 mapBodies
- */
-type CollisionRuntime = {
-  system: System;
-  bodies: Map<EntityId, BodyRecord>;
-
-  /**
-   * 地图碰撞体缓存 key。
-   *
-   * 用于判断是否需要重建 mapBodies（例如地图切换或地图网格尺寸变化）。
-   */
-  mapKey?: string;
-
-  /**
-   * 地图静态碰撞体列表（由 blocked 网格生成）。
-   *
-   * 这些碰撞体会被插入到 check2d System，参与 separate()，但不会被移动（isStatic）。
-   */
-  mapBodies: MapBody[];
-};
-
-const runtimeByWorld = new WeakMap<GameWorld, CollisionRuntime>();
-
-/**
- * 获取或初始化指定 World 的碰撞运行期缓存。
- *
- * 该缓存用于避免每帧都重建 check2d System 与所有 body：
- * - 同一个 world 在整个生命周期内复用同一份 check2d System
- * - bodies 保存 “实体 -> check2d body” 的映射，实体组件变化时按需重建
- *
- * @param world ECS World
- * @returns 该 World 对应的碰撞运行期缓存
- */
-function getRuntime(world: GameWorld): CollisionRuntime {
-  const existing = runtimeByWorld.get(world);
-  if (existing) return existing;
-
-  const created: CollisionRuntime = {
-    system: new Check2d.System(),
-    bodies: new Map(),
-    mapBodies: [],
-  };
-  runtimeByWorld.set(world, created);
-  return created;
-}
-
-/**
- * 生成地图碰撞体缓存 key。
- *
- * key 的设计目标：
- * - 同一张地图（id）与同一套网格参数下可复用已生成的 mapBodies
- * - 当地图 id 或网格参数变化时，触发重建
- *
- * 注意：
- * - blocked 的内容理论上也可能变化，但在本项目里通常随地图/网格一起变化
- * - 如果未来存在“同一地图 id 下动态改 blocked”的需求，需要把版本号或 blocked 的哈希也纳入 key
- *
- * @param map 地图运行时数据
- * @returns 用于缓存命中的字符串 key
- */
-function mapKeyOf(map: MapRuntime): string {
-  const g = map.grid;
-  return `${map.id}:${g.width}x${g.height}:${g.tileWidth}x${g.tileHeight}`;
-}
-
-/**
- * blocked 网格合并后的矩形（以 tile 坐标表示，闭区间）。
- *
- * 字段说明：
- * - x0/x1：水平方向起止 tile 下标（包含端点）
- * - y0/y1：垂直方向起止 tile 下标（包含端点）
- *
- * 为什么用闭区间：
- * - 合并时更直观（例如连续 3 个 tile：x0=2, x1=4）
- * - 转换到世界尺寸时使用 (x1 - x0 + 1) 直接得到 tile 数
- */
-type TileRect = { x0: number; x1: number; y0: number; y1: number };
-
-/**
- * 将阻挡网格（blocked）合并为更少的矩形。
- *
- * 合并策略：
- * - 先按行提取连续的阻挡区间 [x0, x1]
- * - 再把相邻行中区间完全相同的部分向下扩展，形成更大的矩形
- *
- * 这样通常能显著减少 check2d 中静态碰撞体数量，提高分离性能。
- *
- * 细节说明：
- * - blocked 是一维数组，索引规则为 idx = y * width + x
- * - 第一步（按行扫描）得到若干“水平区间”，用 key=`${x0},${x1}` 表示该区间形状
- * - 第二步（纵向合并）仅在“上一行与当前行区间完全一致”时向下延伸
- *   - 这是一种简单高效的合并方式，能覆盖大多数矩形阻挡布局
- *   - 它不会尝试更复杂的拼接（例如部分重叠/错位的区间），以避免算法复杂度与额外拆分成本
- *
- * @param blocked 阻挡网格（0=可走，1=阻挡），长度应为 width*height
- * @param width 网格宽度（tile 数）
- * @param height 网格高度（tile 数）
- * @returns 合并后的矩形列表（tile 坐标）
- */
-function blockedToRects(blocked: Uint8Array, width: number, height: number): TileRect[] {
-  /**
-   * 合并后的输出矩形列表。
-   */
-  const out: TileRect[] = [];
-
-  /**
-   * 上一行仍“处于延伸状态”的矩形集合。
-   *
-   * key 为 `${x0},${x1}`，表示该矩形的水平范围；
-   * value 为正在向下合并的矩形（其 y1 会随行数增长）。
-   */
-  let active = new Map<string, TileRect>();
-
-  for (let y = 0; y < height; y++) {
-    /**
-     * 当前行能够继续延伸（或新创建）的矩形集合。
-     *
-     * 扫描完这一行后：
-     * - next 中存在的矩形：会成为下一轮循环的 active（继续尝试向下延伸）
-     * - active 中缺失于 next 的矩形：说明在这一行“断开了”，需要结算到 out
-     */
-    const next = new Map<string, TileRect>();
-
-    let x = 0;
-    while (x < width) {
-      const idx = y * width + x;
-      if (blocked[idx] !== 1) {
-        x++;
-        continue;
-      }
-
-      /**
-       * 从当前位置开始向右吃掉连续的阻挡 tile，得到本行的一个水平区间 [x0, x1]。
-       */
-      const x0 = x;
-      x++;
-      while (x < width && blocked[y * width + x] === 1) x++;
-      const x1 = x - 1;
-
-      const key = `${x0},${x1}`;
-      const existing = active.get(key);
-      if (existing) {
-        /**
-         * 上一行也存在完全相同的水平区间，说明可以把矩形向下扩展一行：
-         * - 直接修改 existing.y1
-         * - 放入 next，表示该矩形仍处于延伸状态
-         */
-        existing.y1 = y;
-        next.set(key, existing);
-      } else {
-        /**
-         * 上一行没有同形状区间：从当前行新开一个矩形。
-         */
-        next.set(key, { x0, x1, y0: y, y1: y });
-      }
-    }
-
-    /**
-     * 结算在上一行活跃、但在本行无法继续延伸的矩形。
-     */
-    for (const [key, rect] of active) {
-      if (next.has(key)) continue;
-      out.push(rect);
-    }
-
-    active = next;
-  }
-
-  /**
-   * 扫描结束后，仍处于活跃状态的矩形需要统一结算。
-   */
-  for (const rect of active.values()) out.push(rect);
-  return out;
-}
-
-/**
- * 清理并移除当前缓存的地图静态碰撞体。
- *
- * 说明：
- * - rt.mapBodies 中的每个 body 都已经被插入到 rt.system
- * - 清理时必须先从 system 移除，再清空数组，避免残留参与 separate()
- *
- * @param rt 碰撞运行期缓存
- */
-function clearMapBodies(rt: CollisionRuntime): void {
-  for (const body of rt.mapBodies) rt.system.remove(body);
-  rt.mapBodies.length = 0;
-  rt.mapKey = undefined;
-}
-
-/**
- * 确保地图静态碰撞体已构建并插入到 check2d System。
- *
- * 行为：
- * - map 不存在：清空已构建的地图碰撞体
- * - map 存在且 mapKey 变化：重建地图碰撞体
- * - map 存在且 mapKey 未变化：复用已有碰撞体
- *
- * 坐标换算说明（tile 坐标 -> 世界坐标）：
- * - 合并后的矩形 r 使用 tile 下标表示，且为闭区间
- * - 世界尺寸：
- *   - w = (x1 - x0 + 1) * tileWidth
- *   - h = (y1 - y0 + 1) * tileHeight
- * - 世界左上角：
- *   - x = x0 * tileWidth
- *   - y = y0 * tileHeight
- *   说明：check2d 的 Box 位置语义为左上角，因此这里直接使用左上角坐标创建静态墙体
- *
- * @param rt 碰撞运行期缓存
- * @param map 当前 World 的地图运行时数据
- */
-function ensureMapBodies(rt: CollisionRuntime, world: GameWorld): void {
-  const map = world.map;
-  if (!map) {
-    if (rt.mapBodies.length > 0) clearMapBodies(rt);
-    return;
-  }
-
-  /**
-   * mapKey 用于判断“是否需要重建地图碰撞体”。
-   *
-   * 命中缓存时直接返回，避免每 tick 都把 blocked 重扫并重新创建大量静态碰撞体。
-   */
-  const key = mapKeyOf(map);
-  if (rt.mapKey === key) return;
-
-  /**
-   * 地图变化：先移除旧碰撞体，再按新的 blocked 重建。
-   */
-  clearMapBodies(rt);
-
-  const g = map.grid;
-  const rects = blockedToRects(map.blocked, g.width, g.height);
-  for (const r of rects) {
-    const w = (r.x1 - r.x0 + 1) * g.tileWidth;
-    const h = (r.y1 - r.y0 + 1) * g.tileHeight;
-    const x = r.x0 * g.tileWidth;
-    const y = r.y0 * g.tileHeight;
-    /**
-     * 创建静态 box：
-     * - isStatic=true：不参与移动，只作为其他动态碰撞体的阻挡
-     * - userData.kind=map：用于调试区分来源（与实体碰撞体的 userData.eid 区分）
-     */
-    const box = rt.system.createBox({ x, y }, w, h, {
-      isStatic: true,
-      userData: { kind: "map" },
-    }) as MapBody;
-    rt.mapBodies.push(box);
-  }
-
-  rt.mapKey = key;
-}
-
-/**
- * 碰撞系统：使用 check2d 进行 2D 碰撞检测与分离，并把结果回写到 ECS Transform。
- *
- * 设计要点：
- * - check2d 侧维护一套 “可参与碰撞的 body 列表”，而 ECS 侧用组件描述实体的碰撞形状
- * - 本系统每 tick 做三件事：
- *   1) 同步：把 Transform 的位置同步到 body；Collider 尺寸变化时按需重建 body
- *   2) 分离：调用 separate() 让 check2d 计算并执行推开（解穿透）
- *   3) 回写：把 body 的最终位置写回 Transform，作为本 tick 的碰撞结果
- *
- * 坐标语义约定：
- * - Transform.x/y：实体中心点世界坐标
- * - check2d Circle：x/y 为圆心
- * - check2d Box：x/y 为左上角（因此 Box 需要在“中心点 <-> 左上角”之间换算）
- *
- * 形状判定规则：
- * - 如果 Collider.shape 显式设置为 Circle/Box，则以其为准
- * - 否则根据参数推断：halfW/halfH 有效则为 Box；radius 有效则为 Circle；都无效则视为无碰撞体
- *
- * @param world ECS World
- * @returns 处理后的 World
- */
-export function collisionSystem(world: GameWorld): GameWorld {
-  const rt = getRuntime(world);
-  ensureMapBodies(rt, world);
-
-  /**
-   * 本 tick 仍然存活、且应当保留碰撞体的实体集合。
-   *
-   * 用于在遍历结束后清理已经不再匹配 query(Transform, Collider) 的旧 body：
-   * - 实体被销毁
-   * - Collider/Transform 被移除
-   * - 形状参数无效导致本 tick 不创建 body
-   */
-  const alive = new Set<EntityId>();
-
-  for (const eid of query(world, [Transform, Collider])) {
-    const declaredShape = Collider.shape[eid];
-    const radius = Collider.radius[eid] ?? 0;
-    const halfW = Collider.halfW[eid] ?? 0;
-    const halfH = Collider.halfH[eid] ?? 0;
-
-    /**
-     * 计算该实体本 tick 应当使用的碰撞形状。
-     *
-     * 注意：这里允许 Collider.shape 为空/非法值，此时退化为根据参数推断。
-     */
-    const shape =
-      declaredShape === ColliderShape.Circle || declaredShape === ColliderShape.Box
-        ? declaredShape
-        : halfW > 0 && halfH > 0
-          ? ColliderShape.Box
-          : radius > 0
-            ? ColliderShape.Circle
-            : null;
-
-    const existing = rt.bodies.get(eid);
-
-    if (shape === ColliderShape.Circle) {
-      /**
-       * 圆形碰撞体：radius 无效时移除已有 body；有效时同步位置并保证半径一致。
-       * 半径变化会导致 check2d 的内部结构需要更新，这里选择直接重建 body。
-       */
-      if (radius <= 0) {
-        if (existing) {
-          rt.system.remove(existing.body);
-          rt.bodies.delete(eid);
-        }
-        continue;
-      }
-
-      alive.add(eid);
-
-      const x = Transform.x[eid];
-      const y = Transform.y[eid];
-
-      if (!existing || existing.shape !== ColliderShape.Circle) {
-        /**
-         * 该实体首次创建圆形 body，或原本是 Box 需要切换形状：
-         * - 若存在旧 body，先从 check2d System 中移除
-         * - 创建新的 circle 并写入映射
-         */
-        if (existing) rt.system.remove(existing.body);
-        const circle = rt.system.createCircle({ x, y }, radius, { userData: { eid } }) as CircleBody;
-        rt.bodies.set(eid, { shape: ColliderShape.Circle, body: circle });
-        continue;
-      }
-
-      const circle = existing.body as CircleBody;
-      if (circle.r !== radius) {
-        /**
-         * 半径变化：为了避免遗漏内部缓存更新，直接移除并重建。
-         */
-        rt.system.remove(circle);
-        const recreated = rt.system.createCircle({ x, y }, radius, { userData: { eid } }) as CircleBody;
-        rt.bodies.set(eid, { shape: ColliderShape.Circle, body: recreated });
-        continue;
-      }
-
-      /**
-       * 半径未变：仅同步位置。
-       * - setPosition(..., false) 避免 check2d 立即触发额外处理
-       * - updateBody() 用于更新内部 AABB / 广义碰撞等缓存
-       */
-      circle.setPosition(x, y, false);
-      circle.updateBody();
-      continue;
-    }
-
-    if (shape === ColliderShape.Box) {
-      const width = halfW * 2;
-      const height = halfH * 2;
-
-      /**
-       * 盒子碰撞体：尺寸无效时移除已有 body；有效时同步位置并更新尺寸。
-       *
-       * 注意：check2d 的 Box 位置语义为左上角，而 Transform 为中心点，因此需要换算 boxX/boxY。
-       */
-      if (width <= 0 || height <= 0) {
-        if (existing) {
-          rt.system.remove(existing.body);
-          rt.bodies.delete(eid);
-        }
-        continue;
-      }
-
-      alive.add(eid);
-
-      const x = Transform.x[eid];
-      const y = Transform.y[eid];
-      const boxX = x - width * 0.5;
-      const boxY = y - height * 0.5;
-
-      if (!existing || existing.shape !== ColliderShape.Box) {
-        /**
-         * 该实体首次创建盒子 body，或原本是 Circle 需要切换形状。
-         */
-        if (existing) rt.system.remove(existing.body);
-        const box = rt.system.createBox({ x: boxX, y: boxY }, width, height, { userData: { eid } }) as BoxBody;
-        rt.bodies.set(eid, { shape: ColliderShape.Box, body: box });
-        continue;
-      }
-
-      const box = existing.body as BoxBody;
-      /**
-       * 尺寸变化：box 允许直接改宽高，但仍需要 updateBody() 刷新内部结构。
-       */
-      if (box.width !== width) box.width = width;
-      if (box.height !== height) box.height = height;
-      box.setPosition(boxX, boxY, false);
-      box.updateBody();
-      continue;
-    }
-
-    /**
-     * 本 tick 该实体不应当拥有碰撞体：
-     * - 参数无效（radius/halfW/halfH 均无效）
-     * - Collider.shape 非 Circle/Box 且无法推断
-     *
-     * 若存在旧 body，及时从 check2d 中移除并清理映射。
-     */
-    if (existing) {
-      rt.system.remove(existing.body);
-      rt.bodies.delete(eid);
-    }
-    continue;
-  }
-
-  /**
-   * 清理“本 tick 未遍历到”的旧 body。
-   *
-   * 这些 body 通常来自：实体销毁 / 组件移除 / 临时变为无效形状。
-   * 如果不清理，会导致幽灵碰撞体一直参与 separate()。
-   */
-  for (const [eid, record] of rt.bodies) {
-    if (alive.has(eid)) continue;
-    rt.system.remove(record.body);
-    rt.bodies.delete(eid);
-  }
-
-  /**
-   * 执行分离（解穿透）。
-   *
-   * separate() 会修改每个 body 的位置，使其不再与其他 body 重叠。
-   */
-  rt.system.separate();
-
-  /**
-   * 将 check2d 的结果位置回写到 ECS Transform。
-   *
-   * 约定：Transform 是权威位置；本系统在每 tick 的末尾把碰撞分离后的结果写回，供后续系统使用。
-   * 注意：Box 的 x/y 为左上角，回写时需要转换为中心点坐标。
-   */
-  for (const [eid, record] of rt.bodies) {
-    if (record.shape === ColliderShape.Box) {
-      const body = record.body as BoxBody;
-      Transform.x[eid] = body.x + body.width * 0.5;
-      Transform.y[eid] = body.y + body.height * 0.5;
-      continue;
-    }
-
-    Transform.x[eid] = record.body.x;
-    Transform.y[eid] = record.body.y;
-  }
-
-  return world;
-}
-
 export type CollisionDebugMapBody = {
   kind: "map";
   shape: "box";
@@ -514,6 +16,9 @@ export type CollisionDebugMapBody = {
   height: number;
 };
 
+/**
+ * 碰撞系统调试里的实体占位结构。
+ */
 export type CollisionDebugEntityBody =
   | {
       kind: "entity";
@@ -533,66 +38,454 @@ export type CollisionDebugEntityBody =
       height: number;
     };
 
+/**
+ * 碰撞调试快照。
+ */
 export type CollisionDebugBody = CollisionDebugMapBody | CollisionDebugEntityBody;
 
+/**
+ * 碰撞调试快照结果。
+ */
 export type CollisionDebugSnapshot = {
   tick: number;
   bodies: CollisionDebugBody[];
+  pairs: CollisionDebugPair[];
 };
 
 /**
- * 获取当前 World 的碰撞调试快照（用于可视化真实参与碰撞的刚体）。
+ * 碰撞调试里的碰撞对信息。
+ */
+export type CollisionDebugPair = {
+  id: string;
+  a: string;
+  b: string;
+  overlap: number;
+};
+
+type CollisionBodyUserData =
+  | {
+      kind: "map";
+      id: string;
+    }
+  | {
+      kind: "entity";
+      eid: EntityId;
+      id: string;
+    };
+
+type CollisionBody = Body<CollisionBodyUserData>;
+
+type CollisionRuntime = {
+  system: check2d.System<CollisionBody>;
+  mapBodies: CollisionBody[];
+  entityBodies: Map<EntityId, CollisionBody>;
+  pairs: CollisionDebugPair[];
+};
+
+type CollisionWorld = GameWorld & {
+  collisionRuntime?: CollisionRuntime;
+};
+
+const POSITION_EPSILON = 0.0001;
+
+/**
+ * 判断碰撞体是否为圆形。
  *
- * 说明：
- * - 数据来源于 check2d System 内部维护的 body（而不是从 blocked 重新推导）
- * - 用于定位“墙体可穿透 / 碰撞位置偏移”等问题，便于前端叠加绘制
- * - 对于 Box：x/y 为左上角坐标（与 check2d 一致），前端绘制时如需以中心点定位需自行换算
+ * @param body check2d 碰撞体
+ * @returns 是否为圆形
+ */
+function isCircleBody(body: CollisionBody): body is Circle<CollisionBodyUserData> {
+  return body.type === check2d.BodyType.Circle;
+}
+
+/**
+ * 判断碰撞体是否为矩形。
+ *
+ * @param body check2d 碰撞体
+ * @returns 是否为矩形
+ */
+function isBoxBody(body: CollisionBody): body is Box<CollisionBodyUserData> {
+  return body.type === check2d.BodyType.Box;
+}
+
+/**
+ * 读取实体碰撞体的中心点坐标。
+ *
+ * @param body check2d 碰撞体
+ * @returns 中心点坐标
+ */
+function getBodyCenter(body: CollisionBody): { x: number; y: number } {
+  if (isCircleBody(body)) {
+    return { x: body.x, y: body.y };
+  }
+
+  if (isBoxBody(body)) {
+    return {
+      x: body.x + body.width * 0.5,
+      y: body.y + body.height * 0.5,
+    };
+  }
+
+  return {
+    x: body.x,
+    y: body.y,
+  };
+}
+
+/**
+ * 生成调试用的碰撞体标识。
+ *
+ * @param body check2d 碰撞体
+ * @returns 稳定字符串 id
+ */
+function getDebugBodyId(body: CollisionBody): string {
+  const data = body.userData;
+  return data?.id ?? "unknown";
+}
+
+/**
+ * 判断碰撞体是否匹配实体当前声明的形状。
+ *
+ * @param body 现有 check2d 碰撞体
+ * @param eid 实体 id
+ * @param world ECS World
+ * @returns 是否可复用
+ */
+function doesBodyMatchShape(body: CollisionBody, eid: EntityId, world: GameWorld): boolean {
+  const shape = Collider.shape[eid];
+  return shape === ColliderShape.Circle ? isCircleBody(body) : isBoxBody(body);
+}
+
+/**
+ * 为阻挡格创建静态矩形碰撞体。
+ *
+ * @param system check2d 系统
+ * @param tileX 格子 x
+ * @param tileY 格子 y
+ * @param tileWidth 格子宽
+ * @param tileHeight 格子高
+ * @returns 创建后的静态碰撞体
+ */
+function createMapBody(
+  system: check2d.System<CollisionBody>,
+  tileX: number,
+  tileY: number,
+  tileWidth: number,
+  tileHeight: number,
+): CollisionBody {
+  return system.createBox(
+    { x: tileX * tileWidth, y: tileY * tileHeight },
+    tileWidth,
+    tileHeight,
+    {
+      isStatic: true,
+      userData: {
+        kind: "map",
+        id: `map:${tileX}:${tileY}`,
+      },
+    },
+  ) as CollisionBody;
+}
+
+/**
+ * 为实体创建动态碰撞体。
  *
  * @param world ECS World
- * @returns 可序列化的碰撞体列表与当前 tick
+ * @param system check2d 系统
+ * @param eid 实体 id
+ * @returns 创建后的动态碰撞体
  */
-export function getCollisionDebugSnapshot(world: GameWorld): CollisionDebugSnapshot {
-  const rt = getRuntime(world);
-  ensureMapBodies(rt, world);
+function createEntityBody(
+  world: GameWorld,
+  system: check2d.System<CollisionBody>,
+  eid: EntityId,
+): CollisionBody {
+  if (Collider.shape[eid] === ColliderShape.Circle) {
+    return system.createCircle(
+      { x: Transform.x[eid], y: Transform.y[eid] },
+      Collider.radius[eid],
+      {
+        userData: {
+          kind: "entity",
+          eid,
+          id: `entity:${eid}`,
+        },
+      },
+    ) as CollisionBody;
+  }
 
+  return system.createBox(
+    {
+      x: Transform.x[eid] - Collider.halfW[eid],
+      y: Transform.y[eid] - Collider.halfH[eid],
+    },
+    Collider.halfW[eid] * 2,
+    Collider.halfH[eid] * 2,
+    {
+      userData: {
+        kind: "entity",
+        eid,
+        id: `entity:${eid}`,
+      },
+    },
+  ) as CollisionBody;
+}
+
+/**
+ * 根据当前实体组件数据同步 check2d 碰撞体。
+ *
+ * @param world ECS World
+ * @param eid 实体 id
+ * @param body 可复用的碰撞体
+ */
+function syncEntityBody(world: GameWorld, eid: EntityId, body: CollisionBody): void {
+  if (Collider.shape[eid] === ColliderShape.Circle && isCircleBody(body)) {
+    body.r = Collider.radius[eid];
+    body.setPosition(Transform.x[eid], Transform.y[eid], true);
+    return;
+  }
+
+  if (Collider.shape[eid] === ColliderShape.Box && isBoxBody(body)) {
+    body.width = Collider.halfW[eid] * 2;
+    body.height = Collider.halfH[eid] * 2;
+    body.setPosition(
+      Transform.x[eid] - Collider.halfW[eid],
+      Transform.y[eid] - Collider.halfH[eid],
+      true,
+    );
+  }
+}
+
+/**
+ * 懒初始化碰撞运行时，并把地图阻挡格注册为静态碰撞体。
+ *
+ * @param world ECS World
+ * @returns 可复用的碰撞运行时
+ */
+function ensureCollisionRuntime(world: CollisionWorld): CollisionRuntime {
+  if (world.collisionRuntime) {
+    return world.collisionRuntime;
+  }
+
+  const system = new check2d.System<CollisionBody>();
+  const mapBodies: CollisionBody[] = [];
+
+  if (world.map) {
+    const { width, height, tileWidth, tileHeight } = world.map.grid;
+    for (let tileY = 0; tileY < height; tileY += 1) {
+      for (let tileX = 0; tileX < width; tileX += 1) {
+        const idx = tileY * width + tileX;
+        if (world.map.blocked[idx] !== 1) continue;
+        mapBodies.push(createMapBody(system, tileX, tileY, tileWidth, tileHeight));
+      }
+    }
+  }
+
+  world.collisionRuntime = {
+    system,
+    mapBodies,
+    entityBodies: new Map<EntityId, CollisionBody>(),
+    pairs: [],
+  };
+
+  return world.collisionRuntime;
+}
+
+/**
+ * 同步当前帧全部实体碰撞体，并移除已不存在的实体碰撞体。
+ *
+ * @param world ECS World
+ * @param runtime 碰撞运行时
+ */
+function syncEntityBodies(world: GameWorld, runtime: CollisionRuntime): void {
+  const alive = new Set<EntityId>();
+
+  for (const eid of query(world, [Transform, Collider])) {
+    alive.add(eid);
+
+    let body = runtime.entityBodies.get(eid);
+    if (!body || !doesBodyMatchShape(body, eid, world)) {
+      if (body) {
+        runtime.system.remove(body);
+      }
+      body = createEntityBody(world, runtime.system, eid);
+      runtime.entityBodies.set(eid, body);
+    }
+
+    syncEntityBody(world, eid, body);
+  }
+
+  for (const [eid, body] of runtime.entityBodies) {
+    if (alive.has(eid)) continue;
+    runtime.system.remove(body);
+    runtime.entityBodies.delete(eid);
+  }
+
+  runtime.system.update();
+}
+
+/**
+ * 记录当前帧的碰撞对信息。
+ *
+ * @param runtime 碰撞运行时
+ * @param bodyA 碰撞体 A
+ * @param bodyB 碰撞体 B
+ * @param overlap 重叠深度
+ */
+function recordCollisionPair(
+  runtime: CollisionRuntime,
+  bodyA: CollisionBody,
+  bodyB: CollisionBody,
+  overlap: number,
+): void {
+  const a = getDebugBodyId(bodyA);
+  const b = getDebugBodyId(bodyB);
+  const [left, right] = a < b ? [a, b] : [b, a];
+  runtime.pairs.push({
+    id: `${left}|${right}`,
+    a: left,
+    b: right,
+    overlap,
+  });
+}
+
+/**
+ * 把分离后的碰撞体中心点写回 ECS，并清理被阻挡方向上的速度分量。
+ *
+ * @param world ECS World
+ * @param runtime 碰撞运行时
+ * @param previousCenters 分离前的实体中心点
+ */
+function writeBodiesBackToWorld(
+  world: GameWorld,
+  runtime: CollisionRuntime,
+  previousCenters: Map<EntityId, { x: number; y: number }>,
+): void {
+  for (const [eid, body] of runtime.entityBodies) {
+    const next = getBodyCenter(body);
+    const prev = previousCenters.get(eid);
+
+    Transform.x[eid] = next.x;
+    Transform.y[eid] = next.y;
+
+    if (!prev || !hasComponent(world, eid, Velocity)) {
+      continue;
+    }
+
+    const correctionX = next.x - prev.x;
+    const correctionY = next.y - prev.y;
+
+    if (Math.abs(correctionX) > POSITION_EPSILON) {
+      Velocity.vx[eid] = 0;
+    }
+    if (Math.abs(correctionY) > POSITION_EPSILON) {
+      Velocity.vy[eid] = 0;
+    }
+  }
+}
+
+/**
+ * 采集当前帧的调试碰撞体列表。
+ *
+ * @param runtime 碰撞运行时
+ * @returns 可序列化碰撞体列表
+ */
+function collectDebugBodies(runtime: CollisionRuntime): CollisionDebugBody[] {
   const bodies: CollisionDebugBody[] = [];
 
-  for (const box of rt.mapBodies) {
+  for (const body of runtime.mapBodies) {
+    if (!isBoxBody(body)) continue;
     bodies.push({
       kind: "map",
       shape: "box",
-      x: box.x,
-      y: box.y,
-      width: box.width,
-      height: box.height,
+      x: body.x,
+      y: body.y,
+      width: body.width,
+      height: body.height,
     });
   }
 
-  for (const [eid, record] of rt.bodies) {
-    if (record.shape === ColliderShape.Circle) {
-      const circle = record.body as CircleBody;
+  for (const [eid, body] of runtime.entityBodies) {
+    if (isCircleBody(body)) {
       bodies.push({
         kind: "entity",
         shape: "circle",
         eid,
-        x: circle.x,
-        y: circle.y,
-        r: circle.r,
+        x: body.x,
+        y: body.y,
+        r: body.r,
       });
       continue;
     }
 
-    const box = record.body as BoxBody;
+    if (!isBoxBody(body)) continue;
     bodies.push({
       kind: "entity",
       shape: "box",
       eid,
-      x: box.x,
-      y: box.y,
-      width: box.width,
-      height: box.height,
+      x: body.x,
+      y: body.y,
+      width: body.width,
+      height: body.height,
     });
   }
 
-  return { tick: world.time.tick, bodies };
+  return bodies;
+}
+
+/**
+ * 执行一帧服务端碰撞处理。
+ *
+ * 说明：
+ * - 首次运行时会把地图阻挡格注册为静态碰撞体
+ * - 每帧同步实体碰撞体到 check2d，执行分离，再把修正后坐标写回 ECS
+ * - 若分离导致实体在某个轴上被修正，则把该轴速度清零，避免持续顶墙抖动
+ *
+ * @param world ECS World
+ * @returns 处理后的 World
+ */
+export function collisionSystem(world: GameWorld): GameWorld {
+  const collisionWorld = world as CollisionWorld;
+  const runtime = ensureCollisionRuntime(collisionWorld);
+  const previousCenters = new Map<EntityId, { x: number; y: number }>();
+
+  for (const eid of query(world, [Transform, Collider])) {
+    previousCenters.set(eid, {
+      x: Transform.x[eid],
+      y: Transform.y[eid],
+    });
+  }
+
+  syncEntityBodies(world, runtime);
+
+  runtime.pairs = [];
+  runtime.system.separate((response: Response) => {
+    recordCollisionPair(runtime, response.a as CollisionBody, response.b as CollisionBody, response.overlap);
+  });
+
+  writeBodiesBackToWorld(world, runtime, previousCenters);
+  return world;
+}
+
+/**
+ * 获取当前帧的碰撞调试快照。
+ *
+ * 说明：
+ * - 返回地图静态碰撞体、实体动态碰撞体，以及最近一帧记录到的碰撞对
+ * - 若实体碰撞体尚未同步，会在读取前先做一次同步
+ *
+ * @param world ECS World
+ * @returns 当前帧的碰撞调试快照
+ */
+export function getCollisionDebugSnapshot(world: GameWorld): CollisionDebugSnapshot {
+  const collisionWorld = world as CollisionWorld;
+  const runtime = ensureCollisionRuntime(collisionWorld);
+
+  syncEntityBodies(world, runtime);
+
+  return {
+    tick: world.time.tick,
+    bodies: collectDebugBodies(runtime),
+    pairs: runtime.pairs,
+  };
 }

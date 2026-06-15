@@ -27,6 +27,8 @@ interface ClientInput {
   moveY: number;
 }
 
+const DEBUG_COLLIDERS_PUSH_INTERVAL_MS = 250;
+
 /**
  * 判断消息是否为合法的客户端输入结构。
  *
@@ -54,6 +56,8 @@ function isClientInput(message: unknown): message is ClientInput {
 export class GameRoom extends Room<{ state: RoomState }> {
   private world!: GameWorld;
   private systems!: System[];
+  private debugSubscribers = new Set<string>();
+  private debugPushCooldownMs = 0;
 
   /**
    * sessionId -> eid 映射，用于把输入作用到正确的玩家实体。
@@ -99,6 +103,19 @@ export class GameRoom extends Room<{ state: RoomState }> {
       this.lastSeqBySessionId.set(client.sessionId, message.seq);
       this.latestInputBySessionId.set(client.sessionId, message);
     });
+
+    this.onMessage("debug_colliders_subscribe", (client: Client) => {
+      this.debugSubscribers.add(client.sessionId);
+      this.sendCollisionDebugSnapshot(client);
+    });
+
+    this.onMessage("debug_colliders_unsubscribe", (client: Client) => {
+      this.debugSubscribers.delete(client.sessionId);
+    });
+
+    this.onMessage("debug_colliders_pull", (client: Client) => {
+      this.sendCollisionDebugSnapshot(client);
+    });
   }
 
   /**
@@ -133,6 +150,7 @@ export class GameRoom extends Room<{ state: RoomState }> {
     this.playerEidBySessionId.delete(client.sessionId);
     this.lastSeqBySessionId.delete(client.sessionId);
     this.latestInputBySessionId.delete(client.sessionId);
+    this.debugSubscribers.delete(client.sessionId);
     this.state.players.delete(client.sessionId);
   }
 
@@ -162,6 +180,7 @@ export class GameRoom extends Room<{ state: RoomState }> {
     for (const system of this.systems) system(this.world);
 
     this.syncState();
+    this.pushCollisionDebugSnapshots(deltaTimeMs || fixedDtMs);
 
     const tickMs = performance.now() - start;
     recordTick(this.world.metrics, tickMs);
@@ -224,5 +243,35 @@ export class GameRoom extends Room<{ state: RoomState }> {
     this.state.entities.forEach((_value: EntityState, key: string) => {
       if (!alive.has(key)) this.state.entities.delete(key);
     });
+  }
+
+  /**
+   * 按固定间隔向已订阅的客户端推送碰撞调试快照。
+   *
+   * @param deltaTimeMs 本次 tick 的步长（毫秒）
+   */
+  private pushCollisionDebugSnapshots(deltaTimeMs: number): void {
+    if (this.debugSubscribers.size === 0) return;
+
+    this.debugPushCooldownMs += deltaTimeMs;
+    if (this.debugPushCooldownMs < DEBUG_COLLIDERS_PUSH_INTERVAL_MS) {
+      return;
+    }
+    this.debugPushCooldownMs = 0;
+
+    const snapshot = this.getCollisionDebugSnapshot();
+    for (const client of this.clients) {
+      if (!this.debugSubscribers.has(client.sessionId)) continue;
+      client.send("debug_colliders_snapshot", snapshot);
+    }
+  }
+
+  /**
+   * 向指定客户端发送当前帧碰撞调试快照。
+   *
+   * @param client Colyseus 客户端连接
+   */
+  private sendCollisionDebugSnapshot(client: Client): void {
+    client.send("debug_colliders_snapshot", this.getCollisionDebugSnapshot());
   }
 }

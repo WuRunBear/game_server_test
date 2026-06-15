@@ -58,8 +58,8 @@ export function createPlayer(world: GameWorld, options: CreatePlayerOptions): En
     Collider.halfH[eid] = 0;
   } else {
     Collider.radius[eid] = 0;
-    Collider.halfW[eid] = w;
-    Collider.halfH[eid] = h;
+    Collider.halfW[eid] = w * 0.5;
+    Collider.halfH[eid] = h * 0.5;
   }
 
   Health.current[eid] = 100;
