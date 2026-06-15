@@ -48,7 +48,8 @@ export type CollisionDebugBody = CollisionDebugMapBody | CollisionDebugEntityBod
  */
 export type CollisionDebugSnapshot = {
   tick: number;
-  bodies: CollisionDebugBody[];
+  mapBodies?: CollisionDebugMapBody[];
+  entityBodies: CollisionDebugEntityBody[];
   pairs: CollisionDebugPair[];
 };
 
@@ -390,8 +391,8 @@ function writeBodiesBackToWorld(
  * @param runtime 碰撞运行时
  * @returns 可序列化碰撞体列表
  */
-function collectDebugBodies(runtime: CollisionRuntime): CollisionDebugBody[] {
-  const bodies: CollisionDebugBody[] = [];
+function collectDebugMapBodies(runtime: CollisionRuntime): CollisionDebugMapBody[] {
+  const bodies: CollisionDebugMapBody[] = [];
 
   for (const body of runtime.mapBodies) {
     if (!isBoxBody(body)) continue;
@@ -404,6 +405,18 @@ function collectDebugBodies(runtime: CollisionRuntime): CollisionDebugBody[] {
       height: body.height,
     });
   }
+
+  return bodies;
+}
+
+/**
+ * 采集当前帧的实体调试碰撞体列表。
+ *
+ * @param runtime 碰撞运行时
+ * @returns 可序列化实体碰撞体列表
+ */
+function collectDebugEntityBodies(runtime: CollisionRuntime): CollisionDebugEntityBody[] {
+  const bodies: CollisionDebugEntityBody[] = [];
 
   for (const [eid, body] of runtime.entityBodies) {
     if (isCircleBody(body)) {
@@ -477,7 +490,10 @@ export function collisionSystem(world: GameWorld): GameWorld {
  * @param world ECS World
  * @returns 当前帧的碰撞调试快照
  */
-export function getCollisionDebugSnapshot(world: GameWorld): CollisionDebugSnapshot {
+export function getCollisionDebugSnapshot(
+  world: GameWorld,
+  options?: { includeMapBodies?: boolean },
+): CollisionDebugSnapshot {
   const collisionWorld = world as CollisionWorld;
   const runtime = ensureCollisionRuntime(collisionWorld);
 
@@ -485,7 +501,8 @@ export function getCollisionDebugSnapshot(world: GameWorld): CollisionDebugSnaps
 
   return {
     tick: world.time.tick,
-    bodies: collectDebugBodies(runtime),
+    mapBodies: options?.includeMapBodies === false ? undefined : collectDebugMapBodies(runtime),
+    entityBodies: collectDebugEntityBodies(runtime),
     pairs: runtime.pairs,
   };
 }

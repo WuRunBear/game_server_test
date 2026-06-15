@@ -27,7 +27,7 @@ interface ClientInput {
   moveY: number;
 }
 
-const DEBUG_COLLIDERS_PUSH_INTERVAL_MS = 250;
+const DEBUG_COLLIDERS_PUSH_INTERVAL_MS = 500;
 
 /**
  * 判断消息是否为合法的客户端输入结构。
@@ -57,6 +57,7 @@ export class GameRoom extends Room<{ state: RoomState }> {
   private world!: GameWorld;
   private systems!: System[];
   private debugSubscribers = new Set<string>();
+  private debugMapSentSubscribers = new Set<string>();
   private debugPushCooldownMs = 0;
 
   /**
@@ -106,11 +107,12 @@ export class GameRoom extends Room<{ state: RoomState }> {
 
     this.onMessage("debug_colliders_subscribe", (client: Client) => {
       this.debugSubscribers.add(client.sessionId);
-      this.sendCollisionDebugSnapshot(client);
+      this.sendCollisionDebugSnapshot(client, true);
     });
 
     this.onMessage("debug_colliders_unsubscribe", (client: Client) => {
       this.debugSubscribers.delete(client.sessionId);
+      this.debugMapSentSubscribers.delete(client.sessionId);
     });
 
     this.onMessage("debug_colliders_pull", (client: Client) => {
@@ -151,16 +153,18 @@ export class GameRoom extends Room<{ state: RoomState }> {
     this.lastSeqBySessionId.delete(client.sessionId);
     this.latestInputBySessionId.delete(client.sessionId);
     this.debugSubscribers.delete(client.sessionId);
+    this.debugMapSentSubscribers.delete(client.sessionId);
     this.state.players.delete(client.sessionId);
   }
 
   /**
    * 获取服务端当前帧的碰撞调试快照。
    *
+   * @param options 快照裁剪选项
    * @returns 可序列化的碰撞体列表与 tick 信息
    */
-  getCollisionDebugSnapshot(): CollisionDebugSnapshot {
-    return getCollisionDebugSnapshot(this.world);
+  getCollisionDebugSnapshot(options?: { includeMapBodies?: boolean }): CollisionDebugSnapshot {
+    return getCollisionDebugSnapshot(this.world, options);
   }
 
   /**
@@ -263,7 +267,7 @@ export class GameRoom extends Room<{ state: RoomState }> {
     }
     this.debugPushCooldownMs = 0;
 
-    const snapshot = this.getCollisionDebugSnapshot();
+    const snapshot = this.getCollisionDebugSnapshot({ includeMapBodies: false });
     for (const client of this.clients) {
       if (!this.debugSubscribers.has(client.sessionId)) continue;
       client.send("debug_colliders_snapshot", snapshot);
@@ -275,7 +279,15 @@ export class GameRoom extends Room<{ state: RoomState }> {
    *
    * @param client Colyseus 客户端连接
    */
-  private sendCollisionDebugSnapshot(client: Client): void {
-    client.send("debug_colliders_snapshot", this.getCollisionDebugSnapshot());
+  private sendCollisionDebugSnapshot(client: Client, forceIncludeMapBodies = false): void {
+    const includeMapBodies =
+      forceIncludeMapBodies || !this.debugMapSentSubscribers.has(client.sessionId);
+    client.send(
+      "debug_colliders_snapshot",
+      this.getCollisionDebugSnapshot({ includeMapBodies }),
+    );
+    if (includeMapBodies) {
+      this.debugMapSentSubscribers.add(client.sessionId);
+    }
   }
 }
