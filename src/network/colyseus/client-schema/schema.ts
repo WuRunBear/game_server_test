@@ -12,6 +12,10 @@ export class EntityState extends Schema {
     @type("number") public x!: number;
     @type("number") public y!: number;
     @type("int32") public hp!: number;
+    @type("uint8") public shape!: number;
+    @type("number") public radius!: number;
+    @type("number") public w!: number;
+    @type("number") public h!: number;
 }
 
 export class PlayerState extends Schema {

@@ -2,7 +2,7 @@ import { query, removeEntity } from "bitecs";
 import { Room, type Client } from "@colyseus/core";
 
 import { gameConfig, getMapSourceFromConfig } from "config";
-import { Health, NetworkId, Transform, Velocity } from "components";
+import { Collider, Health, NetworkId, Size, Transform, Velocity } from "components";
 import { createNpc, createPlayer } from "factories";
 import { buildMapRuntime } from "map";
 import { EntityState } from "network/colyseus/state/EntityState";
@@ -223,7 +223,7 @@ export class GameRoom extends Room<{ state: RoomState }> {
 
     const alive = new Set<string>();
 
-    for (const eid of query(this.world, [NetworkId, Transform, Health])) {
+    for (const eid of query(this.world, [NetworkId, Transform, Health, Collider, Size])) {
       const id = NetworkId.value[eid];
       const key = String(id);
       alive.add(key);
@@ -238,6 +238,10 @@ export class GameRoom extends Room<{ state: RoomState }> {
       entityState.x = Transform.x[eid];
       entityState.y = Transform.y[eid];
       entityState.hp = Health.current[eid];
+      entityState.shape = Collider.shape[eid];
+      entityState.radius = Collider.radius[eid];
+      entityState.w = Size.w[eid];
+      entityState.h = Size.h[eid];
     }
 
     this.state.entities.forEach((_value: EntityState, key: string) => {

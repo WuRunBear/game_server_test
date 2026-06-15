@@ -31,4 +31,32 @@ export class EntityState extends Schema {
    */
   @type("int32")
   hp: number = 0;
+
+  /**
+   * 渲染/碰撞共用的形状类型。
+   *
+   * 约定：
+   * - 0 表示圆形
+   * - 1 表示矩形
+   */
+  @type("uint8")
+  shape: number = 0;
+
+  /**
+   * 圆形半径（仅圆形时有效）。
+   */
+  @type("number")
+  radius: number = 0;
+
+  /**
+   * 实体宽度（矩形渲染时使用）。
+   */
+  @type("number")
+  w: number = 0;
+
+  /**
+   * 实体高度（矩形渲染时使用）。
+   */
+  @type("number")
+  h: number = 0;
 }
