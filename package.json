@@ -26,7 +26,6 @@
     "@colyseus/ws-transport": "^0.17.13",
     "bitecs": "^0.4.0",
     "check2d": "^9.36.4",
-    "colyseus": "^0.17.10",
     "mistreevous": "^4.3.1",
     "winston": "^3.19.0",
     "ws": "^8.18.0"
