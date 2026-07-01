@@ -1,5 +1,13 @@
 import { hasComponent, query } from "bitecs";
-import check2d, { type Body, type Box, type Circle, type Response } from "check2d";
+import _check2dDefault from "check2d";
+import * as _check2dNamespace from "check2d";
+import type { Body, Box, Circle, Response, System as Check2dSystem } from "check2d";
+
+const check2d = (
+  _check2dDefault && typeof _check2dDefault === "object" && "System" in _check2dDefault
+    ? _check2dDefault
+    : _check2dNamespace
+) as typeof _check2dNamespace;
 
 import { Collider, ColliderShape, Transform, Velocity } from "components";
 import type { EntityId, GameWorld } from "src/world";
@@ -77,7 +85,7 @@ type CollisionBodyUserData =
 type CollisionBody = Body<CollisionBodyUserData>;
 
 type CollisionRuntime = {
-  system: check2d.System<CollisionBody>;
+  system: Check2dSystem<CollisionBody>;
   mapBodies: CollisionBody[];
   entityBodies: Map<EntityId, CollisionBody>;
   pairs: CollisionDebugPair[];
@@ -168,7 +176,7 @@ function doesBodyMatchShape(body: CollisionBody, eid: EntityId, world: GameWorld
  * @returns 创建后的静态碰撞体
  */
 function createMapBody(
-  system: check2d.System<CollisionBody>,
+  system: Check2dSystem<CollisionBody>,
   tileX: number,
   tileY: number,
   tileWidth: number,
@@ -198,7 +206,7 @@ function createMapBody(
  */
 function createEntityBody(
   world: GameWorld,
-  system: check2d.System<CollisionBody>,
+  system: Check2dSystem<CollisionBody>,
   eid: EntityId,
 ): CollisionBody {
   if (Collider.shape[eid] === ColliderShape.Circle) {
