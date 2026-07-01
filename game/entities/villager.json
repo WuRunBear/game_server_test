@@ -1,0 +1,12 @@
+{
+  "kind": "villager",
+  "tags": ["NPC"],
+  "components": {
+    "Size": { "w": 16, "h": 16 },
+    "Velocity": {},
+    "Collider": { "shape": 1, "halfW": 8, "halfH": 8 },
+    "Health": { "current": 50, "max": 50 }
+  },
+  "behavior": "wander-default",
+  "team": 0
+}

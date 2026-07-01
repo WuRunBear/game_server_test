@@ -1,0 +1,15 @@
+{
+  "default": "generated-map",
+  "maps": {
+    "generated-map": {
+      "kind": "generated",
+      "generatorId": "simple",
+      "name": "生成地图",
+      "seed": 1,
+      "width": 64,
+      "height": 64,
+      "tileWidth": 16,
+      "tileHeight": 16
+    }
+  }
+}

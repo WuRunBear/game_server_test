@@ -1,0 +1,31 @@
+{
+  "id": "survival-island",
+  "name": "荒岛求生",
+  "worldview": { "theme": "survival" },
+  "tickRate": 20,
+  "map": {
+    "registry": "./maps/registry.json",
+    "default": "generated-map"
+  },
+  "systems": [
+    { "id": "ai" },
+    { "id": "physics" },
+    { "id": "movement" },
+    { "id": "collision" },
+    { "id": "combat", "config": { "friendlyFire": false } },
+    { "id": "inventory" },
+    { "id": "interaction" }
+  ],
+  "entities": "./entities/*.json",
+  "behaviors": "./behaviors/*.json",
+  "rules": "./rules/*.json",
+  "spawns": "./spawns/*.json",
+  "netSync": {
+    "fields": [
+      { "component": "Transform", "fields": ["x", "y"] },
+      { "component": "Health", "fields": ["current"] },
+      { "component": "Collider", "fields": ["shape", "radius"] },
+      { "component": "Size", "fields": ["w", "h"] }
+    ]
+  }
+}
