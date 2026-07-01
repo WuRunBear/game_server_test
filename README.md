@@ -29,7 +29,7 @@ src/
   index.ts                  # 入口
   main.ts                   # 初始化 Colyseus 服务器
   world.ts                  # GameWorld 类型 + createGameWorld
-  gameLoop.ts               # 固定 tick 循环（当前不使用，由 GameRoom 驱动）
+
   metrics.ts                # tick 性能指标
 
   components/               # ECS 组件（bitecs SoA）

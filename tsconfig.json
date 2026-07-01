@@ -33,6 +33,8 @@
       "utils/*": ["src/utils/*"],
       "map": ["src/map"],
       "map/*": ["src/map/*"],
+      "framework": ["framework/index.ts"],
+      "framework/*": ["framework/*"],
     }
   },
   "tsc-alias": {
