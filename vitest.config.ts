@@ -8,9 +8,6 @@ export default defineConfig({
   test: {
     include: ["framework/__tests__/**/*.test.ts"],
     exclude: ["node_modules", "dist"],
-    deps: {
-      inline: ["check2d"],
-    },
   },
   resolve: {
     alias: [

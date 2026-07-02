@@ -1,13 +1,9 @@
+import { createRequire } from "node:module";
 import { hasComponent, query } from "bitecs";
-import _check2dDefault from "check2d";
-import * as _check2dNamespace from "check2d";
 import type { Body, Box, Circle, Response, System as Check2dSystem } from "check2d";
 
-const check2d = (
-  _check2dDefault && typeof _check2dDefault === "object" && "System" in _check2dDefault
-    ? _check2dDefault
-    : _check2dNamespace
-) as typeof _check2dNamespace;
+const require = createRequire(import.meta.url);
+const check2d = require("check2d") as typeof import("check2d");
 
 import { Collider, ColliderShape, Transform, Velocity } from "components";
 import type { EntityId, GameWorld } from "src/world";
