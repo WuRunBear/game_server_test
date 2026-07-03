@@ -116,7 +116,7 @@ function mapSourceFromRegistryFile(
   if (kind === "generated") {
     return {
       kind: "generated",
-      generatorId: "simple",
+      generatorId: asString(entryRaw.generatorId) ?? "simple",
       id,
       name,
       seed: getNumber(entryRaw, ["seed"], 1),
@@ -137,6 +137,6 @@ function mapSourceFromRegistryFile(
  * @throws Error 当地图清单读取或解析失败时抛出
  */
 export function getMapSourceFromConfig(): MapSource {
-  const registryPath = "config/maps.registry.json";
+  const registryPath = "game/maps/registry.json";
   return mapSourceFromRegistryFile(registryPath, null);
 }

@@ -5,12 +5,15 @@ import { createActionRegistry } from "framework/ai/actionRegistry";
 import { registerBuiltinSystems } from "framework/systems/registerBuiltinSystems";
 import { createArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import { registerBuiltinArchetypes } from "framework/entities/registerBuiltinArchetypes";
+import { createGeneratorRegistry } from "framework/map/generatorRegistry";
+import { registerBuiltinGenerators } from "framework/map/registerBuiltinGenerators";
 
 export interface FrameworkRegistries {
   componentRegistry: ReturnType<typeof createComponentRegistry>;
   systemRegistry: ReturnType<typeof createSystemRegistry>;
   actionRegistry: ReturnType<typeof createActionRegistry>;
   archetypeRegistry: ReturnType<typeof createArchetypeRegistry>;
+  generatorRegistry: ReturnType<typeof createGeneratorRegistry>;
 }
 
 let registries: FrameworkRegistries | undefined;
@@ -29,7 +32,10 @@ export function bootstrapFramework(): FrameworkRegistries {
   const archetypeRegistry = createArchetypeRegistry();
   registerBuiltinArchetypes(archetypeRegistry);
 
-  registries = { componentRegistry, systemRegistry, actionRegistry, archetypeRegistry };
+  const generatorRegistry = createGeneratorRegistry();
+  registerBuiltinGenerators(generatorRegistry);
+
+  registries = { componentRegistry, systemRegistry, actionRegistry, archetypeRegistry, generatorRegistry };
   return registries;
 }
 

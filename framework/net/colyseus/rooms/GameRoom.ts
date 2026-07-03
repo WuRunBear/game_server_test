@@ -1,19 +1,18 @@
 import { query, removeEntity } from "bitecs";
 import { Room, type Client } from "@colyseus/core";
 
-import { gameConfig, getMapSourceFromConfig } from "config";
 import { Collider, Health, NetworkId, Size, Transform, Velocity } from "components";
 import { spawnEntity } from "framework/entities/spawn";
 import { getRegistries } from "framework/bootstrap";
-import { buildMapRuntime } from "map";
+import { createGameInstance } from "framework/bootstrap/GameInstance";
+import { loadGameDefinition } from "framework/bootstrap/loadGameDefinition";
+import type { GameInstance } from "framework/bootstrap/GameInstance";
 import { EntityState } from "network/colyseus/state/EntityState";
 import { RoomState } from "network/colyseus/state/RoomState";
 import { PlayerState } from "network/colyseus/state/PlayerState";
 import { recordTick } from "framework/metrics";
-import { createSystems } from "systems";
 import { getCollisionDebugSnapshot, type CollisionDebugSnapshot } from "systems/core/collisionSystem";
-import { createLogger } from "utils/logger";
-import { createGameWorld, type EntityId, type GameWorld, type System } from "world";
+import type { EntityId, GameWorld } from "world";
 
 /**
  * 客户端输入（最小示例）。
@@ -56,7 +55,7 @@ function isClientInput(message: unknown): message is ClientInput {
  */
 export class GameRoom extends Room<{ state: RoomState }> {
   private world!: GameWorld;
-  private systems!: System[];
+  private gameInstance!: GameInstance;
   private debugSubscribers = new Set<string>();
   private debugMapSentSubscribers = new Set<string>();
   private debugPushCooldownMs = 0;
@@ -83,20 +82,13 @@ export class GameRoom extends Room<{ state: RoomState }> {
    */
   onCreate(): void {
     this.autoDispose = false;
-    const fixedDtMs = Math.max(1, Math.floor(1000 / gameConfig.tickRate));
 
-    const { componentRegistry, archetypeRegistry } = getRegistries();
+    const gameDef = loadGameDefinition();
+    this.gameInstance = createGameInstance(gameDef);
+    this.world = this.gameInstance.world;
+    const fixedDtMs = Math.max(1, Math.floor(1000 / gameDef.tickRate));
 
     this.state = new RoomState();
-    this.world = createGameWorld(fixedDtMs);
-    this.world.logger = createLogger("world");
-    this.systems = createSystems();
-
-    this.world.map = buildMapRuntime(getMapSourceFromConfig());
-    for (const spawn of this.world.map.spawns.npcs) {
-      const archetype = archetypeRegistry.get(spawn.kind);
-      spawnEntity(this.world, archetype, componentRegistry, { x: spawn.pos.x, y: spawn.pos.y });
-    }
 
     this.setSimulationInterval((deltaTime) => this.step(deltaTime, fixedDtMs), fixedDtMs);
 
@@ -182,12 +174,8 @@ export class GameRoom extends Room<{ state: RoomState }> {
   private step(deltaTimeMs: number, fixedDtMs: number): void {
     const start = performance.now();
 
-    this.world.time.tick += 1;
-    this.world.time.dtMs = deltaTimeMs || fixedDtMs;
-
     this.applyInputs();
-
-    for (const system of this.systems) system(this.world);
+    this.gameInstance.step(deltaTimeMs || fixedDtMs);
 
     this.syncState();
     this.pushCollisionDebugSnapshots(deltaTimeMs || fixedDtMs);

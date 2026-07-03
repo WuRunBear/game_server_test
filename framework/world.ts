@@ -41,6 +41,8 @@ export function createGameWorld(fixedDtMs: number): GameWorld {
     },
     metrics: createMetrics(),
     logger: createLogger("world"),
+    systemRuntimes: new Map(),
+    nextNetworkId: 1,
   }) as GameWorld;
 
   return world;

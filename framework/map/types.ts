@@ -112,7 +112,7 @@ export interface GeneratedMapSource {
   /**
    * 生成器 id（用于选择具体生成算法）。
    */
-  generatorId: "simple";
+  generatorId: string;
   /**
    * 地图 id（稳定标识）。
    */

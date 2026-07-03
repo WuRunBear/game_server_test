@@ -6,39 +6,23 @@ import { createNpcTree } from "ai/btFactory";
 import { stepBehaviourTree, type BtInstance } from "ai/btRunner";
 import type { EntityId, GameWorld } from "world";
 
-/**
- * AI 系统运行期缓存。
- *
- * 每个 World 维护一份缓存，用于保存“实体 -> 行为树实例/黑板”的映射，避免每 tick 重新创建对象。
- */
 type AiRuntime = {
   npcTrees: Map<EntityId, BtInstance>;
   blackboards: Map<EntityId, Blackboard>;
 };
 
-/**
- * 按 World 维度保存 AI 运行期缓存。
- *
- * 使用 WeakMap 确保 World 被释放时缓存可被 GC 回收，避免泄漏。
- */
-const runtimeByWorld = new WeakMap<GameWorld, AiRuntime>();
+const AI_KEY = "ai";
 
-/**
- * 获取或初始化指定 World 的 AI 运行期缓存。
- *
- * @param world ECS World
- * @returns 该 World 对应的运行期缓存
- */
 function getRuntime(world: GameWorld): AiRuntime {
-  const existing = runtimeByWorld.get(world);
-  if (existing) return existing;
+  let rt = world.systemRuntimes.get(AI_KEY) as AiRuntime | undefined;
+  if (rt) return rt;
 
-  const created: AiRuntime = {
+  rt = {
     npcTrees: new Map(),
     blackboards: new Map(),
   };
-  runtimeByWorld.set(world, created);
-  return created;
+  world.systemRuntimes.set(AI_KEY, rt);
+  return rt;
 }
 
 /**

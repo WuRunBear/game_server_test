@@ -87,9 +87,7 @@ type CollisionRuntime = {
   pairs: CollisionDebugPair[];
 };
 
-type CollisionWorld = GameWorld & {
-  collisionRuntime?: CollisionRuntime;
-};
+const COLLISION_KEY = "collision";
 
 const POSITION_EPSILON = 0.0001;
 
@@ -267,10 +265,9 @@ function syncEntityBody(world: GameWorld, eid: EntityId, body: CollisionBody): v
  * @param world ECS World
  * @returns 可复用的碰撞运行时
  */
-function ensureCollisionRuntime(world: CollisionWorld): CollisionRuntime {
-  if (world.collisionRuntime) {
-    return world.collisionRuntime;
-  }
+function ensureCollisionRuntime(world: GameWorld): CollisionRuntime {
+  const existing = world.systemRuntimes.get(COLLISION_KEY) as CollisionRuntime | undefined;
+  if (existing) return existing;
 
   const system = new check2d.System<CollisionBody>();
   const mapBodies: CollisionBody[] = [];
@@ -286,14 +283,15 @@ function ensureCollisionRuntime(world: CollisionWorld): CollisionRuntime {
     }
   }
 
-  world.collisionRuntime = {
+  const runtime: CollisionRuntime = {
     system,
     mapBodies,
     entityBodies: new Map<EntityId, CollisionBody>(),
     pairs: [],
   };
 
-  return world.collisionRuntime;
+  world.systemRuntimes.set(COLLISION_KEY, runtime);
+  return runtime;
 }
 
 /**
@@ -462,8 +460,7 @@ function collectDebugEntityBodies(runtime: CollisionRuntime): CollisionDebugEnti
  * @returns 处理后的 World
  */
 export function collisionSystem(world: GameWorld): GameWorld {
-  const collisionWorld = world as CollisionWorld;
-  const runtime = ensureCollisionRuntime(collisionWorld);
+  const runtime = ensureCollisionRuntime(world);
   const previousCenters = new Map<EntityId, { x: number; y: number }>();
 
   for (const eid of query(world, [Transform, Collider])) {
@@ -498,8 +495,7 @@ export function getCollisionDebugSnapshot(
   world: GameWorld,
   options?: { includeMapBodies?: boolean },
 ): CollisionDebugSnapshot {
-  const collisionWorld = world as CollisionWorld;
-  const runtime = ensureCollisionRuntime(collisionWorld);
+  const runtime = ensureCollisionRuntime(world);
 
   syncEntityBodies(world, runtime);
 

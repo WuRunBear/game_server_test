@@ -22,10 +22,6 @@ export function spawnEntity(
   componentRegistry: ComponentRegistry,
   overrides?: SpawnOverrides,
 ): EntityId {
-  if (!world.nextNetworkId) {
-    world.nextNetworkId = 1;
-  }
-
   const eid = addEntity(world);
 
   addComponent(world, eid, Transform);

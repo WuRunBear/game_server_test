@@ -1,25 +1,13 @@
-import type { MapRuntime, MapSource } from "map/types";
-import { generateSimpleMap } from "map/generated/simple";
-import { mapRuntimeFromTiled } from "map/tiled";
+import type { MapRuntime, MapSource } from "framework/map/types";
+import { mapRuntimeFromTiled } from "framework/map/tiled";
+import { getRegistries } from "framework/bootstrap";
 
-/**
- * 根据地图来源构建运行时地图数据（纯函数，无副作用）。
- *
- * @param source 地图来源（tiled 或 generated）
- * @returns MapRuntime
- */
 export function buildMapRuntime(source: MapSource): MapRuntime {
   if (source.kind === "tiled") {
     return mapRuntimeFromTiled(source.id, source.name, source.json);
   }
 
-  return generateSimpleMap({
-    id: source.id,
-    name: source.name,
-    seed: source.seed,
-    width: source.width,
-    height: source.height,
-    tileWidth: source.tileWidth,
-    tileHeight: source.tileHeight,
-  });
+  const { generatorRegistry } = getRegistries();
+  const generator = generatorRegistry.get(source.generatorId);
+  return generator(source as unknown as Record<string, unknown>);
 }

@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { GameDefinitionSchema, type GameDefinition } from "framework/config/schema/GameDefinitionSchema";
+import { getRegistries } from "framework/bootstrap";
 
 export interface LoadGameDefinitionOptions {
   gameJsonPath?: string;
@@ -26,7 +27,25 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): GameDef
     );
   }
 
+  validateIntegrity(result.data);
+
   return result.data;
+}
+
+function validateIntegrity(gameDef: GameDefinition): void {
+  try {
+    const { systemRegistry } = getRegistries();
+    for (const entry of gameDef.systems ?? []) {
+      if (!systemRegistry.has(entry.id)) {
+        throw new Error(`System "${entry.id}" referenced in game config is not registered`);
+      }
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("not bootstrapped")) {
+      return;
+    }
+    throw err;
+  }
 }
 
 export function createDefaultGameDefinition(): GameDefinition {
