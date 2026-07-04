@@ -7,6 +7,19 @@ export type BtDefinitionJson =
   | { type: string; children?: unknown[]; name?: string; args?: Record<string, unknown>; [key: string]: unknown }
   | Array<{ type: string; children?: unknown[]; name?: string; args?: Record<string, unknown>; [key: string]: unknown }>;
 
+function getActionName(obj: Record<string, unknown>): string | undefined {
+  if (typeof obj.name === "string") return obj.name;
+  if (typeof obj.call === "string") return obj.call;
+  return undefined;
+}
+
+function getChildNodes(obj: Record<string, unknown>): unknown[] {
+  const nodes: unknown[] = [];
+  if (Array.isArray(obj.children)) nodes.push(...obj.children);
+  if (obj.child) nodes.push(obj.child);
+  return nodes;
+}
+
 function collectActionNames(node: unknown, names: Set<string>): void {
   if (typeof node === "string") {
     for (const match of node.matchAll(/action\s*\[([^\]]+)\]/g)) {
@@ -16,13 +29,12 @@ function collectActionNames(node: unknown, names: Set<string>): void {
   }
   if (!node || typeof node !== "object") return;
   const obj = node as Record<string, unknown>;
-  if (typeof obj.name === "string" && obj.type === "action") {
-    names.add(obj.name);
+  const actionName = getActionName(obj);
+  if (typeof obj.type === "string" && obj.type === "action" && actionName) {
+    names.add(actionName);
   }
-  if (Array.isArray(obj.children)) {
-    for (const child of obj.children) {
-      collectActionNames(child, names);
-    }
+  for (const child of getChildNodes(obj)) {
+    collectActionNames(child, names);
   }
 }
 
@@ -42,14 +54,13 @@ function parseJsonIfLooksLikeJson(text: string): unknown | null {
 function extractActionArgs(node: unknown, actionName: string): Record<string, unknown> {
   if (!node || typeof node !== "object") return {};
   const obj = node as Record<string, unknown>;
-  if (typeof obj.name === "string" && obj.name === actionName && typeof obj.args === "object" && obj.args !== null) {
+  const name = getActionName(obj);
+  if (name === actionName && typeof obj.args === "object" && obj.args !== null) {
     return obj.args as Record<string, unknown>;
   }
-  if (Array.isArray(obj.children)) {
-    for (const child of obj.children) {
-      const result = extractActionArgs(child, actionName);
-      if (Object.keys(result).length > 0) return result;
-    }
+  for (const child of getChildNodes(obj)) {
+    const result = extractActionArgs(child, actionName);
+    if (Object.keys(result).length > 0) return result;
   }
   return {};
 }
@@ -88,8 +99,25 @@ export function createNpcTree(
     agent[name] = factory(args);
   }
 
-  const tree = new BehaviourTree(normalizedDefinition as never, agent as BtAgent);
+  const cleanDefinition = removeArgsFromDefinition(normalizedDefinition);
+
+  const tree = new BehaviourTree(cleanDefinition as never, agent as BtAgent);
   return { tree, agent: agent as BtAgent };
+}
+
+function removeArgsFromDefinition(node: unknown): unknown {
+  if (!node || typeof node !== "object") return node;
+  if (Array.isArray(node)) return node.map(removeArgsFromDefinition);
+  const obj = { ...(node as Record<string, unknown>) };
+  delete obj.args;
+  for (const key of Object.keys(obj)) {
+    if (key === "children" && Array.isArray(obj[key])) {
+      obj[key] = obj[key].map(removeArgsFromDefinition);
+    } else if (key === "child" && typeof obj[key] === "object") {
+      obj[key] = removeArgsFromDefinition(obj[key]);
+    }
+  }
+  return obj;
 }
 
 export function createDefaultNpcTree(): BtInstance<BtAgent> {

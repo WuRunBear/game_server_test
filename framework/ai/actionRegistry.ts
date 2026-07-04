@@ -6,6 +6,7 @@ export interface ActionRegistry {
   register(name: string, factory: ActionFactory): void;
   get(name: string): ActionFactory;
   has(name: string): boolean;
+  all(): ActionFactory[];
 }
 
 export function createActionRegistry(): ActionRegistry {
@@ -29,6 +30,10 @@ export function createActionRegistry(): ActionRegistry {
 
     has(name) {
       return actions.has(name);
+    },
+
+    all() {
+      return [...actions.values()];
     },
   };
 }

@@ -13,6 +13,7 @@
     { "id": "movement" },
     { "id": "collision" },
     { "id": "combat", "config": { "friendlyFire": false } },
+    { "id": "spawning" },
     { "id": "inventory" },
     { "id": "interaction" }
   ],

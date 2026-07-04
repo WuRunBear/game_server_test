@@ -6,9 +6,10 @@ import { physicsSystem } from "framework/systems/core/physicsSystem";
 import { movementSystem } from "framework/systems/core/movementSystem";
 import { collisionSystem } from "framework/systems/core/collisionSystem";
 import { aiSystem } from "framework/systems/gameplay/aiSystem";
-import { combatSystem } from "framework/systems/gameplay/combatSystem";
+import { createCombatSystem } from "framework/systems/gameplay/combatSystem";
 import { inventorySystem } from "framework/systems/gameplay/inventorySystem";
 import { interactionSystem } from "framework/systems/gameplay/interactionSystem";
+import { spawningSystem } from "framework/systems/gameplay/spawningSystem";
 
 import { setDefaultActionRegistry } from "framework/ai/btFactory";
 import { registerBuiltinActions } from "framework/ai/registerBuiltinActions";
@@ -46,14 +47,20 @@ export function registerBuiltinSystems(
 
   systemRegistry.register({
     id: "combat",
-    factory: (_world: GameWorld) => combatSystem,
+    factory: (_world: GameWorld, config?: Record<string, unknown>) => createCombatSystem(config),
     after: ["collision"],
+  });
+
+  systemRegistry.register({
+    id: "spawning",
+    factory: (_world: GameWorld) => spawningSystem,
+    after: ["combat"],
   });
 
   systemRegistry.register({
     id: "inventory",
     factory: (_world: GameWorld) => inventorySystem,
-    after: ["combat"],
+    after: ["spawning"],
   });
 
   systemRegistry.register({

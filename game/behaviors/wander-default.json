@@ -2,8 +2,10 @@
   "id": "wander-default",
   "definition": {
     "type": "root",
-    "children": [
-      { "type": "action", "name": "Wander", "args": { "speed": 48 } }
-    ]
+    "child": {
+      "type": "action",
+      "call": "Wander",
+      "args": { "speed": 48 }
+    }
   }
 }

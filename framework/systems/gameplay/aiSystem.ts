@@ -1,5 +1,4 @@
 import { query } from "bitecs";
-
 import { NPC } from "components";
 import { createBlackboard, type Blackboard } from "ai/blackboard";
 import { createNpcTree } from "ai/btFactory";
@@ -9,6 +8,7 @@ import type { EntityId, GameWorld } from "world";
 type AiRuntime = {
   npcTrees: Map<EntityId, BtInstance>;
   blackboards: Map<EntityId, Blackboard>;
+  eidKind: Map<EntityId, string>;
 };
 
 const AI_KEY = "ai";
@@ -20,22 +20,17 @@ function getRuntime(world: GameWorld): AiRuntime {
   rt = {
     npcTrees: new Map(),
     blackboards: new Map(),
+    eidKind: new Map(),
   };
   world.systemRuntimes.set(AI_KEY, rt);
   return rt;
 }
 
-/**
- * AI 系统：驱动所有 NPC 的行为树。
- *
- * 约定：
- * - 每个 NPC 实体拥有一份独立的黑板与行为树实例
- * - 每 tick 对每个 NPC 调用一次 step，向 agent 注入 { world, self, bb } 作为运行上下文
- * - 当 NPC 实体消失时，清理对应缓存
- *
- * @param world ECS World
- * @returns world
- */
+export function setEntityKind(world: GameWorld, eid: EntityId, kind: string): void {
+  const rt = getRuntime(world);
+  rt.eidKind.set(eid, kind);
+}
+
 export function aiSystem(world: GameWorld): GameWorld {
   const rt = getRuntime(world);
   const alive = new Set<EntityId>();
@@ -51,7 +46,21 @@ export function aiSystem(world: GameWorld): GameWorld {
 
     let bt = rt.npcTrees.get(eid);
     if (!bt) {
-      bt = createNpcTree();
+      const kind = rt.eidKind.get(eid);
+      if (kind) {
+        const archetype = world.archetypes.get(kind);
+        if (archetype?.behavior) {
+          const behaviorDef = world.gameDef.resolvedBehaviors.find((b) => b.id === archetype.behavior);
+          if (behaviorDef) {
+            bt = createNpcTree(behaviorDef.definition as Parameters<typeof createNpcTree>[0], world.actions);
+          }
+        }
+      }
+
+      if (!bt) {
+        bt = createNpcTree(undefined, world.actions);
+      }
+
       rt.npcTrees.set(eid, bt);
     }
 
@@ -59,7 +68,10 @@ export function aiSystem(world: GameWorld): GameWorld {
   }
 
   for (const eid of rt.npcTrees.keys()) {
-    if (!alive.has(eid)) rt.npcTrees.delete(eid);
+    if (!alive.has(eid)) {
+      rt.npcTrees.delete(eid);
+      rt.eidKind.delete(eid);
+    }
   }
   for (const eid of rt.blackboards.keys()) {
     if (!alive.has(eid)) rt.blackboards.delete(eid);

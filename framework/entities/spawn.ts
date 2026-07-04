@@ -7,6 +7,7 @@ import { Transform } from "framework/components/transform";
 import { NetworkId } from "framework/components/network";
 import { Player, NPC, Enemy, Item } from "framework/components/tags";
 import { Team } from "framework/components/combat";
+import { setEntityKind } from "framework/systems/gameplay/aiSystem";
 
 const TAG_MAP: Record<string, unknown> = { Player, NPC, Enemy, Item };
 
@@ -56,6 +57,8 @@ export function spawnEntity(
   }
 
   NetworkId.value[eid] = world.nextNetworkId++;
+
+  setEntityKind(world, eid, archetype.kind);
 
   return eid;
 }

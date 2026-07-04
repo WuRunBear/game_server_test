@@ -1,43 +1,178 @@
-import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { GameDefinitionSchema, type GameDefinition } from "framework/config/schema/GameDefinitionSchema";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { resolve, dirname, basename } from "node:path";
+import {
+  GameDefinitionSchema,
+  type LoadedGameDefinition,
+  type BehaviorDefinition,
+  type SpawnRule,
+} from "framework/config/schema/GameDefinitionSchema";
+import { ArchetypeSchema } from "framework/config/schema/ArchetypeSchema";
+import { BehaviorSchema } from "framework/config/schema/BehaviorSchema";
+import { SpawnRuleSchema, SpawnRegistrySchema } from "framework/config/schema/SpawnSchema";
+import { MapRegistrySchema, type GeneratedMapEntryJson, type TiledMapEntryJson } from "framework/config/schema/MapRegistrySchema";
 import { getRegistries } from "framework/bootstrap";
+import type { MapSource } from "framework/map/types";
+import type { ArchetypeSpec } from "framework/entities/archetypeRegistry";
 
 export interface LoadGameDefinitionOptions {
   gameJsonPath?: string;
 }
 
-export function loadGameDefinition(options?: LoadGameDefinitionOptions): GameDefinition {
-  const jsonPath = resolve(
-    process.cwd(),
-    options?.gameJsonPath ?? "game/game.json",
-  );
-
-  if (!existsSync(jsonPath)) {
-    return createDefaultGameDefinition();
-  }
-
-  const raw = readFileSync(jsonPath, "utf8");
-  const parsed = JSON.parse(raw) as unknown;
-  const result = GameDefinitionSchema.safeParse(parsed);
-
-  if (!result.success) {
-    throw new Error(
-      `Invalid game definition at ${jsonPath}: ${result.error.message}`,
-    );
-  }
-
-  validateIntegrity(result.data);
-
-  return result.data;
+function resolveConfigDir(gameJsonPath: string): string {
+  return resolve(process.cwd(), dirname(gameJsonPath));
 }
 
-function validateIntegrity(gameDef: GameDefinition): void {
+function readJsonFile(filePath: string): unknown {
+  const text = readFileSync(filePath, "utf8");
+  return JSON.parse(text) as unknown;
+}
+
+function loadFilesByGlob(baseDir: string, pattern: string): string[] {
+  if (pattern.includes("*")) {
+    const dir = dirname(pattern);
+    const scanDir = resolve(baseDir, dir);
+    if (!existsSync(scanDir)) return [];
+    return readdirSync(scanDir)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => resolve(scanDir, f));
+  }
+  const fullPath = resolve(baseDir, pattern);
+  return existsSync(fullPath) ? [fullPath] : [];
+}
+
+function loadArchetypesFiles(baseDir: string, entityPattern?: string): ArchetypeSpec[] {
+  if (!entityPattern) return [];
+  const files = loadFilesByGlob(baseDir, entityPattern);
+  const results: ArchetypeSpec[] = [];
+  for (const file of files) {
+    const raw = readJsonFile(file);
+    const parsed = ArchetypeSchema.parse(raw);
+    results.push(parsed as ArchetypeSpec);
+  }
+  return results;
+}
+
+function loadBehaviorFiles(baseDir: string, behaviorPattern?: string): BehaviorDefinition[] {
+  if (!behaviorPattern) return [];
+  const files = loadFilesByGlob(baseDir, behaviorPattern);
+  const results: BehaviorDefinition[] = [];
+  for (const file of files) {
+    const raw = readJsonFile(file);
+    const parsed = BehaviorSchema.parse(raw);
+    results.push(parsed as BehaviorDefinition);
+  }
+  return results;
+}
+
+function loadRulesFile(baseDir: string, rulesPattern?: string): Record<string, unknown> {
+  if (!rulesPattern) return {};
+  const files = loadFilesByGlob(baseDir, rulesPattern);
+  const allRules: Record<string, unknown> = {};
+  for (const file of files) {
+    const raw = readJsonFile(file);
+    const name = basename(file).replace(/\.json$/, "");
+    allRules[name] = raw;
+  }
+  return allRules;
+}
+
+function loadSpawnsFile(baseDir: string, spawnsPattern?: string): SpawnRule[] {
+  if (!spawnsPattern) return [];
+  const files = loadFilesByGlob(baseDir, spawnsPattern);
+  const results: SpawnRule[] = [];
+  for (const file of files) {
+    const raw = readJsonFile(file);
+    const parsed = SpawnRegistrySchema.parse(raw);
+    for (const rule of parsed.rules) {
+      results.push(SpawnRuleSchema.parse(rule) as SpawnRule);
+    }
+  }
+  return results;
+}
+
+function resolveMapSource(baseDir: string, mapRegistryPath?: string): MapSource | undefined {
+  if (!mapRegistryPath) return undefined;
+  const fullPath = resolve(baseDir, mapRegistryPath);
+  if (!existsSync(fullPath)) return undefined;
+
+  const raw = readJsonFile(fullPath);
+  const registry = MapRegistrySchema.parse(raw);
+  const defaultId = registry.default ?? Object.keys(registry.maps)[0];
+  if (!defaultId) return undefined;
+
+  const entry = registry.maps[defaultId];
+  if (!entry) return undefined;
+
+  if (entry.kind === "tiled") {
+    const tiledEntry = entry as TiledMapEntryJson;
+    const tiledPath = resolve(dirname(fullPath), tiledEntry.path);
+    return {
+      kind: "tiled" as const,
+      id: tiledEntry.id ?? defaultId,
+      name: tiledEntry.name ?? defaultId,
+      json: readJsonFile(tiledPath),
+    };
+  }
+
+  const genEntry = entry as GeneratedMapEntryJson;
+  return {
+    kind: "generated" as const,
+    generatorId: genEntry.generatorId ?? "simple",
+    id: genEntry.id ?? defaultId,
+    name: genEntry.name ?? defaultId,
+    seed: genEntry.seed ?? 1,
+    width: genEntry.width ?? 64,
+    height: genEntry.height ?? 64,
+    tileWidth: genEntry.tileWidth ?? 16,
+    tileHeight: genEntry.tileHeight ?? 16,
+  };
+}
+
+function validateIntegrity(data: LoadedGameDefinition): void {
   try {
-    const { systemRegistry } = getRegistries();
-    for (const entry of gameDef.systems ?? []) {
+    const { systemRegistry, actionRegistry, componentRegistry, archetypeRegistry } = getRegistries();
+
+    for (const entry of data.systems ?? []) {
       if (!systemRegistry.has(entry.id)) {
         throw new Error(`System "${entry.id}" referenced in game config is not registered`);
+      }
+    }
+
+    for (const entity of data.resolvedEntities) {
+      if (entity.behavior) {
+        const behaviorExists = data.resolvedBehaviors.some((b) => b.id === entity.behavior);
+        if (!behaviorExists) {
+          throw new Error(`Behavior "${entity.behavior}" referenced by archetype "${entity.kind}" not found in behaviors config`);
+        }
+      }
+      for (const compName of Object.keys(entity.components)) {
+        if (!componentRegistry.has(compName)) {
+          throw new Error(`Component "${compName}" referenced by archetype "${entity.kind}" is not registered`);
+        }
+      }
+    }
+
+    for (const behavior of data.resolvedBehaviors) {
+      const actionNames = new Set<string>();
+      collectActionNames(behavior.definition, actionNames);
+      for (const name of actionNames) {
+        if (!actionRegistry.has(name)) {
+          throw new Error(`Action "${name}" referenced by behavior "${behavior.id}" is not registered`);
+        }
+      }
+    }
+
+    for (const spawn of data.resolvedSpawns) {
+      const entityExists = data.resolvedEntities.some((e) => e.kind === spawn.kind) ||
+        archetypeRegistry.has(spawn.kind);
+      if (!entityExists) {
+        throw new Error(`Entity kind "${spawn.kind}" referenced in spawns is not defined`);
+      }
+    }
+
+    for (const field of data.netSync?.fields ?? []) {
+      if (!componentRegistry.has(field.component)) {
+        throw new Error(`Component "${field.component}" referenced in netSync is not registered`);
       }
     }
   } catch (err) {
@@ -48,7 +183,67 @@ function validateIntegrity(gameDef: GameDefinition): void {
   }
 }
 
-export function createDefaultGameDefinition(): GameDefinition {
+function collectActionNames(node: unknown, names: Set<string>): void {
+  if (typeof node === "string") {
+    for (const match of node.matchAll(/action\s*\[([^\]]+)\]/g)) {
+      if (match[1]) names.add(match[1]);
+    }
+    return;
+  }
+  if (!node || typeof node !== "object") return;
+  const obj = node as Record<string, unknown>;
+  if (typeof obj.name === "string" && obj.type === "action") {
+    names.add(obj.name);
+  }
+  if (Array.isArray(obj.children)) {
+    for (const child of obj.children) {
+      collectActionNames(child, names);
+    }
+  }
+}
+
+export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedGameDefinition {
+  const jsonPath = resolve(
+    process.cwd(),
+    options?.gameJsonPath ?? "game/game.json",
+  );
+
+  if (!existsSync(jsonPath)) {
+    return createDefaultGameDefinition();
+  }
+
+  const baseDir = resolveConfigDir(jsonPath);
+  const raw = readJsonFile(jsonPath);
+  const result = GameDefinitionSchema.safeParse(raw);
+
+  if (!result.success) {
+    throw new Error(
+      `Invalid game definition at ${jsonPath}: ${result.error.message}`,
+    );
+  }
+
+  const gameDef = result.data;
+  const resolvedEntities = loadArchetypesFiles(baseDir, gameDef.entities);
+  const resolvedBehaviors = loadBehaviorFiles(baseDir, gameDef.behaviors);
+  const resolvedRules = loadRulesFile(baseDir, gameDef.rules);
+  const resolvedSpawns = loadSpawnsFile(baseDir, gameDef.spawns);
+  const resolvedMapSource = resolveMapSource(baseDir, gameDef.map?.registry);
+
+  const loaded: LoadedGameDefinition = {
+    ...gameDef,
+    resolvedEntities,
+    resolvedBehaviors,
+    resolvedRules,
+    resolvedSpawns,
+    resolvedMapSource,
+  };
+
+  validateIntegrity(loaded);
+
+  return loaded;
+}
+
+export function createDefaultGameDefinition(): LoadedGameDefinition {
   return {
     id: "default",
     name: "默认游戏",
@@ -59,6 +254,7 @@ export function createDefaultGameDefinition(): GameDefinition {
       { id: "movement" },
       { id: "collision" },
       { id: "combat" },
+      { id: "spawning" },
       { id: "inventory" },
       { id: "interaction" },
     ],
@@ -70,5 +266,10 @@ export function createDefaultGameDefinition(): GameDefinition {
         { component: "Size", fields: ["w", "h"] },
       ],
     },
+    resolvedEntities: [],
+    resolvedBehaviors: [],
+    resolvedRules: {},
+    resolvedSpawns: [],
+    resolvedMapSource: undefined,
   };
 }

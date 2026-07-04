@@ -6,7 +6,7 @@ const require = createRequire(import.meta.url);
 const check2d = require("check2d") as typeof import("check2d");
 
 import { Collider, ColliderShape, Transform, Velocity } from "components";
-import type { EntityId, GameWorld } from "src/world";
+import type { EntityId, GameWorld } from "world";
 
 /**
  * 碰撞系统调试里的地图占位结构。

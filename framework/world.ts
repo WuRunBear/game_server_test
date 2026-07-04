@@ -3,6 +3,12 @@ import { createWorld } from "bitecs";
 import { createMetrics, type Metrics } from "framework/metrics";
 import { createLogger, type Logger } from "framework/utils/logger";
 import type { MapRuntime } from "framework/map";
+import type { ComponentRegistry } from "framework/components/componentRegistry";
+import type { SystemRegistry } from "framework/systems/systemRegistry";
+import type { ActionRegistry } from "framework/ai/actionRegistry";
+import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
+import type { GeneratorRegistry } from "framework/map/generatorRegistry";
+import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
 
 export type EntityId = number;
 export type Tick = number;
@@ -19,12 +25,12 @@ export type GameWorld = ReturnType<typeof createWorld> & {
   logger: Logger;
   map?: MapRuntime;
 
-  gameDef: Record<string, unknown>;
-  archetypes: Record<string, unknown>;
-  systems_registry: Record<string, unknown>;
-  actions: Record<string, unknown>;
-  generators: Record<string, unknown>;
-  components_registry: Record<string, unknown>;
+  gameDef: LoadedGameDefinition;
+  archetypes: ArchetypeRegistry;
+  systems_registry: SystemRegistry;
+  actions: ActionRegistry;
+  generators: GeneratorRegistry;
+  components_registry: ComponentRegistry;
 
   systemRuntimes: Map<string, unknown>;
   nextNetworkId: number;

@@ -15,4 +15,21 @@ export { bootstrapFramework, getRegistries, type FrameworkRegistries } from "fra
 
 export { runHeadless, type HeadlessHostOptions } from "framework/net/headless/HeadlessHost";
 
-export { GameDefinitionSchema, type GameDefinition, type SystemEnableEntry, type NetSyncField } from "framework/config/schema/GameDefinitionSchema";
+export { GameDefinitionSchema, type GameDefinition, type LoadedGameDefinition, type BehaviorDefinition, type SpawnRule, type SystemEnableEntry, type NetSyncField } from "framework/config/schema/GameDefinitionSchema";
+
+export {
+  registerSystem,
+  registerComponent,
+  registerArchetype,
+  registerAction,
+  registerGenerator,
+  registerRuleModule,
+  getRuleModule,
+  listRegisteredSystems,
+  listRegisteredArchetypes,
+  listRegisteredActions,
+  validateGameDefinition,
+  buildMapRuntime,
+  exportMapRuntime,
+  type RuleModule,
+} from "framework/api";

@@ -3,7 +3,8 @@ import { Room, type Client } from "@colyseus/core";
 
 import { Collider, Health, NetworkId, Size, Transform, Velocity } from "components";
 import { spawnEntity } from "framework/entities/spawn";
-import { getRegistries } from "framework/bootstrap";
+import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
+import type { ComponentRegistry } from "framework/components/componentRegistry";
 import { createGameInstance } from "framework/bootstrap/GameInstance";
 import { loadGameDefinition } from "framework/bootstrap/loadGameDefinition";
 import type { GameInstance } from "framework/bootstrap/GameInstance";
@@ -80,10 +81,11 @@ export class GameRoom extends Room<{ state: RoomState }> {
   /**
    * 房间创建回调：初始化 World、系统列表与地图/NPC，并启动 tick。
    */
-  onCreate(): void {
+  onCreate(options?: Record<string, unknown>): void {
     this.autoDispose = false;
 
-    const gameDef = loadGameDefinition();
+    const gameJsonPath = options?.gameJsonPath as string | undefined;
+    const gameDef = loadGameDefinition({ gameJsonPath });
     this.gameInstance = createGameInstance(gameDef);
     this.world = this.gameInstance.world;
     const fixedDtMs = Math.max(1, Math.floor(1000 / gameDef.tickRate));
@@ -123,9 +125,8 @@ export class GameRoom extends Room<{ state: RoomState }> {
    */
   onJoin(client: Client): void {
     const playerSpawn = this.world.map?.spawns.player ?? { x: 0, y: 0 };
-    const { componentRegistry, archetypeRegistry } = getRegistries();
-    const archetype = archetypeRegistry.get("player");
-    const eid = spawnEntity(this.world, archetype, componentRegistry, { x: playerSpawn.x, y: playerSpawn.y });
+    const archetype = (this.world.archetypes as ArchetypeRegistry).get("player");
+    const eid = spawnEntity(this.world, archetype, this.world.components_registry as ComponentRegistry, { x: playerSpawn.x, y: playerSpawn.y });
     this.playerEidBySessionId.set(client.sessionId, eid);
 
     const playerState = new PlayerState();
@@ -218,10 +219,19 @@ export class GameRoom extends Room<{ state: RoomState }> {
    */
   private syncState(): void {
     this.state.tick = this.world.time.tick;
+    const netSync = this.world.gameDef.netSync?.fields ?? [];
+
+    const syncComponents = new Set(netSync.map((f) => f.component));
+    const syncFields = new Map(netSync.map((f) => [f.component, new Set(f.fields)]));
+
+    const queryComponents: unknown[] = [NetworkId, Transform];
+    if (syncComponents.size === 0 || syncComponents.has("Health")) queryComponents.push(Health);
+    if (syncComponents.size === 0 || syncComponents.has("Collider")) queryComponents.push(Collider);
+    if (syncComponents.size === 0 || syncComponents.has("Size")) queryComponents.push(Size);
 
     const alive = new Set<string>();
 
-    for (const eid of query(this.world, [NetworkId, Transform, Health, Collider, Size])) {
+    for (const eid of query(this.world, queryComponents)) {
       const id = NetworkId.value[eid];
       const key = String(id);
       alive.add(key);
@@ -233,13 +243,27 @@ export class GameRoom extends Room<{ state: RoomState }> {
         this.state.entities.set(key, entityState);
       }
 
-      entityState.x = Transform.x[eid];
-      entityState.y = Transform.y[eid];
-      entityState.hp = Health.current[eid];
-      entityState.shape = Collider.shape[eid];
-      entityState.radius = Collider.radius[eid];
-      entityState.w = Size.w[eid];
-      entityState.h = Size.h[eid];
+      if (syncFields.size === 0 || syncFields.get("Transform")?.has("x")) {
+        entityState.x = Transform.x[eid];
+      }
+      if (syncFields.size === 0 || syncFields.get("Transform")?.has("y")) {
+        entityState.y = Transform.y[eid];
+      }
+      if (syncFields.size === 0 || syncFields.get("Health")?.has("current")) {
+        entityState.hp = Health.current[eid];
+      }
+      if (syncFields.size === 0 || syncFields.get("Collider")?.has("shape")) {
+        entityState.shape = Collider.shape[eid];
+      }
+      if (syncFields.size === 0 || syncFields.get("Collider")?.has("radius")) {
+        entityState.radius = Collider.radius[eid];
+      }
+      if (syncFields.size === 0 || syncFields.get("Size")?.has("w")) {
+        entityState.w = Size.w[eid];
+      }
+      if (syncFields.size === 0 || syncFields.get("Size")?.has("h")) {
+        entityState.h = Size.h[eid];
+      }
     }
 
     this.state.entities.forEach((_value: EntityState, key: string) => {

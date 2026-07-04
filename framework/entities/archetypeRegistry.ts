@@ -10,6 +10,7 @@ export interface ArchetypeRegistry {
   register(spec: ArchetypeSpec): void;
   get(kind: string): ArchetypeSpec;
   has(kind: string): boolean;
+  all(): ArchetypeSpec[];
 }
 
 export function createArchetypeRegistry(): ArchetypeRegistry {
@@ -33,6 +34,10 @@ export function createArchetypeRegistry(): ArchetypeRegistry {
 
     has(kind) {
       return archetypes.has(kind);
+    },
+
+    all() {
+      return [...archetypes.values()];
     },
   };
 }

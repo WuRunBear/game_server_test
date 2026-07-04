@@ -26,6 +26,7 @@ export interface ColyseusServer {
  */
 export interface StartColyseusServerOptions {
   logger: Logger;
+  gameJsonPath?: string;
 }
 
 /**
@@ -120,7 +121,7 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
   void gameServer.listen(serverConfig.port).then(
     () => {
       options.logger.info("服务器已启动", { port: serverConfig.port });
-      void matchMaker.createRoom("game", {}).then(
+      void matchMaker.createRoom("game", { gameJsonPath: options.gameJsonPath }).then(
         (room) => {
           persistentRoomId = room.roomId;
           options.logger.info("常驻房间已创建", { roomId: room.roomId });

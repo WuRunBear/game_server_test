@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { MapSource } from "framework/map/types";
+import type { ArchetypeSpec } from "framework/entities/archetypeRegistry";
 
 export const SystemEnableEntrySchema = z.object({
   id: z.string(),
@@ -33,3 +35,23 @@ export const GameDefinitionSchema = z.object({
 export type GameDefinition = z.infer<typeof GameDefinitionSchema>;
 export type SystemEnableEntry = z.infer<typeof SystemEnableEntrySchema>;
 export type NetSyncField = z.infer<typeof NetSyncFieldSchema>;
+
+export interface SpawnRule {
+  kind: string;
+  zoneId: number;
+  max: number;
+  respawnMs: number;
+}
+
+export interface BehaviorDefinition {
+  id: string;
+  definition: unknown;
+}
+
+export interface LoadedGameDefinition extends GameDefinition {
+  resolvedMapSource?: MapSource;
+  resolvedEntities: ArchetypeSpec[];
+  resolvedBehaviors: BehaviorDefinition[];
+  resolvedRules: Record<string, unknown>;
+  resolvedSpawns: SpawnRule[];
+}
