@@ -26,6 +26,14 @@ export function createGameInstance(gameDef: LoadedGameDefinition): GameInstance 
   world.actions = actionRegistry;
   world.generators = generatorRegistry;
 
+  for (const entity of gameDef.resolvedEntities) {
+    try {
+      archetypeRegistry.register(entity);
+    } catch {
+      // 实体已在默认原型中注册（如 player/villager），JSON 版本以默认版本为准
+    }
+  }
+
   const systems = buildSystems(world, gameDef.systems ?? [], systemRegistry);
 
   const mapBuilt = gameDef.resolvedMapSource
