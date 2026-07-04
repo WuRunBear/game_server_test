@@ -270,6 +270,18 @@ describe("aiSystem with behavior loading (Item 8)", () => {
   });
 });
 
+describe("GameInstance with game config", () => {
+  it("should register loaded entities into archetypeRegistry", () => {
+    const gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
+    const instance = createGameInstance(gameDef);
+
+    const { archetypeRegistry } = getRegistries();
+    expect(archetypeRegistry.has("player")).toBe(true);
+    expect(archetypeRegistry.has("villager")).toBe(true);
+    expect(instance.world.map).toBeDefined();
+  });
+});
+
 describe("inventorySystem (Item 5)", () => {
   it("should pick up items when player is nearby", () => {
     const gameDef = createDefaultGameDefinition();
