@@ -35,5 +35,7 @@ export function listRegistries(): void {
 
   console.log("\n=== 已注册的地图生成器 ===");
   const generators = listRegisteredGenerators();
-  console.log(`  共 ${generators.length} 个`);
+  for (const gen of generators) {
+    console.log(`  ${gen.id}`);
+  }
 }

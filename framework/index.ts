@@ -2,11 +2,13 @@ export { createLogger, type Logger } from "framework/utils/logger";
 export { clampMs } from "framework/utils/timer";
 export { createMetrics, recordTick, type Metrics } from "framework/metrics";
 export { createGameWorld, type GameWorld, type EntityId, type Tick, type System, type GameTime } from "framework/world";
+export type { MapRuntime, MapSource, MapGrid, MapZone, MapSpawns, Vec2 } from "framework/map/types";
 
 export { createComponentRegistry, type ComponentRegistry } from "framework/components/componentRegistry";
 export { createSystemRegistry, type SystemRegistry, type SystemSpec, buildSystems } from "framework/systems/systemRegistry";
 export { createActionRegistry, type ActionRegistry, type ActionFactory, type ActionEntry } from "framework/ai/actionRegistry";
 export { createArchetypeRegistry, type ArchetypeRegistry, type ArchetypeSpec } from "framework/entities/archetypeRegistry";
+export { createGeneratorRegistry, type GeneratorRegistry, type GeneratorEntry, type MapGenerator } from "framework/map/generatorRegistry";
 export { spawnEntity, type SpawnOverrides } from "framework/entities/spawn";
 
 export { createGameInstance, type GameInstance } from "framework/bootstrap/GameInstance";

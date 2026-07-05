@@ -3,7 +3,7 @@ import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { SystemRegistry, SystemSpec } from "framework/systems/systemRegistry";
 import type { ActionRegistry, ActionFactory, ActionEntry } from "framework/ai/actionRegistry";
 import type { ArchetypeRegistry, ArchetypeSpec } from "framework/entities/archetypeRegistry";
-import type { GeneratorRegistry, MapGenerator } from "framework/map/generatorRegistry";
+import type { GeneratorRegistry, MapGenerator, GeneratorEntry } from "framework/map/generatorRegistry";
 import type { GameDefinition } from "framework/config/schema/GameDefinitionSchema";
 import { GameDefinitionSchema } from "framework/config/schema/GameDefinitionSchema";
 
@@ -62,7 +62,7 @@ export function listRegisteredComponents(): Readonly<Record<string, unknown>> {
   return getRegistries().componentRegistry.all();
 }
 
-export function listRegisteredGenerators(): MapGenerator[] {
+export function listRegisteredGenerators(): GeneratorEntry[] {
   return getRegistries().generatorRegistry.all();
 }
 

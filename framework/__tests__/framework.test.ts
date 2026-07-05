@@ -379,34 +379,40 @@ describe("systemRegistry edge cases", () => {
       { id: "movement", enabled: false },
     ], systemRegistry);
 
-    const ids = systems.map((_s, i) => {
-      const specs = systemRegistry.all();
-      return specs[i]?.id;
-    });
     expect(systems.length).toBe(2);
   });
 
   it("buildSystems should respect after/before ordering", () => {
+    const callOrder: string[] = [];
     const { systemRegistry } = getRegistries();
 
     systemRegistry.register({
-      id: "test-after-physics",
-      factory: () => (world) => world,
-      after: ["physics"],
+      id: "test-order-a",
+      factory: () => (world) => {
+        callOrder.push("test-order-a");
+        return world;
+      },
+    });
+    systemRegistry.register({
+      id: "test-order-b",
+      factory: () => (world) => {
+        callOrder.push("test-order-b");
+        return world;
+      },
+      after: ["test-order-a"],
     });
 
     const world = createTestWorld();
     const systems = buildSystems(world, [
-      { id: "ai" },
-      { id: "physics" },
-      { id: "test-after-physics" },
+      { id: "test-order-a" },
+      { id: "test-order-b" },
     ], systemRegistry);
 
-    const specs = systemRegistry.all();
-    const physicsIdx = specs.findIndex((s) => s.id === "physics");
-    const testAfterIdx = specs.findIndex((s) => s.id === "test-after-physics");
-    expect(physicsIdx).toBeGreaterThanOrEqual(0);
-    expect(testAfterIdx).toBeGreaterThanOrEqual(0);
+    for (const sys of systems) {
+      sys(world);
+    }
+
+    expect(callOrder).toEqual(["test-order-a", "test-order-b"]);
   });
 
   it("buildSystems should throw for unregistered system", () => {

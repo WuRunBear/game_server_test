@@ -1,6 +1,5 @@
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
-import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
 
 interface NewGameOptions {
   id: string;
@@ -34,6 +33,8 @@ function writeJson(filePath: string, data: unknown): void {
 export function newGame(argv: string[]): void {
   const opts = parseArgs(argv);
   const baseDir = resolve(process.cwd(), opts.outDir);
+  const projectDir = resolve(baseDir, "..");
+  const srcDir = join(projectDir, "src");
 
   if (existsSync(join(baseDir, "game.json"))) {
     console.error(`错误: ${opts.outDir}/game.json 已存在。请指定其他输出目录或手动删除后重试。`);
@@ -47,6 +48,7 @@ export function newGame(argv: string[]): void {
     join(baseDir, "rules"),
     join(baseDir, "spawns"),
     join(baseDir, "maps"),
+    srcDir,
   ];
   for (const dir of dirs) {
     mkdirSync(dir, { recursive: true });
@@ -97,7 +99,19 @@ export function newGame(argv: string[]): void {
     },
   });
 
+  const registerPath = join(srcDir, "register.ts");
+  if (!existsSync(registerPath)) {
+    writeFileSync(registerPath, `import { bootstrapFramework } from "framework";
+
+// 注册游戏独有的组件/系统/动作/规则/生成器
+// 参考 ARCHITECTURE.md §8.2 扩展点总览
+
+bootstrapFramework();
+`, "utf8");
+  }
+
   console.log(`✓ 游戏脚手架已创建: ${baseDir}`);
+  console.log(`  src 目录: ${srcDir}`);
   console.log("  接下来可以:");
   console.log(`    - 编辑 ${opts.outDir}/game.json 调整系统配置`);
   console.log(`    - 在 ${opts.outDir}/entities/ 中添加实体原型`);

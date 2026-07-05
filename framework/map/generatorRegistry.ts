@@ -2,11 +2,16 @@ import type { MapRuntime } from "framework/map/types";
 
 export type MapGenerator = (opts: Record<string, unknown>) => MapRuntime;
 
+export interface GeneratorEntry {
+  id: string;
+  generator: MapGenerator;
+}
+
 export interface GeneratorRegistry {
   register(id: string, gen: MapGenerator): void;
   get(id: string): MapGenerator;
   has(id: string): boolean;
-  all(): MapGenerator[];
+  all(): GeneratorEntry[];
 }
 
 export function createGeneratorRegistry(): GeneratorRegistry {
@@ -33,7 +38,7 @@ export function createGeneratorRegistry(): GeneratorRegistry {
     },
 
     all() {
-      return [...generators.values()];
+      return [...generators.entries()].map(([id, generator]) => ({ id, generator }));
     },
   };
 }
