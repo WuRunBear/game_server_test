@@ -2,11 +2,16 @@ import type { State } from "mistreevous";
 
 export type ActionFactory = (args?: Record<string, unknown>) => () => State;
 
+export interface ActionEntry {
+  name: string;
+  factory: ActionFactory;
+}
+
 export interface ActionRegistry {
   register(name: string, factory: ActionFactory): void;
   get(name: string): ActionFactory;
   has(name: string): boolean;
-  all(): ActionFactory[];
+  all(): ActionEntry[];
 }
 
 export function createActionRegistry(): ActionRegistry {
@@ -33,7 +38,7 @@ export function createActionRegistry(): ActionRegistry {
     },
 
     all() {
-      return [...actions.values()];
+      return [...actions.entries()].map(([name, factory]) => ({ name, factory }));
     },
   };
 }

@@ -112,16 +112,16 @@ function mapRuntimeToJsonSerializable(runtime: MapRuntime) {
  * @param runtime 生成后的 MapRuntime
  * @returns 导出的 json/png 绝对路径
  */
-export function exportGeneratedMapArtifacts(runtime: MapRuntime): {
+export function exportGeneratedMapArtifacts(runtime: MapRuntime, outDir?: string): {
   jsonPath: string;
   pngPath: string;
 } {
-  const outDir = resolve(process.cwd(), "config/maps/exports");
-  mkdirSync(outDir, { recursive: true });
+  const dir = outDir ?? resolve(process.cwd(), "config/maps/exports");
+  mkdirSync(dir, { recursive: true });
 
   const base = runtime.id;
-  const jsonPath = resolve(outDir, `${base}.json`);
-  const pngPath = resolve(outDir, `${base}.png`);
+  const jsonPath = resolve(dir, `${base}.json`);
+  const pngPath = resolve(dir, `${base}.png`);
 
   const json = JSON.stringify(mapRuntimeToJsonSerializable(runtime), null, 2);
   writeFileSync(jsonPath, json, "utf8");

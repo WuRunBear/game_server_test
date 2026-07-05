@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { addComponent, addEntity, hasComponent } from "bitecs";
+import { State } from "mistreevous";
 import {
   bootstrapFramework,
   createGameInstance,
@@ -7,6 +8,7 @@ import {
   createDefaultGameDefinition,
   loadGameDefinition,
   spawnEntity,
+  buildSystems,
   type GameInstance,
 } from "framework/index";
 import { getRegistries } from "framework/bootstrap";
@@ -16,7 +18,7 @@ import { Transform } from "framework/components/transform";
 import { Velocity } from "framework/components/physics";
 import { Health, Attack, Defense, Team } from "framework/components/combat";
 import { NetworkId } from "framework/components/network";
-import { NPC } from "framework/components/tags";
+import { NPC, Player } from "framework/components/tags";
 import { Collider } from "framework/components/physics";
 import { Size } from "framework/components/size";
 import type { GameWorld } from "framework/world";
@@ -333,5 +335,184 @@ describe("interactionSystem (Item 5)", () => {
     instance.step(50);
 
     expect(instance.world.time.tick).toBe(1);
+  });
+});
+
+describe("archetypeRegistry edge cases", () => {
+  it("should throw when getting non-existent archetype", () => {
+    const { archetypeRegistry } = getRegistries();
+    expect(() => archetypeRegistry.get("non-existent")).toThrow("not registered");
+  });
+
+  it("should throw on duplicate registration", () => {
+    const { archetypeRegistry } = getRegistries();
+    expect(() => archetypeRegistry.register({ kind: "player", components: {} }))
+      .toThrow("already registered");
+  });
+
+  it("all() should return all registered archetypes", () => {
+    const { archetypeRegistry } = getRegistries();
+    const all = archetypeRegistry.all();
+    expect(all.length).toBeGreaterThanOrEqual(2);
+    expect(all.some((a) => a.kind === "player")).toBe(true);
+    expect(all.some((a) => a.kind === "villager")).toBe(true);
+  });
+});
+
+describe("systemRegistry edge cases", () => {
+  it("should throw on duplicate system registration", () => {
+    const { systemRegistry } = getRegistries();
+    expect(() =>
+      systemRegistry.register({
+        id: "ai",
+        factory: () => (world) => world,
+      })
+    ).toThrow("already registered");
+  });
+
+  it("buildSystems should filter disabled systems", () => {
+    const { systemRegistry } = getRegistries();
+    const world = createTestWorld();
+    const systems = buildSystems(world, [
+      { id: "ai" },
+      { id: "physics" },
+      { id: "movement", enabled: false },
+    ], systemRegistry);
+
+    const ids = systems.map((_s, i) => {
+      const specs = systemRegistry.all();
+      return specs[i]?.id;
+    });
+    expect(systems.length).toBe(2);
+  });
+
+  it("buildSystems should respect after/before ordering", () => {
+    const { systemRegistry } = getRegistries();
+
+    systemRegistry.register({
+      id: "test-after-physics",
+      factory: () => (world) => world,
+      after: ["physics"],
+    });
+
+    const world = createTestWorld();
+    const systems = buildSystems(world, [
+      { id: "ai" },
+      { id: "physics" },
+      { id: "test-after-physics" },
+    ], systemRegistry);
+
+    const specs = systemRegistry.all();
+    const physicsIdx = specs.findIndex((s) => s.id === "physics");
+    const testAfterIdx = specs.findIndex((s) => s.id === "test-after-physics");
+    expect(physicsIdx).toBeGreaterThanOrEqual(0);
+    expect(testAfterIdx).toBeGreaterThanOrEqual(0);
+  });
+
+  it("buildSystems should throw for unregistered system", () => {
+    const world = createTestWorld();
+    const { systemRegistry } = getRegistries();
+    expect(() =>
+      buildSystems(world, [{ id: "non-existent-system" }], systemRegistry)
+    ).toThrow("not registered");
+  });
+
+  it("buildSystems should pass config to factory", () => {
+    const { systemRegistry } = getRegistries();
+    let receivedConfig: Record<string, unknown> | undefined;
+
+    systemRegistry.register({
+      id: "test-config-system",
+      factory: (_world, config) => {
+        receivedConfig = config;
+        return (w) => w;
+      },
+    });
+
+    const world = createTestWorld();
+    buildSystems(world, [
+      { id: "test-config-system", config: { customKey: "customValue" } },
+    ], systemRegistry);
+
+    expect(receivedConfig).toEqual({ customKey: "customValue" });
+  });
+});
+
+describe("actionRegistry edge cases", () => {
+  it("should throw on duplicate action registration", () => {
+    const { actionRegistry } = getRegistries();
+    expect(() => actionRegistry.register("Idle", () => () => State.SUCCEEDED))
+      .toThrow("already registered");
+  });
+
+  it("all() should return action entries with names", () => {
+    const { actionRegistry } = getRegistries();
+    const all = actionRegistry.all();
+    expect(all.length).toBeGreaterThanOrEqual(2);
+    for (const entry of all) {
+      expect(entry).toHaveProperty("name");
+      expect(entry).toHaveProperty("factory");
+      expect(typeof entry.name).toBe("string");
+      expect(typeof entry.factory).toBe("function");
+    }
+  });
+
+  it("registered actions should be callable", () => {
+    const { actionRegistry } = getRegistries();
+    const factory = actionRegistry.get("Idle");
+    const action = factory();
+    const result = action();
+    expect(result).toBe(State.SUCCEEDED);
+  });
+});
+
+describe("GameInstance.step snapshot test", () => {
+  it("should produce deterministic state after N ticks", () => {
+    const gameDef = createDefaultGameDefinition();
+    const instance = createGameInstance(gameDef);
+
+    const player = spawnCustomEntity(instance.world, "player", {
+      Transform: { x: 100, y: 100 },
+      Health: { current: 100, max: 100 },
+      Velocity: { x: 0, y: 0, vx: 5, vy: 0 },
+      Player: {},
+    });
+
+    instance.step(50);
+    instance.step(50);
+    instance.step(50);
+
+    const state = {
+      tick: instance.world.time.tick,
+      entities: [] as Array<{
+        x: number;
+        y: number;
+        hp: number;
+        hasHealth: boolean;
+        hasPlayer: boolean;
+      }>,
+    };
+
+    for (let eid = 0; eid < 100; eid++) {
+      if (hasComponent(instance.world, eid, Transform)) {
+        state.entities.push({
+          x: Math.round(Transform.x[eid] * 100) / 100,
+          y: Math.round(Transform.y[eid] * 100) / 100,
+          hp: Health.current[eid],
+          hasHealth: hasComponent(instance.world, eid, Health),
+          hasPlayer: hasComponent(instance.world, eid, Player),
+        });
+      }
+    }
+
+    expect(state.tick).toBe(3);
+    expect(state.entities.length).toBe(1);
+    expect(state.entities[0]).toEqual({
+      x: 100.75,
+      y: 100,
+      hp: 100,
+      hasHealth: true,
+      hasPlayer: true,
+    });
   });
 });

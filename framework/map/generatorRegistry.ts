@@ -6,6 +6,7 @@ export interface GeneratorRegistry {
   register(id: string, gen: MapGenerator): void;
   get(id: string): MapGenerator;
   has(id: string): boolean;
+  all(): MapGenerator[];
 }
 
 export function createGeneratorRegistry(): GeneratorRegistry {
@@ -29,6 +30,10 @@ export function createGeneratorRegistry(): GeneratorRegistry {
 
     has(id) {
       return generators.has(id);
+    },
+
+    all() {
+      return [...generators.values()];
     },
   };
 }

@@ -5,7 +5,7 @@ export { createGameWorld, type GameWorld, type EntityId, type Tick, type System,
 
 export { createComponentRegistry, type ComponentRegistry } from "framework/components/componentRegistry";
 export { createSystemRegistry, type SystemRegistry, type SystemSpec, buildSystems } from "framework/systems/systemRegistry";
-export { createActionRegistry, type ActionRegistry, type ActionFactory } from "framework/ai/actionRegistry";
+export { createActionRegistry, type ActionRegistry, type ActionFactory, type ActionEntry } from "framework/ai/actionRegistry";
 export { createArchetypeRegistry, type ArchetypeRegistry, type ArchetypeSpec } from "framework/entities/archetypeRegistry";
 export { spawnEntity, type SpawnOverrides } from "framework/entities/spawn";
 
@@ -28,6 +28,8 @@ export {
   listRegisteredSystems,
   listRegisteredArchetypes,
   listRegisteredActions,
+  listRegisteredComponents,
+  listRegisteredGenerators,
   validateGameDefinition,
   buildMapRuntime,
   exportMapRuntime,

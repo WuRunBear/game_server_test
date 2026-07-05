@@ -1,16 +1,37 @@
-import { buildMapRuntime } from "map/buildRuntime";
-import { exportGeneratedMapArtifacts } from "map/exportGenerated";
-import { getMapSourceFromConfig } from "config/map";
+import { resolve } from "node:path";
+import {
+  bootstrapFramework,
+  loadGameDefinition,
+  buildMapRuntime,
+  exportMapRuntime,
+} from "framework";
 
-/**
- * 工具层：加载地图来源配置 → 构建运行时 → 导出产物到磁盘（JSON + PNG）。
- *
- * 原先此副作用内嵌在 buildMapRuntime 中，现在分离为独立工具函数，
- * 框架核心 `buildMapRuntime` 保持纯函数。
- */
-export function exportMap(): void {
-  const source = getMapSourceFromConfig();
-  const runtime = buildMapRuntime(source);
-  const { jsonPath, pngPath } = exportGeneratedMapArtifacts(runtime);
-  console.log(`Map exported: ${jsonPath}, ${pngPath}`);
+export function exportMap(argv: string[]): void {
+  const mapId = argv[0];
+
+  const args: Record<string, string> = {};
+  for (let i = 1; i < argv.length; i += 2) {
+    if (argv[i]?.startsWith("--") && argv[i + 1] !== undefined) {
+      args[argv[i].replace(/^--/, "")] = argv[i + 1];
+    }
+  }
+
+  bootstrapFramework();
+
+  try {
+    const gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
+
+    if (!gameDef.resolvedMapSource) {
+      console.error("当前 game.json 未配置地图源");
+      process.exit(1);
+    }
+
+    const runtime = buildMapRuntime(gameDef.resolvedMapSource);
+    const outDir = args.out ? resolve(process.cwd(), args.out) : undefined;
+    const { jsonPath, pngPath } = exportMapRuntime(runtime, outDir);
+    console.log(`地图已导出: ${jsonPath}, ${pngPath}`);
+  } catch (err) {
+    console.error("地图导出失败:", err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
 }

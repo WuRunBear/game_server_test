@@ -8,7 +8,8 @@
     "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
     "start": "node dist/src/index.js",
     "schema:gen": "schema-codegen src/network/colyseus/state/RoomState.ts --output src/network/colyseus/client-schema --ts --bundle",
-    "test": "vitest run"
+    "test": "vitest run",
+    "tools": "tsx tools/cli.ts"
   },
   "engines": {
     "node": ">=22"

@@ -1,7 +1,7 @@
 import { getRegistries } from "framework/bootstrap";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { SystemRegistry, SystemSpec } from "framework/systems/systemRegistry";
-import type { ActionRegistry, ActionFactory } from "framework/ai/actionRegistry";
+import type { ActionRegistry, ActionFactory, ActionEntry } from "framework/ai/actionRegistry";
 import type { ArchetypeRegistry, ArchetypeSpec } from "framework/entities/archetypeRegistry";
 import type { GeneratorRegistry, MapGenerator } from "framework/map/generatorRegistry";
 import type { GameDefinition } from "framework/config/schema/GameDefinitionSchema";
@@ -54,8 +54,16 @@ export function listRegisteredArchetypes(): ArchetypeSpec[] {
   return getRegistries().archetypeRegistry.all();
 }
 
-export function listRegisteredActions(): ActionFactory[] {
+export function listRegisteredActions(): ActionEntry[] {
   return getRegistries().actionRegistry.all();
+}
+
+export function listRegisteredComponents(): Readonly<Record<string, unknown>> {
+  return getRegistries().componentRegistry.all();
+}
+
+export function listRegisteredGenerators(): MapGenerator[] {
+  return getRegistries().generatorRegistry.all();
 }
 
 export function validateGameDefinition(gameDef: unknown): gameDef is GameDefinition {
