@@ -1,7 +1,7 @@
 import { query, removeEntity } from "bitecs";
 import { Room, type Client } from "@colyseus/core";
 
-import { Collider, Health, NetworkId, Size, Transform, Velocity } from "components";
+import { NetworkId, Velocity } from "components";
 import { spawnEntity } from "framework/entities/spawn";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
@@ -216,18 +216,21 @@ export class GameRoom extends Room<{ state: RoomState }> {
    * - 使用 NetworkId 作为 entities 的稳定 key（字符串化）
    * - 存量实体复用 EntityState，只更新字段，避免每 tick 重建对象
    * - 通过 alive 集合清理已被移除的实体
+   * - 同步字段完全由 game.json 的 netSync 配置驱动，无硬编码字段
    */
   private syncState(): void {
     this.state.tick = this.world.time.tick;
     const netSync = this.world.gameDef.netSync?.fields ?? [];
+    const componentRegistry = this.world.components_registry as ComponentRegistry;
 
-    const syncComponents = new Set(netSync.map((f) => f.component));
-    const syncFields = new Map(netSync.map((f) => [f.component, new Set(f.fields)]));
+    if (netSync.length === 0) return;
 
-    const queryComponents: unknown[] = [NetworkId, Transform];
-    if (syncComponents.size === 0 || syncComponents.has("Health")) queryComponents.push(Health);
-    if (syncComponents.size === 0 || syncComponents.has("Collider")) queryComponents.push(Collider);
-    if (syncComponents.size === 0 || syncComponents.has("Size")) queryComponents.push(Size);
+    const queryComponents: unknown[] = [NetworkId];
+    for (const field of netSync) {
+      if (componentRegistry.has(field.component)) {
+        queryComponents.push(componentRegistry.get(field.component));
+      }
+    }
 
     const alive = new Set<string>();
 
@@ -243,26 +246,15 @@ export class GameRoom extends Room<{ state: RoomState }> {
         this.state.entities.set(key, entityState);
       }
 
-      if (syncFields.size === 0 || syncFields.get("Transform")?.has("x")) {
-        entityState.x = Transform.x[eid];
-      }
-      if (syncFields.size === 0 || syncFields.get("Transform")?.has("y")) {
-        entityState.y = Transform.y[eid];
-      }
-      if (syncFields.size === 0 || syncFields.get("Health")?.has("current")) {
-        entityState.hp = Health.current[eid];
-      }
-      if (syncFields.size === 0 || syncFields.get("Collider")?.has("shape")) {
-        entityState.shape = Collider.shape[eid];
-      }
-      if (syncFields.size === 0 || syncFields.get("Collider")?.has("radius")) {
-        entityState.radius = Collider.radius[eid];
-      }
-      if (syncFields.size === 0 || syncFields.get("Size")?.has("w")) {
-        entityState.w = Size.w[eid];
-      }
-      if (syncFields.size === 0 || syncFields.get("Size")?.has("h")) {
-        entityState.h = Size.h[eid];
+      for (const field of netSync) {
+        const comp = componentRegistry.get(field.component) as Record<string, unknown> | undefined;
+        if (!comp) continue;
+        for (const fname of field.fields) {
+          const arr = (comp as Record<string, { [eid: number]: number }>)[fname];
+          if (typeof arr === "object" && eid in arr) {
+            entityState.values.set(`${field.component}.${fname}`, arr[eid]);
+          }
+        }
       }
     }
 
