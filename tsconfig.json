@@ -22,6 +22,8 @@
       "config/*": ["framework/config/*"],
       "network": ["framework/net"],
       "network/*": ["framework/net/*"],
+      "simulation": ["framework/simulation"],
+      "simulation/*": ["framework/simulation/*"],
       "systems": ["framework/systems"],
       "systems/*": ["framework/systems/*"],
       "utils": ["framework/utils"],

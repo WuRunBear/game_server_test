@@ -4,6 +4,7 @@ import { State } from "mistreevous";
 import {
   bootstrapFramework,
   createGameInstance,
+  createGameSimulation,
   runHeadless,
   createDefaultGameDefinition,
   loadGameDefinition,
@@ -112,14 +113,13 @@ describe("archetypeRegistry", () => {
   });
 });
 
-describe("GameInstance headless", () => {
+describe("GameSimulation headless", () => {
   it("should run ticks without error", () => {
     const gameDef = createDefaultGameDefinition();
-    const instance = createGameInstance(gameDef);
+    const sim = createGameSimulation(gameDef);
 
-    expect(instance.world.time.tick).toBe(0);
-    runHeadless(instance, { tickCount: 5 });
-    expect(instance.world.time.tick).toBe(5);
+    const results = runHeadless(sim, { tickCount: 5 });
+    expect(results[4].tick).toBe(5);
   });
 });
 

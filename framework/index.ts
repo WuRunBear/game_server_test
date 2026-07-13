@@ -17,6 +17,12 @@ export { bootstrapFramework, getRegistries, type FrameworkRegistries } from "fra
 
 export { runHeadless, type HeadlessHostOptions } from "framework/net/headless/HeadlessHost";
 
+export { createGameSimulation, GameSimulation } from "framework/simulation/GameSimulation";
+export type { SimulationPort } from "framework/simulation/SimulationPort";
+export type {
+  PlayerInput, PlayerJoinResult, TickSnapshot, TickResult, DebugSnapshotOptions,
+} from "framework/simulation/types";
+
 export { GameDefinitionSchema, type GameDefinition, type LoadedGameDefinition, type BehaviorDefinition, type SpawnRule, type SystemEnableEntry, type NetSyncField } from "framework/config/schema/GameDefinitionSchema";
 
 export {

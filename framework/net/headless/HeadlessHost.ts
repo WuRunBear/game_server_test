@@ -1,23 +1,26 @@
-import { recordTick } from "framework/metrics";
-import type { GameInstance } from "framework/bootstrap/GameInstance";
+import type { SimulationPort } from "simulation/SimulationPort";
+import type { TickResult } from "simulation/types";
 
 export interface HeadlessHostOptions {
   tickCount?: number;
-  onTick?: (tick: number) => void;
+  dtMs?: number;
+  onTick?: (result: TickResult) => void;
 }
 
 export function runHeadless(
-  instance: GameInstance,
+  sim: SimulationPort,
   options?: HeadlessHostOptions,
-): void {
+): TickResult[] {
   const maxTicks = options?.tickCount ?? 1;
+  const dtMs = options?.dtMs ?? 50;
   const onTick = options?.onTick;
+  const results: TickResult[] = [];
 
   for (let i = 0; i < maxTicks; i++) {
-    const start = performance.now();
-    instance.step(instance.world.time.fixedDtMs);
-    const tickMs = performance.now() - start;
-    recordTick(instance.world.metrics, tickMs);
-    onTick?.(instance.world.time.tick);
+    const result = sim.tick(dtMs);
+    results.push(result);
+    onTick?.(result);
   }
+
+  return results;
 }
