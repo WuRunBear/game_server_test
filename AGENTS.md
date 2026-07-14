@@ -38,17 +38,22 @@ game/         ← 游戏配置 — 纯 JSON：实体、行为、地图、规则�
 
 ## 目录结构与职责
 
-### `framework/` — 框架核心（81 个 TS 文件，~5200 行）
+### `framework/` — 框架核心（75 个 TS 文件，~5,400 行）
 
 ```
 framework/
-├── index.ts                  # 公共 API barrel 导出
+├── index.ts                  # 公共 API barrel 导出（含 simulation 模块）
 ├── api.ts                    # 全局 register* 函数 + list* 函数（操作单例 registry）
 ├── world.ts                  # GameWorld 类型 + createGameWorld()
 ├── bootstrap.ts              # bootstrapFramework() — 创建并填充所有 registry（模块单例）
 ├── bootstrap/
 │   ├── GameInstance.ts        # createGameInstance(gameDef) → { world, systems, step, spawnInitialEntities }
 │   └── loadGameDefinition.ts  # 加载 game.json + zod 校验 + 引用完整性检查
+├── simulation/                # 仿真抽象层 — 传输层与 ECS 的解耦接口
+│   ├── SimulationPort.ts     # 接口: tick / addPlayer / removePlayer / submitInput / getDebugSnapshot
+│   ├── GameSimulation.ts      # 实现: SimulationPort 的具体实现，内部聚合 GameInstance + ECS
+│   ├── types.ts               # 纯数据 DTO: PlayerInput, TickSnapshot, TickResult, PlayerJoinResult
+│   └── index.ts               # 模块 barrel 导出
 ├── components/                # ECS 组件（SoA）+ componentRegistry
 │   ├── componentRegistry.ts  # 组件注册表: 名 → defineComponent
 │   ├── registerBuiltin.ts    # 注册 21 个内置组件
@@ -83,15 +88,15 @@ framework/
 ├── net/
 │   ├── colyseus/
 │   │   ├── server.ts         # startColyseusServer — HTTP + WebSocket + /health /maps/runtime /debug/colliders
-│   │   ├── rooms/GameRoom.ts # 房间: 持有 GameInstance，委托 step（只做传输/输入/同步/调试）
+│   │   ├── rooms/GameRoom.ts # 房间: 持有 SimulationPort，委托 tick（纯传输/输入/同步/调试，无 ECS 导入）
 │   │   └── state/            # RoomState, PlayerState, EntityState (Colyseus Schema)
 │   └── headless/
-│       └── HeadlessHost.ts   # runHeadless(instance, opts) — 无传输驱动 step (测试/单机)
+│       └── HeadlessHost.ts   # runHeadless(sim, opts) — 无传输驱动 tick，返回 TickResult[]
 ├── utils/                    # logger.ts (winston), timer.ts (clampMs)
 ├── metrics.ts                # tick 性能指标 (EMA avg)
 ├── repository.ts             # Repository 接口 (持久化抽象)
 ├── postgres.ts, redis.ts    # 占位 stub
-└── __tests__/framework.test.ts  # 35 个测试, 17 个 describe 块
+└── __tests__/framework.test.ts  # 包含 headless 集成测试, 17 个 describe 块
 ```
 
 ### `src/` — 游戏入口（3 个文件，~19 行）
@@ -194,11 +199,21 @@ src/index.ts → dotenv → src/main.ts
 
 ### 仿真/传输解耦
 
-`GameInstance` 是纯仿真抽象。两种宿主：
-- `GameRoom`（Colyseus）— 多人在线，传输 + 输入 + 同步 + 调试
-- `HeadlessHost`（`runHeadless`）— 无传输，测试/单机，直接驱动 `instance.step()`
+`GameInstance` 是纯仿真抽象。`SimulationPort` 接口定义传输层与仿真层的合约：
 
-两者调用相同的 `gameInstance.step(dtMs)`，逻辑完全一致。
+```
+GameRoom / HeadlessHost
+    ↕ (SimulationPort 接口)
+GameSimulation (实现 SimulationPort)
+    ↕
+GameInstance (world, systems, step)
+```
+
+两种宿主：
+- `GameRoom`（Colyseus）— 多人在线，传输 + 输入 + 同步 + 调试，通过 `SimulationPort` 操作仿真
+- `HeadlessHost`（`runHeadless`）— 无传输，测试/单机，通过 `SimulationPort` 驱动，返回 `TickResult[]`
+
+两者调用相同的 `sim.tick(dtMs)`，逻辑完全一致。`GameRoom` 不导入任何 bitecs 或 ECS 符号，所有数据通过纯 DTO（`TickSnapshot`）在两层之间传递。
 
 ## 扩展指南
 
@@ -280,7 +295,7 @@ pnpm tools gen-map simple --out out/  # 生成地图
 
 ## 路径别名（tsconfig.json）
 
-`framework` → `framework/index.ts`，以及 `components`, `systems`, `ai`, `map`, `config`, `network`, `utils`, `world`, `src` 等短别名。`tsc-alias` 在编译时重写为相对路径。
+`framework` → `framework/index.ts`，以及 `simulation`, `components`, `systems`, `ai`, `map`, `config`, `network`, `utils`, `world`, `src` 等短别名。`tsc-alias` 在编译时重写为相对路径。
 
 ## 已知遗留/注意点
 
@@ -291,3 +306,4 @@ pnpm tools gen-map simple --out out/  # 生成地图
 5. **Repository/Postgres/Redis 全是 stub**：持久化层未实现。
 6. **`interactionSystem` 是最小占位**：仅日志记录玩家靠近 NPC。
 7. **Inventory 是 AoS**：与其他 20 个 SoA 组件不一致，如需扩展需注意。
+8. **vitest.config.ts 缺少 `simulation` 路径别名**：tsconfig 中已定义但 vitest 未同步，目前不影响测试（通过 `framework` barrel 导出间接引用），但直接 `import from "simulation"` 会失败。
