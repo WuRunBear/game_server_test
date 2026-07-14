@@ -1,25 +1,89 @@
+/**
+ * 仿真模块的纯数据类型（DTO）。
+ *
+ * 这些类型是仿真层（SimulationPort 实现）与传输层（GameRoom / HeadlessHost）
+ * 之间的数据协议。它们不包含任何 bitecs 或 ECS 类型，传输层可以完全不知道
+ * ECS 的存在就能消费这些数据。
+ *
+ * 简单来说，这些就是"仿真出了什么数据、传输层需要什么数据"的合同。
+ */
+
+/**
+ * 客户端发给服务端的输入命令。
+ *
+ * 约定：
+ * - seq 是一个自增序号，每发一条消息 +1，用于服务端去重和丢弃乱序包
+ * - moveX / moveY 是方向/速度值，具体含义由仿真层的输入建模决定
+ *   （当前实现直接写入 Velocity 组件，未来可能改为加速度或意图组件）
+ */
 export interface PlayerInput {
+  /** 消息序号，用于去重；后一条的 seq 必须 > 前一条 */
   seq: number;
+  /** 水平移动分量 */
   moveX: number;
+  /** 垂直移动分量 */
   moveY: number;
 }
 
+/**
+ * 玩家加入成功时的返回信息。
+ *
+ * 只返回 networkId 是因为传输层需要的唯一信息就是"这个新玩家对应哪个实体"，
+ * 其余数据（坐标、血量等）会在下一帧快照中自动同步。
+ */
 export interface PlayerJoinResult {
+  /** 玩家实体的网络标识（不等于 ECS 内部的 eid，是稳定对外 ID） */
   networkId: number;
 }
 
+/**
+ * 单帧快照——仿真层产出的纯数据，传输层用它来更新客户端状态。
+ *
+ * 核心思路：
+ * - entities 中只包含"还活着的实体"。传输层拿到后做 diff：
+ *   快照里有但 RoomState 没有 → 新实体，创建 EntityState
+ *   快照里没有但 RoomState 有 → 实体已死亡，从 RoomState 删除
+ *   两边都有 → 更新字段值
+ * - 字段 key 格式为 "ComponentName.fieldName"（如 "Transform.x"），
+ *   由 game.json 的 netSync 配置驱动，无硬编码。
+ */
 export interface TickSnapshot {
+  /** 当前逻辑帧号（从 1 开始递增） */
   tick: number;
+  /**
+   * 存活实体快照。
+   * - key: networkId（NetworkId 组件的值，稳定标识）
+   * - value: 字段映射，key 格式 "ComponentName.fieldName"，value 是字段数值
+   */
   entities: Map<number, Record<string, number>>;
 }
 
+/**
+ * tick() 方法的返回值——包含了快照数据和性能指标。
+ *
+ * 传输层拿到这个后：
+ * 1. 用 snapshot 更新客户端状态（写入 Colyseus RoomState）
+ * 2. 忽略 tickMs / avgTickMs（如有需要也可用于监控上报）
+ */
 export interface TickResult {
+  /** 本帧实体快照 */
   snapshot: TickSnapshot;
+  /** 本帧执行耗时（毫秒），从 performance.now() 差值计算 */
   tickMs: number;
+  /** 当前帧号 */
   tick: number;
+  /** EMA 滑动平均帧耗时（毫秒），用于性能监控趋势判断 */
   avgTickMs: number;
 }
 
+/**
+ * 调试快照的获取选项。
+ *
+ * includeMapBodies 控制是否包含地图碰撞体信息。
+ * 地图碰撞体每帧不变，客户端通常只需要首次拉取，
+ * 后续每帧只拉实体碰撞体以节省带宽。
+ */
 export interface DebugSnapshotOptions {
+  /** 是否包含地图静态碰撞体（首次订阅时为 true，后续推送为 false） */
   includeMapBodies?: boolean;
 }
