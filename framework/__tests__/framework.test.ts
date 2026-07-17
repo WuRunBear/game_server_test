@@ -10,6 +10,7 @@ import {
   loadGameDefinition,
   spawnEntity,
   buildSystems,
+  registerSystem,
   type GameInstance,
 } from "framework/index";
 import { getRegistries } from "framework/bootstrap";
@@ -520,5 +521,116 @@ describe("GameInstance.step snapshot test", () => {
       hasHealth: true,
       hasPlayer: true,
     });
+  });
+});
+
+describe("GameSimulation input handling", () => {
+  it("should stop player velocity when no new input is submitted", () => {
+    const gameDef = createDefaultGameDefinition();
+    const sim = createGameSimulation(gameDef);
+
+    const { networkId } = sim.addPlayer("session-1");
+    sim.submitInput("session-1", { seq: 1, moveX: 100, moveY: 0 });
+
+    const r1 = sim.tick(50);
+    const p1 = r1.snapshot.entities.get(networkId)!;
+
+    const r2 = sim.tick(50);
+    const p2 = r2.snapshot.entities.get(networkId)!;
+
+    // position should not change between consecutive ticks without new input
+    expect(p2["Transform.x"]).toBe(p1["Transform.x"]);
+    expect(p2["Transform.y"]).toBe(p1["Transform.y"]);
+  });
+
+  it("should apply fresh input after previous input has been consumed", () => {
+    const gameDef = createDefaultGameDefinition();
+    const sim = createGameSimulation(gameDef);
+
+    const { networkId } = sim.addPlayer("session-1");
+
+    sim.submitInput("session-1", { seq: 1, moveX: 100, moveY: 0 });
+    const r1 = sim.tick(50);
+
+    sim.submitInput("session-1", { seq: 2, moveX: 0, moveY: 100 });
+    const r2 = sim.tick(50);
+
+    const p1 = r1.snapshot.entities.get(networkId)!;
+    const p2 = r2.snapshot.entities.get(networkId)!;
+
+    // x: moved in first tick, should not move in second
+    expect(p2["Transform.x"]).toBe(p1["Transform.x"]);
+    // y: moved in second tick
+    expect(p2["Transform.y"]).toBeGreaterThan(p1["Transform.y"]);
+  });
+});
+
+describe("GameInstance step dtMs clamping", () => {
+  it("should fall back to fixedDtMs when dtMs is 0", () => {
+    const gameDef = createDefaultGameDefinition();
+    const instance = createGameInstance(gameDef);
+    const fixedDtMs = Math.floor(1000 / gameDef.tickRate);
+
+    instance.step(0);
+    expect(instance.world.time.dtMs).toBe(fixedDtMs);
+  });
+
+  it("should fall back to fixedDtMs when dtMs is NaN", () => {
+    const gameDef = createDefaultGameDefinition();
+    const instance = createGameInstance(gameDef);
+    const fixedDtMs = Math.floor(1000 / gameDef.tickRate);
+
+    instance.step(NaN);
+    expect(instance.world.time.dtMs).toBe(fixedDtMs);
+  });
+
+  it("should fall back to fixedDtMs when dtMs is negative", () => {
+    const gameDef = createDefaultGameDefinition();
+    const instance = createGameInstance(gameDef);
+    const fixedDtMs = Math.floor(1000 / gameDef.tickRate);
+
+    instance.step(-1);
+    expect(instance.world.time.dtMs).toBe(fixedDtMs);
+  });
+
+  it("should clamp dtMs to MAX_DT_MULTIPLIER * fixedDtMs when too large", () => {
+    const gameDef = createDefaultGameDefinition();
+    const instance = createGameInstance(gameDef);
+    const fixedDtMs = Math.floor(1000 / gameDef.tickRate);
+
+    instance.step(99999);
+    expect(instance.world.time.dtMs).toBe(fixedDtMs * 4);
+  });
+
+  it("should use dtMs as-is when within bounds", () => {
+    const gameDef = createDefaultGameDefinition();
+    const instance = createGameInstance(gameDef);
+
+    instance.step(100);
+    expect(instance.world.time.dtMs).toBe(100);
+  });
+});
+
+describe("GameSimulation tick error isolation", () => {
+  it("should not throw when a system throws inside step", () => {
+    registerSystem({
+      id: "test-thrower",
+      factory: () => (world) => {
+        throw new Error("test error in system");
+      },
+      after: ["interaction"],
+    });
+
+    const gameDef = createDefaultGameDefinition();
+    gameDef.systems!.push({ id: "test-thrower" });
+    const sim = createGameSimulation(gameDef);
+
+    expect(() => sim.tick(50)).not.toThrow();
+
+    const result = sim.tick(50);
+    expect(result).toBeDefined();
+    expect(typeof result.tick).toBe("number");
+    expect(result.snapshot).toBeDefined();
+    expect(result.snapshot.entities).toBeDefined();
   });
 });

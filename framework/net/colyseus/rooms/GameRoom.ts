@@ -214,9 +214,10 @@ export class GameRoom extends Room<{ state: RoomState }> {
    * @param fixedDtMs 固定步长（兜底值，deltaTimeMs 可能为 0）
    */
   private onTick(deltaTimeMs: number, fixedDtMs: number): void {
-    const result = this.sim.tick(deltaTimeMs || fixedDtMs);
+    const dtMs = deltaTimeMs > 0 ? deltaTimeMs : fixedDtMs;
+    const result = this.sim.tick(dtMs);
     this.applySnapshot(result.snapshot);
-    this.pushCollisionDebugSnapshots(deltaTimeMs || fixedDtMs);
+    this.pushCollisionDebugSnapshots(dtMs);
   }
 
   /**

@@ -111,7 +111,10 @@ export class GameSimulation implements SimulationPort {
    * 2. instance.step() — 运行所有 ECS 系统（move/phys/collision/combat/ai...）
    * 3. buildSnapshot() — 从 ECS world 拉取数据，构建纯数据快照
    * 4. recordTick()   — 记录本帧耗时，用 EMA 更新平均值
-   * 5. 慢帧告警        — 如果帧耗时的 1.5x fixedDtMs，输出 warn 日志
+   * 5. 帧耗时告警       — 如果帧耗时超过固定步长 1.5x 或 step 抛异常，输出告警
+   *
+   * **错误隔离**：若 applyInputs 或 step 抛异常，catch 后记录日志，
+   * 降级构建快照（使用系统执行到一半的状态），不中断 tick 循环。
    *
    * @param dtMs 本帧步长（毫秒）
    * @returns TickResult（快照 + 性能指标）
@@ -119,17 +122,29 @@ export class GameSimulation implements SimulationPort {
   tick(dtMs: number): TickResult {
     const start = performance.now();
 
-    this.applyInputs();
-    this.instance.step(dtMs);
-    const snapshot = this.buildSnapshot();
+    let stepFailed = false;
+    try {
+      this.applyInputs();
+      this.instance.step(dtMs);
+    } catch (err) {
+      stepFailed = true;
+      this.world.logger.error("tick 执行失败", {
+        tick: this.world.time.tick,
+        error: err instanceof Error ? err.stack : String(err),
+      });
+    }
 
+    const snapshot = this.buildSnapshot();
     const tickMs = performance.now() - start;
 
-    // 记录性能指标（EMA 滑动平均）
     recordTick(this.world.metrics, tickMs);
 
-    // 帧耗时超过固定步长 1.5 倍 → 告警（可能出现卡顿）
-    if (tickMs > this.world.time.fixedDtMs * 1.5) {
+    if (stepFailed) {
+      this.world.logger.warn("tick 已降级（使用部分状态快照）", {
+        tick: this.world.time.tick,
+        tickMs,
+      });
+    } else if (tickMs > this.world.time.fixedDtMs * 1.5) {
       this.world.logger.warn("单帧耗时过高", {
         tick: this.world.time.tick,
         tickMs,
@@ -233,27 +248,28 @@ export class GameSimulation implements SimulationPort {
   /**
    * 将缓存的最新玩家输入应用到 ECS。
    *
-   * **当前实现**：直接把 moveX/moveY 写入 Velocity.vx/vy。
-   * 这是最简单的输入模型（"输入 = 直接速度"），适合俯瞰视角游戏。
+   * **脉冲式输入模型**：
+   * 1. 先清零所有 player 实体的 Velocity（无输入 → 停止）
+   * 2. 应用当帧收到的最新输入
+   * 3. 清空输入缓存（下一帧无新输入则保持停止）
    *
-   * **未来可能的改进**：
-   * - 改为"输入 = 加速度" → 写入 Acceleration.ax/ay，由 physicsSystem 处理
-   * - 改为"输入 = 方向意图" → 写入 Intent 组件，由 aiSystem 或 movementSystem 处理
-   * - 加入摩擦力/最大速度限制
-   *
-   * 注意：每次 tick 后不清空 latestInputBySessionId。
-   * 如果客户端断线（不再发送输入），玩家会保持最后一个输入方向继续移动。
-   * 如果需要在断线时停止，可在 removePlayer 或超时逻辑中处理。
+   * 与旧实现的差异：旧实现不清空缓存，导致断线后玩家持续移动。
+   * 现在改为每帧"消费即丢弃"，每个输入只生效一帧。
    */
   private applyInputs(): void {
+    for (const eid of this.playerEidBySessionId.values()) {
+      Velocity.vx[eid] = 0;
+      Velocity.vy[eid] = 0;
+    }
+
     for (const [sessionId, input] of this.latestInputBySessionId) {
       const eid = this.playerEidBySessionId.get(sessionId);
       if (typeof eid !== "number") continue;
-
-      // 直接写入 bitecs SoA 数组：Velocity.vx[eid] 是 eid 号实体的 x 速度
       Velocity.vx[eid] = input.moveX;
       Velocity.vy[eid] = input.moveY;
     }
+
+    this.latestInputBySessionId.clear();
   }
 
   /**

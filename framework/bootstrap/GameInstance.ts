@@ -6,6 +6,9 @@ import { spawnEntity } from "framework/entities/spawn";
 import { getRegistries } from "framework/bootstrap";
 import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
 
+/** dtMs 上限倍率：单帧步长最多为固定步长的 N 倍，防止负载尖峰导致物理穿透 */
+const MAX_DT_MULTIPLIER = 4;
+
 export interface GameInstance {
   world: GameWorld;
   systems: System[];
@@ -47,7 +50,9 @@ export function createGameInstance(gameDef: LoadedGameDefinition): GameInstance 
 
     step(dtMs) {
       world.time.tick += 1;
-      world.time.dtMs = dtMs || fixedDtMs;
+
+      const raw = Number.isFinite(dtMs) && dtMs > 0 ? dtMs : fixedDtMs;
+      world.time.dtMs = Math.min(raw, fixedDtMs * MAX_DT_MULTIPLIER);
 
       for (const system of systems) {
         system(world);
