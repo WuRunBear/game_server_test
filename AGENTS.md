@@ -1,8 +1,8 @@
 # AGENTS.md — 项目高层次概括
 
 > 本文件为 AI 代理（opencode/Claude/Cursor 等）提供项目上下文，供会话间复用。
-> 它**只是索引与规则**：架构细节见 `ARCHITECTURE.md`，系统覆盖与进度见
-> `docs/ROADMAP.md`，代码现状以源码为准（文档可能滞后于代码）。
+> 它**只是索引与规则**：人类上手见 `README.md`，系统覆盖与进度见
+> `docs/ROADMAP.md`，架构机制以源码为准（文档可能滞后于代码）。
 
 ## 项目定位
 
@@ -59,7 +59,7 @@ framework/    ← 框架核心 — 游戏无关，所有通用逻辑
 game/         ← 游戏配置 — 纯 JSON：实体、行为、地图、规则、生成点
 ```
 
-**依赖方向严格自上而下**：`tools → framework`、`src → framework`。`framework` 不反向依赖任何游戏代码或工具代码。`game/` 目录是数据（非 TS），由 `loadGameDefinition` 按路径加载。文件级目录树与逐文件职责见 `ARCHITECTURE.md` §五。
+**依赖方向严格自上而下**：`tools → framework`、`src → framework`。`framework` 不反向依赖任何游戏代码或工具代码。`game/` 目录是数据（非 TS），由 `loadGameDefinition` 按路径加载。文件级目录树与逐行注释见 `README.md` §目录结构。
 
 ## 文档与代码索引
 
@@ -67,8 +67,8 @@ game/         ← 游戏配置 — 纯 JSON：实体、行为、地图、规则�
 
 | 你要找 | 去这里 |
 |--------|--------|
-| 架构深度设计（GameWorld / 各 Registry / 扩展点 / 配置层模型） | `ARCHITECTURE.md` §六、§七、§八 |
-| 目录结构详图、tsconfig、路径别名 | `ARCHITECTURE.md` §五 |
+| 架构机制（GameWorld / 各 Registry / 扩展点 / 配置模型） | 读 `framework/` 源码：`world.ts`、`bootstrap.ts`、各 `*Registry.ts` 与 `registerBuiltin*.ts` |
+| 目录结构详图、tsconfig、路径别名 | `README.md` §目录结构 + `tsconfig.json` 的 `paths` |
 | 系统覆盖现状、缺口、待修缺陷、分阶段路线图 | `docs/ROADMAP.md` |
 | 人类快速上手、工具命令、技术栈一览 | `README.md` |
 | 当前游戏内容（实体 / 行为 / 地图 / 规则 / 生成点） | `game/*.json` |
@@ -79,13 +79,13 @@ game/         ← 游戏配置 — 纯 JSON：实体、行为、地图、规则�
 
 - **启动**：`src/index.ts → main.ts → bootstrapFramework() → startColyseusServer(gameJsonPath) → loadGameDefinition → createGameInstance → GameRoom.setSimulationInterval`。
 - **每 tick**：`GameRoom` 收输入写 `Velocity` → `gameInstance.step(dtMs)` 按拓扑序跑系统 → 把 ECS 状态派生为 Colyseus `RoomState` → 调试快照节流推送。
-- **Registry 模式**：组件/系统/动作/原型/生成器/规则统一用「名 → factory」注册表；`bootstrapFramework()` 建表（幂等单例），`createGameInstance()` 挂到 `world`，系统经 `world` 访问。各表细节见 `ARCHITECTURE.md` §6.2-6.6。
-- **网络**：服务端权威，`RoomState` 是每 tick 从 ECS 派生的视图；同步字段由 `gameDef.netSync.fields` 配置（无硬编码）；稳定 `NetworkId` ≠ eid。见 `ARCHITECTURE.md` §6.10。
-- **仿真/传输解耦**：`SimulationPort` 接口隔离传输层与 ECS；`GameRoom`（联机）与 `HeadlessHost`（测试/单机）共用同一 `sim.tick(dtMs)`，`GameRoom` 不导入任何 bitecs/ECS 符号。见 `ARCHITECTURE.md` §6.10。
+- **Registry 模式**：组件/系统/动作/原型/生成器/规则统一用「名 → factory」注册表；`bootstrapFramework()` 建表（幂等单例），`createGameInstance()` 挂到 `world`，系统经 `world` 访问。各表细节见 `framework/` 下的 `*Registry.ts` 与 `registerBuiltin*.ts`。
+- **网络**：服务端权威，`RoomState` 是每 tick 从 ECS 派生的视图；同步字段由 `gameDef.netSync.fields` 配置（无硬编码）；稳定 `NetworkId` ≠ eid。见 `framework/simulation/` 与 `framework/net/`。
+- **仿真/传输解耦**：`SimulationPort` 接口隔离传输层与 ECS；`GameRoom`（联机）与 `HeadlessHost`（测试/单机）共用同一 `sim.tick(dtMs)`，`GameRoom` 不导入任何 bitecs/ECS 符号。见 `framework/simulation/SimulationPort.ts`。
 
 ## 扩展点速查
 
-注册扩展都在 `src/register.ts`；完整代码示例见 `ARCHITECTURE.md` §8.2 与 `README.md` §扩展指南。
+注册扩展都在 `src/register.ts`；完整代码示例见 `README.md` §扩展指南。
 
 | 扩展点 | 注册函数 | 配置中引用 |
 |--------|---------|-----------|
