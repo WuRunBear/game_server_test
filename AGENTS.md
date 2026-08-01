@@ -130,6 +130,6 @@ pnpm tools export-map [mapId] --out <dir>       # 导出 MapRuntime
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `PORT` | 3001 | 服务监听端口 |
+| `PORT` | 3000 | 服务监听端口（见 `framework/config/server.ts`） |
 | `CORS_ORIGINS` | — | 跨域白名单（逗号分隔，空则允许 *） |
 | `GAME_CONFIG_PATH` | `game/game.json` | 游戏配置路径 |

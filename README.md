@@ -1,6 +1,6 @@
 # 配置驱动的 2D 游戏服务端框架
 
-基于 **Node.js + TypeScript + bitECS + Colyseus** 的无头游戏服务端。核心命题：**配置定义游戏，框架运行游戏，AI 可选生成配置**。
+基于 **Node.js + TypeScript + bitecs + Colyseus** 的无头游戏服务端。核心命题：**配置定义游戏，框架运行游戏，AI 可选生成配置**。
 
 ## 快速开始
 
@@ -9,10 +9,10 @@ pnpm install
 pnpm dev      # tsx 热重载
 pnpm build    # tsc 编译
 pnpm start    # 运行 dist/src/index.js
-pnpm test     # 运行测试
+pnpm test     # 运行测试（vitest，43 个用例）
 ```
 
-默认监听端口 **3001**，可通过 `.env` 中 `PORT` 覆盖。
+默认监听端口 **3000**（见 `framework/config/server.ts`），可通过 `.env` 中 `PORT` 覆盖。
 
 ## 工具
 
@@ -41,75 +41,90 @@ game/         ← 游戏配置 — 纯 JSON：实体、行为、地图、规则�
 
 ```
 framework/
-  index.ts                  # 公共 API 入口
-  api.ts                    # 注册函数 + list 函数
+  index.ts                  # 公共 API 入口（register* + createGameInstance 等）
+  api.ts                    # 全局 register* 函数 + list* 函数（操作单例 registry）
   world.ts                  # GameWorld 类型 + createGameWorld
-  bootstrap.ts              # 所有 registry 创建与内置注册
+  bootstrap.ts              # bootstrapFramework() — 创建并填充所有 registry（模块单例）
   bootstrap/
-    GameInstance.ts         # GameInstance{ world, systems, step, spawnInitial }
-    loadGameDefinition.ts   # 加载 + zod 校验 game.json 及子配置
+    GameInstance.ts         # createGameInstance(gameDef) → { world, systems, step, spawnInitialEntities }
+    loadGameDefinition.ts   # 加载 game.json + zod 校验 + 引用完整性检查
+  simulation/               # 仿真抽象层 — 传输层与 ECS 的解耦接口
+    SimulationPort.ts      # 接口: tick / addPlayer / removePlayer / submitInput / getDebugSnapshot
+    GameSimulation.ts       # 实现: 内部聚合 GameInstance + ECS
+    types.ts                # 纯数据 DTO: PlayerInput, TickSnapshot, TickResult
+    index.ts                # 模块 barrel 导出
   components/               # ECS 组件 + componentRegistry
     componentRegistry.ts    # 组件注册表: 名 → defineComponent
-    registerBuiltin.ts      # 注册 12 个内置组件
-    transform.ts, physics.ts, combat.ts, ai.ts, inventory.ts, network.ts, timer.ts, tags.ts, size.ts
+    registerBuiltin.ts      # 注册 21 个内置组件
+    index.ts                # barrel 导出
+    transform.ts, size.ts, physics.ts (Velocity/Acceleration/Collider/ColliderShape),
+    combat.ts (Health/Attack/Defense/Team), ai.ts (AIState/Target/BlackboardRef),
+    inventory.ts (AoS 例外), network.ts (NetworkId/LastSynced), timer.ts (Cooldown/Duration), tags.ts (Player/Enemy/NPC/Item)
   systems/
-    systemRegistry.ts       # 系统注册表 + buildSystems (拓扑排序)
-    registerBuiltinSystems.ts
+    systemRegistry.ts       # 系统注册表 + buildSystems (拓扑排序, Kahn 算法)
+    registerBuiltinSystems.ts   # 注册 8 个内置系统
+    index.ts                # barrel 导出
     core/                   # physicsSystem, movementSystem, collisionSystem
-    gameplay/               # aiSystem, combatSystem, inventorySystem, interactionSystem, spawningSystem
+    gameplay/               # aiSystem, combatSystem, spawningSystem, inventorySystem, interactionSystem
   entities/
     archetypeRegistry.ts    # 原型注册表: kind → ArchetypeSpec
-    spawn.ts                # spawnEntity(world, kind, overrides) — 通用实体工厂
+    registerBuiltinArchetypes.ts   # 注册 player, villager 2 个内置原型
+    spawn.ts                # spawnEntity(world, archetype, componentRegistry, overrides)
   ai/
-    blackboard.ts           # 每实体黑板
-    btFactory.ts            # 行为树工厂 (配置 → mistreevous 树)
-    btRunner.ts             # 行为树执行器
     actionRegistry.ts       # 动作注册表: 名 → ActionFactory
+    btFactory.ts            # 行为树工厂 (配置 → mistreevous 树)
+    btRunner.ts             # stepBehaviourTree(instance, ctx)
+    blackboard.ts           # 每实体黑板
+    registerBuiltinActions.ts   # 注册 Idle, Wander 2 个内置动作
     nodes/actions/          # idle.ts, wander.ts
   map/
-    types.ts                # MapRuntime / MapSource / MapZone 等类型
-    tiled.ts                # Tiled JSON 解析
-    buildRuntime.ts         # MapSource → MapRuntime (纯函数)
+    types.ts                # MapRuntime / MapSource / MapZone / Vec2
+    tiled.ts                # Tiled JSON 解析 (collision/objects/zones 三层)
+    buildRuntime.ts         # 纯函数: MapSource → MapRuntime
     generatorRegistry.ts    # 生成器注册表: generatorId → MapGenerator
-    generated/simple.ts     # 默认程序化地图生成器
-    exportGenerated.ts      # MapRuntime → JSON + PNG
+    registerBuiltinGenerators.ts   # 注册 simple 默认生成器
+    generated/simple.ts     # 默认程序化地图生成器 (xorshift32 RNG)
+    exportGenerated.ts       # MapRuntime → JSON + PNG (手写 PNG 编码器)
+    index.ts                # barrel 导出
   config/
-    server.ts               # 端口 / CORS
-    game.ts                 # tickRate 配置
-    map.ts                  # 地图注册表读取
-    schema/                 # zod schema: GameDefinition, Archetype, Behavior, Spawn, MapRegistry, Rule
+    server.ts               # .env → ServerConfig { port, wsPath, corsOrigins }，默认端口 3000
+    game.ts                 # tickRate 静态配置
+    map.ts                  # 地图清单（registry.json）读取
+    index.ts                # barrel 导出
+    schema/                 # zod schema: GameDefinition / Archetype / Behavior / / Spawn / MapRegistry / Rule
   net/
-    colyseus/               # Colyseus 网络适配器
-      server.ts             # HTTP + WebSocket + /health /maps/runtime /debug/colliders
-      rooms/GameRoom.ts     # 房间: 持有 GameInstance，委托 step
-      state/                # RoomState, PlayerState, EntityState (Colyseus Schema)
+    colyseus/
+      server.ts             # startColyseusServer — HTTP + WebSocket + /health /maps/runtime /debug/colliders
+      rooms/GameRoom.ts     # 房间: 持有 SimulationPort，委托 tick（纯传输/输入/同步/调试，无 ECS 导入）
+      state/                # RoomState, PlayerState, EntityState (Colyseus Schema, 字段按 netSync 配置映射)
     headless/
-      HeadlessHost.ts       # 无传输驱动 GameInstance.step (测试/单机)
-  utils/                    # logger, timer
-  metrics.ts                # tick 性能指标
-  __tests__/                # 35 个测试
+      HeadlessHost.ts       # runHeadless(sim, opts) — 无传输驱动 tick，返回 TickResult[]
+  utils/                    # logger.ts (winston), timer.ts (clampMs)
+  metrics.ts                # tick 性能指标 (EMA avg)
+  repository.ts             # Repository 接口 (持久化抽象)
+  postgres.ts, redis.ts     # 占位 stub
+  bitecs-legacy.d.ts         # bitecs legacy API 手工类型声明
+  __tests__/framework.test.ts   # 43 个测试，20 个 describe 块
 
 src/
-  index.ts                  # 入口
-  main.ts                   # 启动 Colyseus 服务器
-  register.ts               # bootstrapFramework() 注册扩展
+  index.ts                  # 入口: dotenv/config → main()
+  main.ts                   # bootstrapFramework() → startColyseusServer({ gameJsonPath })
+  register.ts               # 扩展注册入口（当前仅调用 bootstrapFramework()，无自定义扩展）
 
 game/
-  game.json                 # GameDefinition 主入口
-  entities/                 # 实体原型 (player.json, villager.json)
-  behaviors/                # 行为树 (wander-default.json)
-  rules/                    # 规则 (combat.json)
-  spawns/                   # 生成规则 (populations.json)
-  maps/                     # 地图清单 (registry.json)
+  game.json                 # GameDefinition 主入口：tickRate=20, 8 个系统, netSync 配置
+  entities/                 # player.json, villager.json
+  behaviors/                # wander-default.json
+  rules/                    # combat.json
+  spawns/                   # populations.json
+  maps/                     # registry.json
 
 tools/
   cli.ts                    # 统一 CLI 入口
-  validate.ts               # 配置校验
-  new-game.ts               # 脚手架
-  list-registries.ts        # 列出注册表
-  gen-map.ts                # 地图生成
-  export-map.ts             # 地图导出
+  validate.ts, new-game.ts, list-registries.ts, gen-map.ts, export-map.ts
 ```
+
+> 上述目录树以源码为准，文档可能滞后。核实时可 `pnpm tools list-registries` 或直接读 `framework/*/registerBuiltin*.ts`。
 
 ### 游戏循环
 
@@ -121,13 +136,15 @@ tools/
 
 ### 配置系统
 
-所有游戏内容由 `game/` 下的 JSON 定义，经 zod schema 校验 + 引用完整性检查后加载为 `LoadedGameDefinition`，挂载到 `GameWorld.gameDef`。系统从 `world.gameDef` 读取参数，不依赖全局 getter。
+所有游戏内容由 `game/` 下的 JSON 定义，经 zod schema 校验 + 引用完整性检查后加载为 `GameDefinition`，挂载到 `GameWorld.gameDef`。系统从 `world.gameDef` 读取参数，不依赖全局 getter。
 
 ### 网络同步
 
-Colyseus Schema 每 tick 同步。`EntityState` 的字段通过 `game.json` 的 `netSync.fields` 配置，选择性同步组件字段。服务端权威，客户端仅发送输入。
+Colyseus Schema 每 tick 同步。`EntityState` 的字段通过 `game.json` 的 `netSync.fields` 配置，选择性同步组件字段（无硬编码）。服务端权威，客户端仅发送输入。仿真与传输解耦：`GameRoom`（联机）与 `HeadlessHost`（测试/单机）共用同一 `SimulationPort.tick(dtMs)`，`GameRoom` 不导入任何 bitecs / ECS 符号。
 
 ## 扩展指南
+
+> 本节为操作速查。**战略级约束见 `AGENTS.md` §AI 协作铁律**（游戏逻辑永远不写进 framework/、即需即补、通用的接口最小的实现）。
 
 ### 注册扩展
 
@@ -168,10 +185,11 @@ registerRuleModule("damage-formula", customDamageFormula);
 |------|------|
 | 运行时 | Node.js >= 22 (ESM) |
 | 语言 | TypeScript ^5.8 |
-| ECS | bitecs ^0.4 |
+| ECS | bitecs ^0.4 (legacy API) |
 | 网络 | @colyseus/core + @colyseus/ws-transport |
-| Schema | @colyseus/schema + zod |
-| 碰撞 | check2d |
-| AI | mistreevous |
-| 日志 | winston |
-| 测试 | vitest |
+| Schema | @colyseus/schema + zod ^4 |
+| 碰撞 | check2d ^9 |
+| AI | mistreevous ^4 |
+| 日志 | winston ^3 |
+| 测试 | vitest ^4 |
+| 开发运行 | tsx ^4, tsc-alias |
