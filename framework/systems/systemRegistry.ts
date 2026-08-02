@@ -57,13 +57,6 @@ function topologicalSort(specs: SystemSpec[]): SystemSpec[] {
   for (const s of specs) {
     const deps: string[] = [];
     if (s.after) deps.push(...s.after);
-    if (s.before) {
-      for (const b of s.before) {
-        if (specs.some((o) => o.id === b)) {
-          deps.push(b);
-        }
-      }
-    }
     graph.set(s.id, deps);
     inDegree.set(s.id, 0);
   }
@@ -72,6 +65,20 @@ function topologicalSort(specs: SystemSpec[]): SystemSpec[] {
     for (const dep of deps) {
       if (inDegree.has(dep)) {
         inDegree.set(id, (inDegree.get(id) ?? 0) + 1);
+      }
+    }
+  }
+
+  // "before" 语义：b 应在 s 之后跑（b 依赖 s），故给 b 增加一条 s 的依赖边。
+  // 去重避免与 after 共同产生重复边；缺失的 b 静默忽略（与 after 行为一致）。
+  for (const s of specs) {
+    if (!s.before) continue;
+    for (const b of s.before) {
+      if (!inDegree.has(b)) continue;
+      const bDeps = graph.get(b)!;
+      if (!bDeps.includes(s.id)) {
+        bDeps.push(s.id);
+        inDegree.set(b, (inDegree.get(b) ?? 0) + 1);
       }
     }
   }

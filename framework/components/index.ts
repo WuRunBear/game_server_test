@@ -14,3 +14,4 @@ export { Inventory, type InventorySlots } from "components/inventory";
 export { NetworkId, LastSynced } from "components/network";
 export { Cooldown, Duration } from "components/timer";
 export { Player, Enemy, NPC, Item } from "components/tags";
+export { Kind } from "components/kind";

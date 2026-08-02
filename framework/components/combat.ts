@@ -25,6 +25,10 @@ export const Attack = defineComponent({
    * 攻击力数值。
    */
   value: Types.f32,
+  /**
+   * 攻击射程（像素）。0 表示未设置，由系统回退到配置/默认值。
+   */
+  range: Types.f32,
 });
 
 /**

@@ -475,6 +475,9 @@ export function collisionSystem(world: GameWorld): GameWorld {
   runtime.pairs = [];
   runtime.system.separate((response: Response) => {
     recordCollisionPair(runtime, response.a as CollisionBody, response.b as CollisionBody, response.overlap);
+    // check2d 的 separateBody 仅在回调返回 truthy 时才累加分离偏移并推开 body。
+    // 早期回调未返回值（undefined）导致分离永远不生效，实体穿墙。必须返回 true。
+    return true;
   });
 
   writeBodiesBackToWorld(world, runtime, previousCenters);

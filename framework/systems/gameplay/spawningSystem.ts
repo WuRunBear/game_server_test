@@ -1,10 +1,11 @@
-import { query, hasComponent } from "bitecs";
-import { NPC } from "components";
-import type { GameWorld, EntityId } from "world";
+import { query } from "bitecs";
+import { NPC, Transform, Kind } from "components";
+import type { GameWorld } from "world";
 import { spawnEntity } from "framework/entities/spawn";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { SpawnRule } from "framework/config/schema/GameDefinitionSchema";
+import { pointInPolygon } from "framework/utils/geometry";
 
 interface SpawnTimer {
   lastSpawnTime: number;
@@ -12,6 +13,7 @@ interface SpawnTimer {
 }
 
 const SPAWN_KEY = "spawning";
+const RANDOM_POINT_MAX_RETRIES = 16;
 
 function getSpawnTimers(world: GameWorld): SpawnTimer[] {
   let timers = world.systemRuntimes.get(SPAWN_KEY) as SpawnTimer[] | undefined;
@@ -25,13 +27,11 @@ function countInZone(world: GameWorld, kind: string, zoneId: number): number {
   const zone = world.map?.zones.find((z) => z.id === zoneId);
   if (!zone) return 0;
 
+  const hasPoly = zone.polygon.length >= 3;
   let count = 0;
   for (const eid of query(world, [NPC])) {
-    if (!hasComponent(world, eid, NPC)) continue;
-
-    const found = world.gameDef.resolvedEntities.find((e) => e.kind === kind);
-    if (!found) continue;
-
+    if (Kind[eid] !== kind) continue;
+    if (hasPoly && !pointInPolygon(Transform.x[eid], Transform.y[eid], zone.polygon)) continue;
     count++;
   }
 
@@ -47,6 +47,19 @@ function randomPointInZone(zone: { polygon: { x: number; y: number }[] }): { x: 
     if (p.y < minY) minY = p.y;
     if (p.x > maxX) maxX = p.x;
     if (p.y > maxY) maxY = p.y;
+  }
+
+  if (zone.polygon.length < 3) {
+    return {
+      x: minX + Math.random() * (maxX - minX),
+      y: minY + Math.random() * (maxY - minY),
+    };
+  }
+
+  for (let i = 0; i < RANDOM_POINT_MAX_RETRIES; i++) {
+    const x = minX + Math.random() * (maxX - minX);
+    const y = minY + Math.random() * (maxY - minY);
+    if (pointInPolygon(x, y, zone.polygon)) return { x, y };
   }
 
   return {

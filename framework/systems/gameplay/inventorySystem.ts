@@ -17,15 +17,19 @@ export function inventorySystem(world: GameWorld): GameWorld {
       const slots = Inventory[playerEid];
       if (!slots) continue;
 
+      let placed = false;
       const slotKeys: (keyof InventorySlots)[] = ["slot0", "slot1", "slot2", "slot3"];
       for (const key of slotKeys) {
         if (slots[key] === 0) {
           slots[key] = itemEid;
+          placed = true;
           break;
         }
       }
 
-      removeEntity(world, itemEid);
+      if (placed) {
+        removeEntity(world, itemEid);
+      }
     }
   }
 

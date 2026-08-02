@@ -8,6 +8,7 @@ import { Inventory } from "framework/components/inventory";
 import { NetworkId, LastSynced } from "framework/components/network";
 import { Cooldown, Duration } from "framework/components/timer";
 import { Player, Enemy, NPC, Item } from "framework/components/tags";
+import { Kind } from "framework/components/kind";
 
 export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("Transform", Transform);
@@ -31,4 +32,5 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("Enemy", Enemy);
   registry.register("NPC", NPC);
   registry.register("Item", Item);
+  registry.register("Kind", Kind);
 }

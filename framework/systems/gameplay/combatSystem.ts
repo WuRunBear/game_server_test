@@ -1,6 +1,6 @@
 import { query, removeEntity, hasComponent } from "bitecs";
 import { Health, Attack, Defense, Team } from "components";
-import { Cooldown } from "components";
+import { Cooldown, Transform } from "components";
 import type { GameWorld } from "world";
 import { getRuleModule } from "framework/api";
 
@@ -9,9 +9,11 @@ interface SystemConfig {
   damageFormula?: string;
   damageFormulaRef?: string;
   attackCooldownMs?: number;
+  attackRange?: number;
 }
 
 const DEFAULT_COOLDOWN_MS = 1000;
+const DEFAULT_ATTACK_RANGE = 32;
 
 export function createCombatSystem(config?: Record<string, unknown>) {
   const cfg: SystemConfig = {
@@ -19,6 +21,7 @@ export function createCombatSystem(config?: Record<string, unknown>) {
     damageFormula: config?.damageFormula as string | undefined,
     damageFormulaRef: config?.damageFormulaRef as string | undefined,
     attackCooldownMs: config?.attackCooldownMs as number | undefined,
+    attackRange: config?.attackRange as number | undefined,
   };
 
   return function combatSystem(world: GameWorld): GameWorld {
@@ -27,9 +30,10 @@ export function createCombatSystem(config?: Record<string, unknown>) {
     const damageFormula = cfg.damageFormula ?? rules?.damageFormula ?? "standard";
     const damageFormulaRef = cfg.damageFormulaRef ?? rules?.damageFormulaRef;
     const cooldownMs = cfg.attackCooldownMs ?? rules?.attackCooldownMs ?? DEFAULT_COOLDOWN_MS;
+    const configuredRange = cfg.attackRange ?? rules?.attackRange;
 
-    const attackers = query(world, [Attack, Team]);
-    const targets = query(world, [Health, Defense, Team]);
+    const attackers = query(world, [Attack, Team, Transform]);
+    const targets = query(world, [Health, Defense, Team, Transform]);
 
     for (const attackerId of attackers) {
       if (hasComponent(world, attackerId, Cooldown)) {
@@ -40,10 +44,20 @@ export function createCombatSystem(config?: Record<string, unknown>) {
         }
       }
 
+      const componentRange = Attack.range[attackerId];
+      const attackerRange =
+        configuredRange ??
+        (typeof componentRange === "number" && componentRange > 0 ? componentRange : DEFAULT_ATTACK_RANGE);
+      const attackerX = Transform.x[attackerId];
+      const attackerY = Transform.y[attackerId];
+
       for (const targetId of targets) {
         if (attackerId === targetId) continue;
 
         if (!friendlyFire && Team.id[attackerId] === Team.id[targetId]) continue;
+
+        const dist = Math.hypot(attackerX - Transform.x[targetId], attackerY - Transform.y[targetId]);
+        if (dist > attackerRange) continue;
 
         const attackerDamage = Attack.value[attackerId] ?? 10;
         const targetDefense = Defense.value[targetId] ?? 0;

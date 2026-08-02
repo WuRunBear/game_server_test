@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
-import { addComponent, addEntity, hasComponent } from "bitecs";
+import { addComponent, addEntity, hasComponent, query } from "bitecs";
 import { State } from "mistreevous";
 import {
   bootstrapFramework,
@@ -11,18 +11,26 @@ import {
   spawnEntity,
   buildSystems,
   registerSystem,
+  createActionRegistry,
   type GameInstance,
 } from "framework/index";
 import { getRegistries } from "framework/bootstrap";
 import { setEntityKind } from "framework/systems/gameplay/aiSystem";
+import { spawningSystem } from "framework/systems/gameplay/spawningSystem";
+import { inventorySystem } from "framework/systems/gameplay/inventorySystem";
+import { collisionSystem } from "framework/systems/core/collisionSystem";
+import { createNpcTree } from "framework/ai/btFactory";
 
 import { Transform } from "framework/components/transform";
 import { Velocity } from "framework/components/physics";
 import { Health, Attack, Defense, Team } from "framework/components/combat";
 import { NetworkId } from "framework/components/network";
-import { NPC, Player } from "framework/components/tags";
+import { NPC, Player, Item } from "framework/components/tags";
+import { Kind } from "framework/components/kind";
 import { Collider } from "framework/components/physics";
 import { Size } from "framework/components/size";
+import { Inventory, type InventorySlots } from "framework/components/inventory";
+import type { MapRuntime } from "framework/map";
 import type { GameWorld } from "framework/world";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
@@ -245,6 +253,41 @@ describe("combatSystem (Item 3: damage calculation)", () => {
 
     expect(hasComponent(world, target, Health)).toBe(false);
   });
+
+  it("should only hit targets within attack range", () => {
+    const attacker = spawnCustomEntity(world, "test-attacker", {
+      Health: { current: 100, max: 100 },
+      Attack: { value: 20 },
+      Team: { id: 1 },
+    });
+
+    const nearTarget = spawnCustomEntity(world, "test-target-near", {
+      Health: { current: 100, max: 100 },
+      Defense: { value: 0 },
+      Team: { id: 2 },
+    });
+    const farTarget = spawnCustomEntity(world, "test-target-far", {
+      Health: { current: 100, max: 100 },
+      Defense: { value: 0 },
+      Team: { id: 2 },
+    });
+
+    Transform.x[attacker] = 0;
+    Transform.y[attacker] = 0;
+    Transform.x[nearTarget] = 10;
+    Transform.y[nearTarget] = 0;
+    Transform.x[farTarget] = 100;
+    Transform.y[farTarget] = 0;
+
+    const { systemRegistry } = getRegistries();
+    const combatSpec = systemRegistry.get("combat");
+    const sys = combatSpec.factory(world, { friendlyFire: true, attackCooldownMs: 0 });
+
+    sys(world);
+
+    expect(Health.current[nearTarget]).toBeLessThan(100);
+    expect(Health.current[farTarget]).toBe(100);
+  });
 });
 
 describe("spawningSystem (Item 4)", () => {
@@ -253,6 +296,68 @@ describe("spawningSystem (Item 4)", () => {
     const instance = createGameInstance(gameDef);
     instance.step(50);
     expect(instance.world.time.tick).toBe(1);
+  });
+});
+
+describe("spawningSystem countInZone (Defect 2)", () => {
+  it("should filter by kind and zone polygon; cross-kind quotas do not挤占", () => {
+    const { archetypeRegistry } = getRegistries();
+    archetypeRegistry.register({ kind: "count-zone-a", components: {}, tags: ["NPC"] });
+    archetypeRegistry.register({ kind: "count-zone-b", components: {}, tags: ["NPC"] });
+
+    const gameDef = createDefaultGameDefinition();
+    const instance = createGameInstance(gameDef);
+    const world = instance.world;
+
+    const testMap: MapRuntime = {
+      id: "test",
+      name: "test",
+      grid: { width: 1, height: 1, tileWidth: 1, tileHeight: 1 },
+      blocked: new Uint8Array(1),
+      spawns: { player: null, npcs: [] },
+      zones: [
+        {
+          id: 1,
+          name: "z",
+          polygon: [
+            { x: 0, y: 0 },
+            { x: 100, y: 0 },
+            { x: 100, y: 100 },
+            { x: 0, y: 100 },
+          ],
+        },
+      ],
+    };
+    world.map = testMap;
+    world.gameDef.resolvedSpawns = [
+      { kind: "count-zone-a", zoneId: 1, max: 6, respawnMs: 0 },
+      { kind: "count-zone-b", zoneId: 1, max: 5, respawnMs: 0 },
+    ];
+
+    const insidePositions = [
+      { x: 10, y: 10 },
+      { x: 20, y: 20 },
+      { x: 30, y: 30 },
+      { x: 40, y: 40 },
+      { x: 50, y: 50 },
+    ];
+    for (const pos of insidePositions) {
+      spawnCustomEntity(world, "count-zone-a", { NPC: {}, Transform: pos });
+    }
+    spawnCustomEntity(world, "count-zone-a", { NPC: {}, Transform: { x: 200, y: 200 } });
+
+    spawningSystem(world);
+
+    let countA = 0;
+    let countB = 0;
+    for (const eid of query(world, [NPC])) {
+      const k = Kind[eid];
+      if (k === "count-zone-a") countA++;
+      else if (k === "count-zone-b") countB++;
+    }
+
+    expect(countA).toBe(7);
+    expect(countB).toBe(1);
   });
 });
 
@@ -311,6 +416,40 @@ describe("inventorySystem (Item 5)", () => {
 
     expect(instance.world.time.tick).toBe(1);
   });
+
+  it("should not destroy items when inventory is full (Defect 3)", () => {
+    const gameDef = createDefaultGameDefinition();
+    const instance = createGameInstance(gameDef);
+    const world = instance.world;
+
+    const player = spawnCustomEntity(world, "player", {
+      Transform: { x: 0, y: 0 },
+      Player: {},
+    });
+    Inventory[player] = { slot0: 0, slot1: 0, slot2: 0, slot3: 0 } as InventorySlots;
+
+    const itemEids: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const item = spawnCustomEntity(world, "item", {
+        Transform: { x: i, y: i },
+        Item: {},
+      });
+      itemEids.push(item);
+    }
+
+    inventorySystem(world);
+
+    const slots = Inventory[player]!;
+    expect(slots.slot0).toBe(itemEids[0]);
+    expect(slots.slot1).toBe(itemEids[1]);
+    expect(slots.slot2).toBe(itemEids[2]);
+    expect(slots.slot3).toBe(itemEids[3]);
+
+    for (let i = 0; i < 4; i++) {
+      expect(hasComponent(world, itemEids[i], Item)).toBe(false);
+    }
+    expect(hasComponent(world, itemEids[4], Item)).toBe(true);
+  });
 });
 
 describe("interactionSystem (Item 5)", () => {
@@ -336,6 +475,72 @@ describe("interactionSystem (Item 5)", () => {
     instance.step(50);
 
     expect(instance.world.time.tick).toBe(1);
+  });
+});
+
+describe("collisionSystem separation (Defect: 碰撞系统无效)", () => {
+  it("should push entity out of static map body and zero velocity along the blocked axis", () => {
+    const gameDef = createDefaultGameDefinition();
+    const instance = createGameInstance(gameDef);
+    const world = instance.world;
+
+    const testMap: MapRuntime = {
+      id: "test",
+      name: "test",
+      grid: { width: 4, height: 4, tileWidth: 32, tileHeight: 32 },
+      blocked: new Uint8Array([
+        0, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+      ]),
+      spawns: { player: null, npcs: [] },
+      zones: [],
+    };
+    world.map = testMap;
+
+    const eid = spawnCustomEntity(world, "test-collider", {
+      Transform: { x: 28, y: 28 },
+      Collider: { shape: 1, halfW: 8, halfH: 8 },
+      Velocity: { vx: 10, vy: 10 },
+    });
+
+    collisionSystem(world);
+
+    expect(Transform.y[eid]).toBe(24);
+    expect(Transform.x[eid]).toBe(28);
+
+    expect(Velocity.vy[eid]).toBe(0);
+    expect(Velocity.vx[eid]).toBe(10);
+  });
+
+  it("should not move entity when there is no collision", () => {
+    const gameDef = createDefaultGameDefinition();
+    const instance = createGameInstance(gameDef);
+    const world = instance.world;
+
+    const testMap: MapRuntime = {
+      id: "test2",
+      name: "test2",
+      grid: { width: 4, height: 4, tileWidth: 32, tileHeight: 32 },
+      blocked: new Uint8Array(16),
+      spawns: { player: null, npcs: [] },
+      zones: [],
+    };
+    world.map = testMap;
+
+    const eid = spawnCustomEntity(world, "test-collider", {
+      Transform: { x: 100, y: 100 },
+      Collider: { shape: 1, halfW: 8, halfH: 8 },
+      Velocity: { vx: 5, vy: 5 },
+    });
+
+    collisionSystem(world);
+
+    expect(Transform.x[eid]).toBe(100);
+    expect(Transform.y[eid]).toBe(100);
+    expect(Velocity.vx[eid]).toBe(5);
+    expect(Velocity.vy[eid]).toBe(5);
   });
 });
 
@@ -416,6 +621,39 @@ describe("systemRegistry edge cases", () => {
     expect(callOrder).toEqual(["test-order-a", "test-order-b"]);
   });
 
+  it("buildSystems should respect before ordering (Defect 4)", () => {
+    const callOrder: string[] = [];
+    const { systemRegistry } = getRegistries();
+
+    systemRegistry.register({
+      id: "test-before-a",
+      factory: () => (world) => {
+        callOrder.push("test-before-a");
+        return world;
+      },
+      before: ["test-before-b"],
+    });
+    systemRegistry.register({
+      id: "test-before-b",
+      factory: () => (world) => {
+        callOrder.push("test-before-b");
+        return world;
+      },
+    });
+
+    const world = createTestWorld();
+    const systems = buildSystems(world, [
+      { id: "test-before-b" },
+      { id: "test-before-a" },
+    ], systemRegistry);
+
+    for (const sys of systems) {
+      sys(world);
+    }
+
+    expect(callOrder).toEqual(["test-before-a", "test-before-b"]);
+  });
+
   it("buildSystems should throw for unregistered system", () => {
     const world = createTestWorld();
     const { systemRegistry } = getRegistries();
@@ -470,6 +708,49 @@ describe("actionRegistry edge cases", () => {
     const action = factory();
     const result = action();
     expect(result).toBe(State.SUCCEEDED);
+  });
+});
+
+describe("btFactory condition nodes (Defect 5)", () => {
+  it("should bind both condition and action agent methods", () => {
+    const registry = createActionRegistry();
+    registry.register("CondX", () => () => State.SUCCEEDED);
+    registry.register("ActY", () => () => State.SUCCEEDED);
+
+    const definition = {
+      type: "root",
+      child: {
+        type: "sequence",
+        children: [
+          { type: "condition", call: "CondX" },
+          { type: "action", call: "ActY" },
+        ],
+      },
+    };
+
+    const instance = createNpcTree(definition, registry);
+    const agent = instance.agent as Record<string, unknown>;
+
+    expect(typeof agent.CondX).toBe("function");
+    expect(typeof agent.ActY).toBe("function");
+  });
+
+  it("should throw when a name is used as both action and condition", () => {
+    const registry = createActionRegistry();
+    registry.register("Shared", () => () => State.SUCCEEDED);
+
+    const definition = {
+      type: "root",
+      child: {
+        type: "sequence",
+        children: [
+          { type: "condition", call: "Shared" },
+          { type: "action", call: "Shared" },
+        ],
+      },
+    };
+
+    expect(() => createNpcTree(definition, registry)).toThrow(/both an action and a condition/);
   });
 });
 

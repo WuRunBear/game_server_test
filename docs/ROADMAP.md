@@ -1,7 +1,8 @@
 # 通用 2D 游戏框架系统路线图
 
 > 目标：将当前框架从 17% 成熟度（8/50 系统）演进为通用 2D 游戏框架。
-> 现状：8 个内置系统中 4 个完整、2 个有缺陷、2 个占位。
+> 现状：8 个内置系统中 6 个完整、2 个占位（inventory / interaction）。
+> Phase 0（切片前止血）已完成，修复了此前 5 个框架级缺陷，详见下文「已有系统待修复」。
 
 ## 一、核心仿真
 - Transform / Physics / Movement / Collision — 位置、速度积分、碰撞检测与分离
@@ -79,8 +80,8 @@
 ## 当前框架覆盖（约 8/50 ≈ 17%）
 
 ### ✅ 已有
-- physics、movement、collision、ai(BT 仅 action 绑定)
-- combat(有缺陷)、spawning(有缺陷)
+- physics、movement、collision、ai(BT 绑定 action + condition)
+- combat（射程判定已补齐）、spawning（按 kind/多边形过滤已补齐）
 - inventory(占位)、interaction(占位)
 - sync(仅 number)、logger
 
@@ -90,8 +91,13 @@
 3. **社交进度** — Relationship、Dialogue、Quest、Achievement、Progression
 
 ### 🔧 已有系统待修复
-- combatSystem：缺射程/范围判定（当前全场 AOE）
-- spawningSystem：countInZone 未按 kind/zone 过滤
-- inventorySystem：占位，无堆叠/丢弃/使用
-- interactionSystem：仅日志，无交互语义
-- 框架 bug：systemRegistry before 字段语义反转、collectActionNames 未收 condition
+
+> Phase 0（框架缺陷止血）已完成下列 5 个框架级缺陷，验收以 `pnpm test` + `tsc --noEmit` + `pnpm tools validate` 全绿为准。
+> 切片内功能补全（占位系统语义、堆叠/丢弃等）仍在后续切片推进。
+
+- ✅ combatSystem：缺射程/范围判定（全场 AOE）— Phase 0 已修复（`Attack.range` 字段 + `combat.json` 的 `attackRange`，配置优先回退组件再回退默认 32）
+- ✅ spawningSystem：`countInZone` 未按 kind/zone 多边形过滤 — Phase 0 已修复（新增 `Kind` 组件 + `pointInPolygon` 工具；`randomPointInZone` 改为多边形内重抽）
+- ✅ inventorySystem：满包时 `removeEntity` 仍执行（物品被销毁未入包）— Phase 0 已修复（未入槽不销毁）；占位语义（堆叠/丢弃/使用）仍待后续切片
+- ⏳ interactionSystem：仅日志，无交互语义（待 Slice 1 生存循环补全）
+- ✅ 框架 bug：`systemRegistry` `before` 字段语义反转 — Phase 0 已修复（`b` 依赖 `s` 的边正确建立，去重 + 缺失容错）
+- ✅ 框架 bug：`btFactory.collectActionNames` 未收 `type === "condition"` 节点 — Phase 0 已修复（同步收集 condition，同名 action/condition fail-fast 抛错）

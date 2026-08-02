@@ -1,5 +1,6 @@
 {
   "friendlyFire": false,
   "damageFormula": "standard",
-  "attackCooldownMs": 1000
+  "attackCooldownMs": 1000,
+  "attackRange": 32
 }

@@ -20,22 +20,43 @@ function getChildNodes(obj: Record<string, unknown>): unknown[] {
   return nodes;
 }
 
-function collectActionNames(node: unknown, names: Set<string>): void {
+function collectByType(node: unknown, actions: Set<string>, conditions: Set<string>): void {
   if (typeof node === "string") {
     for (const match of node.matchAll(/action\s*\[([^\]]+)\]/g)) {
-      if (match[1]) names.add(match[1]);
+      if (match[1]) actions.add(match[1]);
+    }
+    for (const match of node.matchAll(/condition\s*\[([^\]]+)\]/g)) {
+      if (match[1]) conditions.add(match[1]);
     }
     return;
   }
   if (!node || typeof node !== "object") return;
   const obj = node as Record<string, unknown>;
-  const actionName = getActionName(obj);
-  if (typeof obj.type === "string" && obj.type === "action" && actionName) {
-    names.add(actionName);
+  const name = getActionName(obj);
+  const type = obj.type;
+  if (typeof name === "string") {
+    if (type === "action") actions.add(name);
+    else if (type === "condition") conditions.add(name);
   }
   for (const child of getChildNodes(obj)) {
-    collectActionNames(child, names);
+    collectByType(child, actions, conditions);
   }
+}
+
+function collectActionNames(node: unknown, names: Set<string>): void {
+  const actions = new Set<string>();
+  const conditions = new Set<string>();
+  collectByType(node, actions, conditions);
+
+  for (const name of actions) {
+    if (conditions.has(name)) {
+      throw new Error(
+        `Name "${name}" is used as both an action and a condition in the behavior tree`,
+      );
+    }
+    names.add(name);
+  }
+  for (const name of conditions) names.add(name);
 }
 
 function parseJsonIfLooksLikeJson(text: string): unknown | null {

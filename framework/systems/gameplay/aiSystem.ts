@@ -1,5 +1,5 @@
 import { query } from "bitecs";
-import { NPC } from "components";
+import { NPC, Kind } from "components";
 import { createBlackboard, type Blackboard } from "ai/blackboard";
 import { createNpcTree } from "ai/btFactory";
 import { stepBehaviourTree, type BtInstance } from "ai/btRunner";
@@ -29,6 +29,7 @@ function getRuntime(world: GameWorld): AiRuntime {
 export function setEntityKind(world: GameWorld, eid: EntityId, kind: string): void {
   const rt = getRuntime(world);
   rt.eidKind.set(eid, kind);
+  Kind[eid] = kind;
 }
 
 export function aiSystem(world: GameWorld): GameWorld {
