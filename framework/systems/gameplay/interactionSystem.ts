@@ -1,26 +1,63 @@
 import { query } from "bitecs";
-import { Transform, Player, NPC } from "components";
-import type { GameWorld, EntityId } from "world";
+import { Player, Transform, Resource, Intent } from "components";
+import type { GameWorld } from "world";
+import { harvest } from "framework/systems/gameplay/gatheringSystem";
 
-const INTERACTION_DISTANCE = 24;
+interface SystemConfig {
+  range?: number;
+}
 
-export function interactionSystem(world: GameWorld): GameWorld {
-  for (const playerEid of query(world, [Player, Transform])) {
-    for (const npcEid of query(world, [NPC, Transform])) {
-      const dist = Math.hypot(
-        Transform.x[playerEid] - Transform.x[npcEid],
-        Transform.y[playerEid] - Transform.y[npcEid],
-      );
+const DEFAULT_RANGE = 24;
 
-      if (dist <= INTERACTION_DISTANCE) {
-        world.logger.info("玩家靠近NPC", {
-          playerEid,
-          npcEid,
-          dist: Math.round(dist),
-        });
+/**
+ * interactionSystem：交互意图路由器。
+ *
+ * 输入信号（interact）由 GameSimulation.applyInputs 写入 Intent[player]；
+ * 本系统消费意图——在 range 内找最近资源节点，调 harvest；
+ * 无论成败清空 Intent（consume-or-discard 语义，不让意图跨帧堆积）。
+ *
+ * 游戏无关——只识别通用 "interact" 意图与 Resource 标签；具体产出由
+ * gatheringSystem 按 yieldsKind 决定。后续切片若加 equip/craft 等意图类型，
+ * 在此扩 switch（即需即补，不提前造意图枚举）。
+ */
+export function createInteractionSystem(config?: Record<string, unknown>) {
+  const cfg: SystemConfig = {
+    range: config?.range as number | undefined,
+  };
+
+  return function interactionSystem(world: GameWorld): GameWorld {
+    const range = cfg.range ?? DEFAULT_RANGE;
+
+    for (const playerEid of query(world, [Player, Transform])) {
+      const intent = Intent[playerEid];
+      if (!intent) continue;
+      // 先清空：意图只在本帧生效
+      Intent[playerEid] = null;
+      if (intent !== "interact") continue;
+
+      const px = Transform.x[playerEid];
+      const py = Transform.y[playerEid];
+
+      let nearestEid = -1;
+      let nearestDist = Infinity;
+      for (const nodeEid of query(world, [Resource, Transform])) {
+        const d = Math.hypot(px - Transform.x[nodeEid], py - Transform.y[nodeEid]);
+        if (d <= range && d < nearestDist) {
+          nearestEid = nodeEid;
+          nearestDist = d;
+        }
+      }
+
+      if (nearestEid >= 0) {
+        harvest(world, playerEid, nearestEid);
       }
     }
-  }
 
-  return world;
+    return world;
+  };
+}
+
+/** 无配置默认实例（向后兼容直接注册形态）。 */
+export function interactionSystem(world: GameWorld): GameWorld {
+  return createInteractionSystem()(world);
 }

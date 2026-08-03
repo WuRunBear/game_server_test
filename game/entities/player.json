@@ -6,7 +6,12 @@
     "Velocity": {},
     "Acceleration": {},
     "Collider": { "shape": 1, "halfW": 8, "halfH": 8 },
-    "Health": { "current": 100, "max": 100 }
+    "Health": { "current": 100, "max": 100 },
+    "Needs": [
+      { "name": "hunger", "current": 100, "max": 100, "decayPerSec": 0.5, "starveDmg": 1 },
+      { "name": "thirst", "current": 100, "max": 100, "decayPerSec": 0.7, "starveDmg": 1 }
+    ],
+    "Inventory": { "capacity": 12 }
   },
   "team": 1
 }

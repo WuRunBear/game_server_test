@@ -26,4 +26,12 @@ export function registerBuiltinArchetypes(registry: ArchetypeRegistry): void {
     behavior: "wander-default",
     team: 0,
   });
+
+  registry.register({
+    kind: "item",
+    tags: ["Item"],
+    components: {
+      Size: { w: 12, h: 12 },
+    },
+  });
 }

@@ -9,7 +9,9 @@ import {
 import { ArchetypeSchema } from "framework/config/schema/ArchetypeSchema";
 import { BehaviorSchema } from "framework/config/schema/BehaviorSchema";
 import { SpawnRuleSchema, SpawnRegistrySchema } from "framework/config/schema/SpawnSchema";
+import { ItemKindSchema, type ItemKindSpec } from "framework/config/schema/ItemKindSchema";
 import { MapRegistrySchema, type GeneratedMapEntryJson, type TiledMapEntryJson } from "framework/config/schema/MapRegistrySchema";
+import { getRuleSchema } from "framework/config/schema/ruleSchemas";
 import { getRegistries } from "framework/bootstrap";
 import type { MapSource } from "framework/map/types";
 import type { ArchetypeSpec } from "framework/entities/archetypeRegistry";
@@ -71,9 +73,28 @@ function loadRulesFile(baseDir: string, rulesPattern?: string): Record<string, u
   for (const file of files) {
     const raw = readJsonFile(file);
     const name = basename(file).replace(/\.json$/, "");
-    allRules[name] = raw;
+    // 已注册 schema 的规则文件名走 zod 校验；未注册的保持 raw 透传（向后兼容）
+    const schema = getRuleSchema(name);
+    allRules[name] = schema ? schema.parse(raw) : raw;
   }
   return allRules;
+}
+
+function loadItemsFile(baseDir: string, itemsPattern?: string): ItemKindSpec[] {
+  if (!itemsPattern) return [];
+  const files = loadFilesByGlob(baseDir, itemsPattern);
+  const results: ItemKindSpec[] = [];
+  const seen = new Set<string>();
+  for (const file of files) {
+    const raw = readJsonFile(file);
+    const parsed = ItemKindSchema.parse(raw);
+    if (seen.has(parsed.kind)) {
+      throw new Error(`Duplicate item kind "${parsed.kind}" in ${file}`);
+    }
+    seen.add(parsed.kind);
+    results.push(parsed);
+  }
+  return results;
 }
 
 function loadSpawnsFile(baseDir: string, spawnsPattern?: string): SpawnRule[] {
@@ -174,6 +195,11 @@ function validateIntegrity(data: LoadedGameDefinition): void {
       if (!componentRegistry.has(field.component)) {
         throw new Error(`Component "${field.component}" referenced in netSync is not registered`);
       }
+      for (const tag of field.tags ?? []) {
+        if (!componentRegistry.has(tag)) {
+          throw new Error(`Tag "${tag}" referenced in netSync (${field.component}) is not registered`);
+        }
+      }
     }
   } catch (err) {
     if (err instanceof Error && err.message.includes("not bootstrapped")) {
@@ -227,6 +253,7 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
   const resolvedBehaviors = loadBehaviorFiles(baseDir, gameDef.behaviors);
   const resolvedRules = loadRulesFile(baseDir, gameDef.rules);
   const resolvedSpawns = loadSpawnsFile(baseDir, gameDef.spawns);
+  const resolvedItems = loadItemsFile(baseDir, gameDef.items);
   const resolvedMapSource = resolveMapSource(baseDir, gameDef.map?.registry);
 
   const loaded: LoadedGameDefinition = {
@@ -235,6 +262,7 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
     resolvedBehaviors,
     resolvedRules,
     resolvedSpawns,
+    resolvedItems,
     resolvedMapSource,
   };
 
@@ -270,6 +298,7 @@ export function createDefaultGameDefinition(): LoadedGameDefinition {
     resolvedBehaviors: [],
     resolvedRules: {},
     resolvedSpawns: [],
+    resolvedItems: [],
     resolvedMapSource: undefined,
   };
 }

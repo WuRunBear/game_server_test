@@ -1,13 +1,16 @@
 export interface ArchetypeSpec {
   kind: string;
   tags?: string[];
-  components: Record<string, Record<string, unknown>>;
+  /** 组件配置值可为对象（SoA 字段）或数组等任意结构（AoS 组件）。 */
+  components: Record<string, unknown>;
   behavior?: string;
   team?: number;
 }
 
 export interface ArchetypeRegistry {
   register(spec: ArchetypeSpec): void;
+  /** 覆盖注册：同 kind 已存在时替换（game 配置优先于框架内建原型）。 */
+  override(spec: ArchetypeSpec): void;
   get(kind: string): ArchetypeSpec;
   has(kind: string): boolean;
   all(): ArchetypeSpec[];
@@ -21,6 +24,10 @@ export function createArchetypeRegistry(): ArchetypeRegistry {
       if (archetypes.has(spec.kind)) {
         throw new Error(`Archetype "${spec.kind}" is already registered`);
       }
+      archetypes.set(spec.kind, spec);
+    },
+
+    override(spec) {
       archetypes.set(spec.kind, spec);
     },
 

@@ -4,10 +4,14 @@ import { Size } from "framework/components/size";
 import { Velocity, Acceleration, Collider, ColliderShape } from "framework/components/physics";
 import { Health, Attack, Defense, Team } from "framework/components/combat";
 import { AIState, Target, BlackboardRef } from "framework/components/ai";
-import { Inventory } from "framework/components/inventory";
+import { Inventory, initInventory } from "framework/components/inventory";
+import { ItemMeta } from "framework/components/itemMeta";
+import { Needs, initNeeds } from "framework/components/needs";
+import { ResourceNode, initResourceNode } from "framework/components/resourceNode";
+import { Intent } from "framework/components/intent";
 import { NetworkId, LastSynced } from "framework/components/network";
 import { Cooldown, Duration } from "framework/components/timer";
-import { Player, Enemy, NPC, Item } from "framework/components/tags";
+import { Player, Enemy, NPC, Item, Resource } from "framework/components/tags";
 import { Kind } from "framework/components/kind";
 
 export function registerBuiltinComponents(registry: ComponentRegistry): void {
@@ -24,6 +28,10 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("Target", Target);
   registry.register("BlackboardRef", BlackboardRef);
   registry.register("Inventory", Inventory);
+  registry.register("ItemMeta", ItemMeta);
+  registry.register("Needs", Needs);
+  registry.register("ResourceNode", ResourceNode);
+  registry.register("Intent", Intent);
   registry.register("NetworkId", NetworkId);
   registry.register("LastSynced", LastSynced);
   registry.register("Cooldown", Cooldown);
@@ -32,5 +40,11 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("Enemy", Enemy);
   registry.register("NPC", NPC);
   registry.register("Item", Item);
+  registry.register("Resource", Resource);
   registry.register("Kind", Kind);
+
+  // AoS 组件初始化钩子
+  registry.registerAosInitializer("Inventory", initInventory);
+  registry.registerAosInitializer("Needs", initNeeds);
+  registry.registerAosInitializer("ResourceNode", initResourceNode);
 }

@@ -107,7 +107,7 @@ game/         ← 游戏配置 — 纯 JSON：实体、行为、地图、规则�
 
 易踩、且看代码未必能发现：
 
-- **`Inventory` 是 AoS**（普通 JS 数组），与其余 SoA（按实体 id 索引）不一致；扩展背包相关功能时注意访问方式。
+- **AoS 组件家族**：`Inventory` / `Kind` / `Needs` / `ResourceNode` / `ItemMeta` / `Intent` 都是普通 JS 数组（`[] as T[]`，按 eid 索引），与其余 SoA（bitecs 数值数组）不一致。它们**不是 bitecs 组件**——不能 `addComponent`、不能进 `query`。spawn 经组件注册表的 **AoS 初始化钩子**（`registerAosInitializer`）按 archetype 配置写入；netSync 经 **AoS 同步适配器**（`registerAosSyncAdapter`，按 `tags` 限定查询）展平为 numbers/strings。扩展此类组件时注意访问方式与查询方式。
 - **`vitest.config.ts` 缺 `simulation` 路径别名**：测试中直接 `import from "simulation"` 会失败，须经 `framework` barrel 间接引入。
 - **持久化层全为 stub**：`repository.ts` / `postgres.ts` / `redis.ts` 方法体基本为空，不要假设存档/读档已可用。
 - **当前缺陷与覆盖进度见 `docs/ROADMAP.md`**，不在本文件枚举（随修复实时变化）。

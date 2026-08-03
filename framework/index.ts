@@ -20,10 +20,13 @@ export { runHeadless, type HeadlessHostOptions } from "framework/net/headless/He
 export { createGameSimulation, GameSimulation } from "framework/simulation/GameSimulation";
 export type { SimulationPort } from "framework/simulation/SimulationPort";
 export type {
-  PlayerInput, PlayerJoinResult, TickSnapshot, TickResult, DebugSnapshotOptions,
+  PlayerInput, PlayerJoinResult, TickSnapshot, TickResult, DebugSnapshotOptions, PlayerCommand, EntitySnapshot,
 } from "framework/simulation/types";
+export { registerAosSyncAdapter, getAosSyncAdapter, type AosSyncAdapter, type AosSyncOutput } from "framework/simulation/aosSyncAdapters";
 
 export { GameDefinitionSchema, type GameDefinition, type LoadedGameDefinition, type BehaviorDefinition, type SpawnRule, type SystemEnableEntry, type NetSyncField } from "framework/config/schema/GameDefinitionSchema";
+export { ItemKindSchema, type ItemKindSpec, type ConsumeEffect } from "framework/config/schema/ItemKindSchema";
+export { registerRuleSchema, getRuleSchema, hasRuleSchema, registerBuiltinRuleSchemas } from "framework/config/schema/ruleSchemas";
 
 export {
   registerSystem,

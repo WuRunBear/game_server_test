@@ -1,0 +1,7 @@
+{
+  "kind": "item",
+  "tags": ["Item"],
+  "components": {
+    "Size": { "w": 12, "h": 12 }
+  }
+}

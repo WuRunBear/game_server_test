@@ -1,8 +1,9 @@
 # 通用 2D 游戏框架系统路线图
 
-> 目标：将当前框架从 17% 成熟度（8/50 系统）演进为通用 2D 游戏框架。
-> 现状：8 个内置系统中 6 个完整、2 个占位（inventory / interaction）。
-> Phase 0（切片前止血）已完成，修复了 5 个框架级缺陷，详见下文「已有系统状态」。
+> 目标：将当前框架演进为通用 2D 游戏框架。
+> Phase 0（切片前止血）已完成 5 个框架级缺陷修复；Slice 1（生存循环）已完成。
+> 现状：8 个内置核心系统 + Slice 1 新增 2 个生存系统（needDecay / gathering），共 10 个内置系统。
+> 详见下文「已有系统状态」。
 
 ## 一、核心仿真
 - Transform / Physics / Movement / Collision — 位置、速度积分、碰撞检测与分离
@@ -77,13 +78,19 @@
 
 ---
 
-## 当前框架覆盖（约 8/50 ≈ 17%）
+## 当前框架覆盖
 
 ### ✅ 已有
 - physics、movement、collision、ai(BT 绑定 action + condition)
-- combat（射程判定已补齐）、spawning（按 kind/多边形过滤已补齐）
-- inventory(占位)、interaction(占位)
-- sync(仅 number)、logger
+- combat（射程判定已补齐）、spawning（按 kind/多边形过滤已补齐，计数不限 NPC）
+- needDecay（Slice 1：按名衰减 Needs + 归零扣 Health + 饿死移除）
+- gathering（Slice 1：资源节点采集 + 再生；directConsume / 部分入落地）
+- interaction（Slice 1：意图路由，按 range 找最近 Resource 节点调 harvest）
+- inventory（Slice 1：堆叠拾取 + 服务端原子 transfer/drop/consume + pickupAfterMs 防瞬回）
+- AoS 组件家族（Inventory / Kind / Needs / ResourceNode / ItemMeta / Intent）+ spawn AoS 初始化钩子（仅 Inventory/Needs/ResourceNode 注册了钩子；ItemMeta/Intent/Kind 由运行时写入）
+- items 加载段（game/items/*.json + ItemKindSchema）+ 通用规则 schema 注册表
+- sync：netSync OR 语义 + AoS 适配器（numbers/strings 分流，修旧 AND-query 缺陷）
+- logger
 
 ### ❌ 缺口最大三类
 1. **AI 高级决策** — UtilityAI、StateMachine、GOAP、Perception
@@ -92,8 +99,12 @@
 
 ### 🔧 已有系统状态
 
-> Phase 0（切片前止血）已完成 5 个框架级缺陷修复：combat 射程判定、spawning 按 kind/多边形过滤、inventory 满包吞物品、systemRegistry before 语义、btFactory condition 收集。验收以 `pnpm test` + `tsc --noEmit` + `pnpm tools validate` 全绿为准。
+> Phase 0（切片前止血）已完成 5 个框架级缺陷修复：combat 射程判定、spawning 按 kind/多边形过滤、inventory 满包吞物品、systemRegistry before 语义、btFactory condition 收集。
+>
+> **Slice 1（生存循环）已完成**：玩家持续衰减的 Needs，采集食物补给否则饿死。验收 `pnpm test`（73 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空。下一切片为 Slice 2 战斗闭环。
 
 **切片内待补全（非框架缺陷）**：
-- interactionSystem：仅日志，无交互语义（待 Slice 1 生存循环）
-- inventorySystem：占位，无堆叠/丢弃/使用（待后续切片）
+- （已补全）inventorySystem：堆叠/丢弃/使用已落地（Slice 1）
+- （已补全）interactionSystem：意图路由已落地（Slice 1）
+- deathSystem / respawn / loot：仍待 Slice 2（饿死沿用 removeEntity 语义）
+- equip 原子：待 Slice 3 有真实装备需求时再加

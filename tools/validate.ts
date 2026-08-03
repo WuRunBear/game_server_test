@@ -17,6 +17,7 @@ export function validate(argv: string[]): void {
     console.log(`  行为树: ${gameDef.resolvedBehaviors.length} 个`);
     console.log(`  规则模块: ${Object.keys(gameDef.resolvedRules).length} 个`);
     console.log(`  生成规则: ${gameDef.resolvedSpawns.length} 个`);
+    console.log(`  item kind: ${gameDef.resolvedItems.length} 个`);
     console.log(`  地图: ${gameDef.resolvedMapSource ? gameDef.resolvedMapSource.id : "无"}`);
   } catch (err) {
     console.error("✗ 配置校验失败:");

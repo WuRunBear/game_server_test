@@ -1,0 +1,5 @@
+{
+  "kind": "water",
+  "maxStack": 1,
+  "consume": [{ "need": "thirst", "amount": 30 }]
+}

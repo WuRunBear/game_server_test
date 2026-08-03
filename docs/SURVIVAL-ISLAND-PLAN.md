@@ -12,8 +12,8 @@
 |----|------|------|
 | **demo 边界** | Slice 1-5 核心循环 | 生存+战斗+合成+昼夜+联机存档，约 20-30 分钟单局贯通 |
 | **完整目标** | 核心 + 建造(S6) + 社交(S7+) | demo 跑通后再评估是否继续 |
-| **变长结构建模** | runtime `Map<eid, T[]>` | Needs/LootTable 走 runtime Map，与 `world.systemRuntimes` 一致，不进 SoA、不钉死上限。最小实现 |
-| **Inventory 模型** | slot 存 `{itemId, count}` + 容量走 archetype 配置 + 独立 `Equipment` 组件（weapon/tool/armor 三槽引用 inventory 槽） | 够支撑堆叠/容量/穿戴，不造格子拖拽引擎。客户端拖拽自便 |
+| **变长结构建模** | runtime AoS 数组 + spawn 初始化钩子 | Needs/ResourceNode/Inventory/ItemMeta/Intent 统一为 `[] as T[]` AoS，与现有 Kind/Inventory 先例一致；spawn 经组件注册表的 AoS 初始化钩子按 archetype 配置写入。**S1 已替代原 systemRuntimes Map 选型**（探查发现 Kind/Inventory 已是 AoS，统一一套机制更简；netSync 也据此统一适配） |
+| **Inventory 模型** | slot 存 `{itemId, count}` + 容量走 archetype 配置 + 独立 `Equipment` 组件（weapon/tool/armor 三槽引用 inventory 槽） | 够支撑堆叠/容量/穿戴，不造格子拖拽引擎。客户端拖拽自便（**S1 落地**：slot `{kind,count}`，capacity 进 archetype，经 AoS 钩子初始化） |
 | **服务端操作原子** | `equip/transfer/drop/consume/use` 作为 Inventory/Equipment 系统的对外接口 | 客户端 UI 调这些 RPC，服务端权威做数据变更与校验 |
 
 ## 总原则（来自 AGENTS.md §AI 协作铁律，强制）
@@ -31,26 +31,34 @@
 
 | 扩展点 | 现状 | 切片 | 修法 |
 |--------|------|------|------|
-| **Inventory 数据模型** | 4 固定槽存 eid，无堆叠 | S1 | slot 改 `{itemId,count}` + 容量字段进 archetype |
-| **netSync** | `组件.标量字段` 清单 | S1 | 扩支持聚合/数组字段（按索引同步），让 Needs/Inventory 能到客户端 UI |
+| **Inventory 数据模型** | 4 固定槽存 eid，无堆叠 | S1 | slot 改 `{kind,count}` + 容量字段进 archetype（经 AoS 初始化钩子） |
+| **AoS archetype 初始化** | spawn 只认 SoA，AoS 组件声明静默无效 | S1 | `componentRegistry` 加 `registerAosInitializer`，`spawn.ts` 按 `Array.isArray` 分支调钩子写入 `CompAoS[eid]` |
+| **items 加载段** | 无 item kind 概念与目录 | S1 | `GameDefinitionSchema` 加 `items` 键 + `ItemKindSchema` + `loadItemsFile` + `itemsByKind` 索引（`game/items/*.json`） |
+| **netSync** | `组件.标量字段` 清单；AND-query 排除缺组件的实体；线路仅 number | S1 | 三层改造：① OR 语义（逐条目独立查询合并）② AoS 适配器（`registerAosSyncAdapter` 按 tags 限定，展平 numbers/strings）③ `EntityState.stringValues` 字符串线路 |
 | **SpawnSchema** | `{kind,zoneId,max,respawnMs}` | S4 | 加可选 `condition` 字段引用通用 condition 模块（夜刷狼用） |
-| **RuleSchema** | 仅有 CombatRule（`.passthrough()`） | S1/S3/S4 | 加 `NeedsRuleSchema`/`CraftingRuleSchema`/`DayNightRuleSchema` |
+| **RuleSchema** | 仅有 CombatRule（`.passthrough()`） | S1/S3/S4 | 加 `NeedsRuleSchema`（S1 已落地）/`CraftingRuleSchema`/`DayNightRuleSchema`；`ruleSchemas` 注册表已建（S1） |
 | **BT 通用节点** | 已支持 action+condition | S2 | 在 `framework/ai/nodes/` 加通用 condition/action（IsTargetInView/IsNight/Chase/Flee/Sleep）注册到 actionRegistry |
 | **Persistence 接口** | stub | S5 | 补 `repository.ts` 实现 |
 
 ---
 
-## Slice 1 — 生存循环（"能活、会死"）
+## Slice 1 — 生存循环（"能活、会死"）✅ 已完成
 
 **目标**：玩家有持续衰减的生理需求，需采集食物补给，否则死亡。
+
+> **S1 实施修正（来自落地探查，写回此计划）**：
+> - 变长结构统一走 AoS 数组 + spawn 初始化钩子（替代原 systemRuntimes Map 选型，见上表）
+> - 跨切片前置表补 3 项 S1 真前置：items 加载段、AoS archetype 初始化、netSync 三处深层改造（OR 语义 / 字符串线路 / AoS 数据源）
+> - `ResourceNode` 因字符串引用（yieldsKind）改为 AoS 形态（计划表原写 SoA）；
+> - `equip` 原子按即需即补推迟到 Slice 3 有真实装备需求时再加，S1 不留空 stub。
 
 ### 新增框架组件（通用，游戏无关）
 
 | 组件 | 形态 | 字段 | 备注 |
 |------|------|------|------|
-| `Kind` | SoA `u32` | `kindId` | Phase 0 #2 已落地或本切片补：实体 kind 记录，gathering/loot/perception 共用 |
-| `Needs` | **runtime `Map<eid, Need[]>`** 存 `world.systemRuntimes` | `Need={name,current,max,decayPerSec,starveDmg,callback?}` | 变长，游戏侧填 `Hunger`/`Thirst` 名 |
-| `ResourceNode` | SoA | `remaining, amountPerHit, regenMs, yieldsKindId` | `yieldsKindId` 指向 item kind 表 |
+| `Kind` | AoS `string[]` | — | Phase 0 #2 已落地：`Kind[eid]` 存 archetype.kind 字符串，spawn 经 `setEntityKind` 写入；gathering/loot/perception 共用 |
+| `Needs` | AoS `(Need[] \| undefined)[]` | `Need={name,current,max,decayPerSec,starveDmg}` | 变长；游戏侧填 `hunger`/`thirst` 名；经 `registerAosInitializer` 从 archetype 数组深拷贝；`callback?` 不存（consume 效果按 need 名匹配） |
+| `ResourceNode` | AoS `(ResourceNodeState \| undefined)[]` | `remaining,max,amountPerHit,regenMs,yieldsKind,directConsume,depletedSinceMs` | `yieldsKind` 为 item kind **字符串**引用；`directConsume` 直接施放不入背包；`depletedSinceMs` 供再生记账 |
 
 ### 新增/扩展框架系统
 
@@ -65,24 +73,25 @@
 
 作为 `inventorySystem` 对外接口（客户端 RPC 调用）：
 - `transfer(fromSlot, toSlot)` — 背包内移动/合并
-- `drop(slot, x, y)` — 丢到地面成 item 实体
-- `consume(slot)` — 食用：触发"恢复 Need"回调 + 消耗
-- `equip(slot)` — 装入 Equipment 槽（Slice 3 完整生效，S1 预留接口）
+- `drop(slot)` — 丢到地面成 item 实体（`ItemMeta` 带 `pickupAfterMs` 防瞬回）
+- `consume(slot)` — 食用：按 item.consume 效果名匹配恢复 Need + 消耗
+- `equip(slot)` — **推迟到 Slice 3** 有真实装备需求时再加（S1 不留空 stub）
 
 ### game/ 配置
 
 | 文件 | 内容 |
 |------|------|
-| `game/entities/player.json` | 加 `Needs:[{Hunger,decay 0.5/s},{Thirst,decay 0.7/s}]`、`Inventory{capacity:12}` |
+| `game/entities/player.json` | 加 `Needs:[{hunger,decay 0.5/s,starveDmg 1},{thirst,decay 0.7/s,starveDmg 1}]`、`Inventory{capacity:12}` |
 | `game/entities/berry_bush.json` | ResourceNode：remaining 5, yields `berry`, regenMs 60000 |
 | `game/entities/tree.json` | ResourceNode：yields `wood` |
-| `game/entities/water_pool.json` | ResourceNode 特例：交互直接补 Thirst（不入背包） |
+| `game/entities/water_pool.json` | ResourceNode 特例：`directConsume` 直接补 Thirst（不入背包），remaining 9999 常驻 |
 | `game/entities/item.json` | 通用 item 原型（落地产物用） |
-| `game/items/berry.json` | item kind=berry, consume 回 Need(Hunger,+20) |
-| `game/items/wood.json` | item kind=wood（材料，无 consume） |
-| `game/rules/needs.json` | 通用衰减规则 + starveDamage |
-| `game/spawns/populations.json` | 资源节点初始布置 |
-| `game/game.json` | `systems` 启用 needDecay/gathering；`netSync.fields` 加 `Needs.current` |
+| `game/items/berry.json` | item kind=berry, consume 回 Need(hunger,+20), maxStack 20 |
+| `game/items/wood.json` | item kind=wood（材料，无 consume）, maxStack 50 |
+| `game/items/water.json` | item kind=water（供 water_pool directConsume 引用）, consume 回 Need(thirst,+30) |
+| `game/rules/needs.json` | 全局衰减倍率 `{decayScale}`；starveDmg 逐项放 player.json 的每个 Need 上 |
+| `game/spawns/populations.json` | 资源节点初始布置（berry_bush 8 / tree 6 / water_pool 2） |
+| `game/game.json` | `systems` 启用 needDecay/gathering/interaction(range 24)；`netSync.fields` 加 `Needs{tags:Player,name/current/max}`/`Inventory{tags:Player,slots}`/`ItemMeta{tags:Item,kind/count}`/`ResourceNode{tags:Resource,remaining}` |
 
 ### 测试点
 

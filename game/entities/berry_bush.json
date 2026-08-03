@@ -1,0 +1,14 @@
+{
+  "kind": "berry_bush",
+  "tags": ["Resource"],
+  "components": {
+    "Size": { "w": 16, "h": 16 },
+    "ResourceNode": {
+      "remaining": 5,
+      "max": 5,
+      "amountPerHit": 1,
+      "regenMs": 60000,
+      "yieldsKind": "berry"
+    }
+  }
+}

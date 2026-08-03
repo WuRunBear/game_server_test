@@ -7,6 +7,7 @@ import { createArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import { registerBuiltinArchetypes } from "framework/entities/registerBuiltinArchetypes";
 import { createGeneratorRegistry } from "framework/map/generatorRegistry";
 import { registerBuiltinGenerators } from "framework/map/registerBuiltinGenerators";
+import { registerBuiltinRuleSchemas } from "framework/config/schema/ruleSchemas";
 
 export interface FrameworkRegistries {
   componentRegistry: ReturnType<typeof createComponentRegistry>;
@@ -34,6 +35,8 @@ export function bootstrapFramework(): FrameworkRegistries {
 
   const generatorRegistry = createGeneratorRegistry();
   registerBuiltinGenerators(generatorRegistry);
+
+  registerBuiltinRuleSchemas();
 
   registries = { componentRegistry, systemRegistry, actionRegistry, archetypeRegistry, generatorRegistry };
   return registries;

@@ -23,6 +23,26 @@ export interface PlayerInput {
   moveX: number;
   /** 垂直移动分量 */
   moveY: number;
+  /**
+   * 交互意图信号：本帧玩家按下交互键（采集等）。
+   * 由 interactionSystem 在该 tick 内消费并清空。
+   */
+  interact?: boolean;
+}
+
+/**
+ * 玩家命令——非逐帧的离散操作（背包原子：食用/丢弃/移动槽）。
+ *
+ * 与 PlayerInput（脉冲式逐帧移动）区别：命令是即刻执行的服务端权威动作，
+ * 不进入 seq 去重 / 帧缓存。type 保持框架通用机制词（consume/drop/transfer），
+ * 不含游戏语义。
+ */
+export interface PlayerCommand {
+  type: "consume" | "drop" | "transfer";
+  /** 目标槽索引（consume/drop 用）；transfer 的源槽。 */
+  slot?: number;
+  /** transfer 目标槽。 */
+  toSlot?: number;
 }
 
 /**
@@ -37,13 +57,27 @@ export interface PlayerJoinResult {
 }
 
 /**
+ * 单实体快照——一个实体在某一帧的全部同步字段。
+ *
+ * 拆成数值 / 字符串两套 map：对应 Colyseus EntityState 的 values / stringValues。
+ * 字段 key 格式 "ComponentName.field"（如 "Transform.x"）或 AoS 展开形态
+ * "Component.index.field"（如 "Needs.0.current"、"Inventory.0.kind"）。
+ */
+export interface EntitySnapshot {
+  /** 数值字段。 */
+  values: Record<string, number>;
+  /** 字符串字段（AoS 适配器展平出的 kind / need 名等）。 */
+  strings: Record<string, string>;
+}
+
+/**
  * 单帧快照——仿真层产出的纯数据，传输层用它来更新客户端状态。
  *
  * 核心思路：
  * - entities 中只包含"还活着的实体"。传输层拿到后做 diff：
  *   快照里有但 RoomState 没有 → 新实体，创建 EntityState
  *   快照里没有但 RoomState 有 → 实体已死亡，从 RoomState 删除
- *   两边都有 → 更新字段值
+ *   两边都有 → 更新字段值（含按 key diff 清理已消失的字段）
  * - 字段 key 格式为 "ComponentName.fieldName"（如 "Transform.x"），
  *   由 game.json 的 netSync 配置驱动，无硬编码。
  */
@@ -53,9 +87,9 @@ export interface TickSnapshot {
   /**
    * 存活实体快照。
    * - key: networkId（NetworkId 组件的值，稳定标识）
-   * - value: 字段映射，key 格式 "ComponentName.fieldName"，value 是字段数值
+   * - value: 实体快照（数值字段 + 字符串字段）
    */
-  entities: Map<number, Record<string, number>>;
+  entities: Map<number, EntitySnapshot>;
 }
 
 /**

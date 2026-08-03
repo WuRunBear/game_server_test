@@ -13,20 +13,27 @@
     { "id": "movement" },
     { "id": "collision" },
     { "id": "combat", "config": { "friendlyFire": false } },
+    { "id": "needDecay" },
     { "id": "spawning" },
     { "id": "inventory" },
-    { "id": "interaction" }
+    { "id": "gathering" },
+    { "id": "interaction", "config": { "range": 24 } }
   ],
   "entities": "./entities/*.json",
   "behaviors": "./behaviors/*.json",
   "rules": "./rules/*.json",
   "spawns": "./spawns/*.json",
+  "items": "./items/*.json",
   "netSync": {
     "fields": [
       { "component": "Transform", "fields": ["x", "y"] },
       { "component": "Health", "fields": ["current"] },
       { "component": "Collider", "fields": ["shape", "radius"] },
-      { "component": "Size", "fields": ["w", "h"] }
+      { "component": "Size", "fields": ["w", "h"] },
+      { "component": "Needs", "tags": ["Player"], "fields": ["name", "current", "max"] },
+      { "component": "Inventory", "tags": ["Player"], "fields": ["slots"] },
+      { "component": "ItemMeta", "tags": ["Item"], "fields": ["kind", "count"] },
+      { "component": "ResourceNode", "tags": ["Resource"], "fields": ["remaining"] }
     ]
   }
 }

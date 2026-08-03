@@ -8,8 +8,10 @@ import { collisionSystem } from "framework/systems/core/collisionSystem";
 import { aiSystem } from "framework/systems/gameplay/aiSystem";
 import { createCombatSystem } from "framework/systems/gameplay/combatSystem";
 import { inventorySystem } from "framework/systems/gameplay/inventorySystem";
-import { interactionSystem } from "framework/systems/gameplay/interactionSystem";
+import { createInteractionSystem } from "framework/systems/gameplay/interactionSystem";
 import { spawningSystem } from "framework/systems/gameplay/spawningSystem";
+import { needDecaySystem } from "framework/systems/gameplay/needDecaySystem";
+import { gatheringSystem } from "framework/systems/gameplay/gatheringSystem";
 
 import { setDefaultActionRegistry } from "framework/ai/btFactory";
 import { registerBuiltinActions } from "framework/ai/registerBuiltinActions";
@@ -64,8 +66,20 @@ export function registerBuiltinSystems(
   });
 
   systemRegistry.register({
-    id: "interaction",
-    factory: (_world: GameWorld) => interactionSystem,
+    id: "gathering",
+    factory: (_world: GameWorld) => gatheringSystem,
     after: ["inventory"],
+  });
+
+  systemRegistry.register({
+    id: "interaction",
+    factory: (_world: GameWorld, config?: Record<string, unknown>) => createInteractionSystem(config),
+    after: ["gathering"],
+  });
+
+  systemRegistry.register({
+    id: "needDecay",
+    factory: (_world: GameWorld) => needDecaySystem,
+    after: ["combat"],
   });
 }

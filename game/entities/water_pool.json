@@ -1,0 +1,15 @@
+{
+  "kind": "water_pool",
+  "tags": ["Resource"],
+  "components": {
+    "Size": { "w": 16, "h": 16 },
+    "ResourceNode": {
+      "remaining": 9999,
+      "max": 9999,
+      "amountPerHit": 1,
+      "regenMs": 0,
+      "yieldsKind": "water",
+      "directConsume": true
+    }
+  }
+}

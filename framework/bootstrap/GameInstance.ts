@@ -29,12 +29,13 @@ export function createGameInstance(gameDef: LoadedGameDefinition): GameInstance 
   world.actions = actionRegistry;
   world.generators = generatorRegistry;
 
+  // 构建 item kind 索引，供采集/消耗等系统按 kind 字符串查表
+  gameDef.itemsByKind = new Map(gameDef.resolvedItems.map((i) => [i.kind, i]));
+
+  // game 配置实体优先于框架内建原型（player/villager 等）——
+  // 内建仅作 createDefaultGameDefinition 的兜底，真实 game/*.json 应能完全定义游戏内容
   for (const entity of gameDef.resolvedEntities) {
-    try {
-      archetypeRegistry.register(entity);
-    } catch {
-      // 实体已在默认原型中注册（如 player/villager），JSON 版本以默认版本为准
-    }
+    archetypeRegistry.override(entity);
   }
 
   const systems = buildSystems(world, gameDef.systems ?? [], systemRegistry);

@@ -1,7 +1,7 @@
 import { Room, type Client } from "@colyseus/core";
 
 import { createGameSimulation, type SimulationPort } from "simulation";
-import type { PlayerInput, TickSnapshot } from "simulation/types";
+import type { PlayerInput, PlayerCommand, TickSnapshot } from "simulation/types";
 import { loadGameDefinition } from "framework/bootstrap/loadGameDefinition";
 import { EntityState } from "network/colyseus/state/EntityState";
 import { RoomState } from "network/colyseus/state/RoomState";
@@ -28,6 +28,18 @@ function isPlayerInput(message: unknown): message is PlayerInput {
     typeof obj.seq === "number" &&
     typeof obj.moveX === "number" &&
     typeof obj.moveY === "number"
+  );
+}
+
+/** 命令消息类型守卫：只做结构校验，游戏逻辑校验在仿真层。 */
+function isPlayerCommand(message: unknown): message is PlayerCommand {
+  if (!message || typeof message !== "object") return false;
+  const obj = message as Record<string, unknown>;
+  return (
+    typeof obj.type === "string" &&
+    (obj.type === "consume" || obj.type === "drop" || obj.type === "transfer") &&
+    (obj.slot === undefined || typeof obj.slot === "number") &&
+    (obj.toSlot === undefined || typeof obj.toSlot === "number")
   );
 }
 
@@ -132,6 +144,12 @@ export class GameRoom extends Room<{ state: RoomState }> {
     this.onMessage("input", (client: Client, message: unknown) => {
       if (!isPlayerInput(message)) return;
       this.sim.submitInput(client.sessionId, message);
+    });
+
+    // 背包原子命令：食用 / 丢弃 / 移动槽
+    this.onMessage("command", (client: Client, message: unknown) => {
+      if (!isPlayerCommand(message)) return;
+      this.sim.submitCommand(client.sessionId, message);
     });
 
     // 订阅碰撞调试推送
@@ -241,7 +259,7 @@ export class GameRoom extends Room<{ state: RoomState }> {
     // alive 集合记录快照中出现的所有实体 networkId
     const alive = new Set<number>();
 
-    for (const [networkId, values] of snapshot.entities) {
+    for (const [networkId, snap] of snapshot.entities) {
       alive.add(networkId);
       const key = String(networkId);
 
@@ -253,10 +271,26 @@ export class GameRoom extends Room<{ state: RoomState }> {
         this.state.entities.set(key, entityState);
       }
 
-      // 逐字段更新（Colyseus Schema 的 MapSchema.set 会标记 dirty，触发增量序列化）
-      for (const [fieldKey, value] of Object.entries(values)) {
+      // 数值字段：按 key diff 更新 + 清理本帧已消失的字段
+      // （如实体某 AoS 索引缩短后，旧 key 不应残留）
+      const nextNumberKeys = new Set<string>();
+      for (const [fieldKey, value] of Object.entries(snap.values)) {
+        nextNumberKeys.add(fieldKey);
         entityState.values.set(fieldKey, value);
       }
+      entityState.values.forEach((_v: number, k: string) => {
+        if (!nextNumberKeys.has(k)) entityState.values.delete(k);
+      });
+
+      // 字符串字段：同样的 diff 清理
+      const nextStringKeys = new Set<string>();
+      for (const [fieldKey, value] of Object.entries(snap.strings)) {
+        nextStringKeys.add(fieldKey);
+        entityState.stringValues.set(fieldKey, value);
+      }
+      entityState.stringValues.forEach((_v: string, k: string) => {
+        if (!nextStringKeys.has(k)) entityState.stringValues.delete(k);
+      });
     }
 
     // 清理已死亡的实体：RoomState 中有但 alive 集合中没有的

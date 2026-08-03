@@ -29,7 +29,8 @@ import { NPC, Player, Item } from "framework/components/tags";
 import { Kind } from "framework/components/kind";
 import { Collider } from "framework/components/physics";
 import { Size } from "framework/components/size";
-import { Inventory, type InventorySlots } from "framework/components/inventory";
+import { Inventory, type InventoryEntry } from "framework/components/inventory";
+import { ItemMeta } from "framework/components/itemMeta";
 import type { MapRuntime } from "framework/map";
 import type { GameWorld } from "framework/world";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
@@ -426,7 +427,7 @@ describe("inventorySystem (Item 5)", () => {
       Transform: { x: 0, y: 0 },
       Player: {},
     });
-    Inventory[player] = { slot0: 0, slot1: 0, slot2: 0, slot3: 0 } as InventorySlots;
+    Inventory[player] = { capacity: 4, slots: Array.from({ length: 4 }, () => null) };
 
     const itemEids: number[] = [];
     for (let i = 0; i < 5; i++) {
@@ -434,26 +435,30 @@ describe("inventorySystem (Item 5)", () => {
         Transform: { x: i, y: i },
         Item: {},
       });
+      ItemMeta[item] = { kind: "testitem", count: 1, pickupAfterMs: 0 };
       itemEids.push(item);
     }
 
     inventorySystem(world);
 
-    const slots = Inventory[player]!;
-    expect(slots.slot0).toBe(itemEids[0]);
-    expect(slots.slot1).toBe(itemEids[1]);
-    expect(slots.slot2).toBe(itemEids[2]);
-    expect(slots.slot3).toBe(itemEids[3]);
+    const inv = Inventory[player]!;
+    expect(inv.slots[0]?.kind).toBe("testitem");
+    expect(inv.slots[0]?.count).toBe(1);
+    expect(inv.slots[1]?.kind).toBe("testitem");
+    expect(inv.slots[2]?.kind).toBe("testitem");
+    expect(inv.slots[3]?.kind).toBe("testitem");
+    expect(inv.slots[4] ?? null).toBe(null);
 
     for (let i = 0; i < 4; i++) {
       expect(hasComponent(world, itemEids[i], Item)).toBe(false);
     }
+    // 第 5 个因满包未入——保留 Defect-3 的「满包不吞物品」语义
     expect(hasComponent(world, itemEids[4], Item)).toBe(true);
   });
 });
 
 describe("interactionSystem (Item 5)", () => {
-  it("should detect nearby NPCs", () => {
+  it("should step a tick without error when no interact intent is issued", () => {
     const gameDef = createDefaultGameDefinition();
     const instance = createGameInstance(gameDef);
 
@@ -820,8 +825,8 @@ describe("GameSimulation input handling", () => {
     const p2 = r2.snapshot.entities.get(networkId)!;
 
     // position should not change between consecutive ticks without new input
-    expect(p2["Transform.x"]).toBe(p1["Transform.x"]);
-    expect(p2["Transform.y"]).toBe(p1["Transform.y"]);
+    expect(p2.values["Transform.x"]).toBe(p1.values["Transform.x"]);
+    expect(p2.values["Transform.y"]).toBe(p1.values["Transform.y"]);
   });
 
   it("should apply fresh input after previous input has been consumed", () => {
@@ -840,9 +845,9 @@ describe("GameSimulation input handling", () => {
     const p2 = r2.snapshot.entities.get(networkId)!;
 
     // x: moved in first tick, should not move in second
-    expect(p2["Transform.x"]).toBe(p1["Transform.x"]);
+    expect(p2.values["Transform.x"]).toBe(p1.values["Transform.x"]);
     // y: moved in second tick
-    expect(p2["Transform.y"]).toBeGreaterThan(p1["Transform.y"]);
+    expect(p2.values["Transform.y"]).toBeGreaterThan(p1.values["Transform.y"]);
   });
 });
 

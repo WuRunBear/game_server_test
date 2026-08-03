@@ -1,5 +1,5 @@
 import { query } from "bitecs";
-import { NPC, Transform, Kind } from "components";
+import { Transform, Kind } from "components";
 import type { GameWorld } from "world";
 import { spawnEntity } from "framework/entities/spawn";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
@@ -29,7 +29,9 @@ function countInZone(world: GameWorld, kind: string, zoneId: number): number {
 
   const hasPoly = zone.polygon.length >= 3;
   let count = 0;
-  for (const eid of query(world, [NPC])) {
+  // 按 Kind + zone 计数，不限定 NPC 标签——否则非 NPC 类型的 spawn rule
+  // （如资源节点、S4 夜刷狼）max 上限永不生效，会无限刷出
+  for (const eid of query(world, [Transform])) {
     if (Kind[eid] !== kind) continue;
     if (hasPoly && !pointInPolygon(Transform.x[eid], Transform.y[eid], zone.polygon)) continue;
     count++;

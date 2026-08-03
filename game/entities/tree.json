@@ -1,0 +1,14 @@
+{
+  "kind": "tree",
+  "tags": ["Resource"],
+  "components": {
+    "Size": { "w": 16, "h": 16 },
+    "ResourceNode": {
+      "remaining": 3,
+      "max": 3,
+      "amountPerHit": 1,
+      "regenMs": 120000,
+      "yieldsKind": "wood"
+    }
+  }
+}

@@ -25,4 +25,11 @@ export class EntityState extends Schema {
    */
   @type({ map: "number" })
   values = new MapSchema<number>();
+
+  /**
+   * 字符串字段映射——AoS 适配器展平出的字符串字段（如 "Inventory.0.kind"）。
+   * 与数值 values 分开存放，因 Colyseus MapSchema 类型单一。
+   */
+  @type({ map: "string" })
+  stringValues = new MapSchema<string>();
 }

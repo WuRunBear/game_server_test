@@ -1,5 +1,5 @@
 import type {
-  PlayerInput, PlayerJoinResult, TickResult, DebugSnapshotOptions,
+  PlayerInput, PlayerJoinResult, TickResult, DebugSnapshotOptions, PlayerCommand,
 } from "./types";
 
 /**
@@ -69,6 +69,17 @@ export interface SimulationPort {
    * @param input 输入数据
    */
   submitInput(sessionId: string, input: PlayerInput): void;
+
+  /**
+   * 提交一条玩家命令（离散动作，非逐帧）。
+   *
+   * 立即执行服务端权威变更（如背包原子），不入帧缓存、不做 seq 去重。
+   * 返回是否成功执行；未知命令类型返回 false。
+   *
+   * @param sessionId Colyseus 连接标识
+   * @param command 命令数据
+   */
+  submitCommand(sessionId: string, command: PlayerCommand): boolean;
 
   /**
    * 获取当前帧的碰撞调试快照。

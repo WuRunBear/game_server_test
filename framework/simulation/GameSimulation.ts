@@ -1,5 +1,5 @@
 import { query, removeEntity } from "bitecs";
-import { NetworkId, Velocity } from "components";
+import { NetworkId, Velocity, Inventory, Intent } from "components";
 import { spawnEntity } from "framework/entities/spawn";
 import { createGameInstance, type GameInstance } from "framework/bootstrap/GameInstance";
 import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
@@ -8,10 +8,12 @@ import { recordTick } from "framework/metrics";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import type { EntityId, GameWorld } from "world";
+import { consumeSlot, dropSlot, transferSlot } from "framework/systems/gameplay/inventoryOps";
+import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
 
 import type { SimulationPort } from "./SimulationPort";
 import type {
-  PlayerInput, PlayerJoinResult, TickSnapshot, TickResult, DebugSnapshotOptions,
+  PlayerInput, PlayerJoinResult, TickSnapshot, TickResult, DebugSnapshotOptions, PlayerCommand, EntitySnapshot,
 } from "./types";
 
 /**
@@ -37,8 +39,8 @@ import type {
  * ## 主要职责
  *
  * 1. **玩家管理**：`addPlayer()` 创建玩家实体，`removePlayer()` 销毁并清理
- * 2. **输入处理**：`submitInput()` 接收 + seq 去重，`applyInputs()` 写入 ECS
- * 3. **快照构建**：`buildSnapshot()` 用 bitecs query 遍历实体，读取配置的同步字段
+ * 2. **输入处理**：`submitInput()` 接收 + seq 去重，`applyInputs()` 写入 ECS；`submitCommand()` 处理离散动作
+ * 3. **快照构建**：`buildSnapshot()` 用配置的 netSync 字段从 ECS 派生快照（含 AoS 适配）
  * 4. **指标记录**：`tick()` 中记录性能数据，帧过慢时输出告警
  * 5. **调试支持**：`getDebugSnapshot()` 获取碰撞调试数据
  */
@@ -83,7 +85,7 @@ export class GameSimulation implements SimulationPort {
    * ```
    * 表示每帧快照要包含 Transform.x 和 Transform.y。
    */
-  private netSyncFields: { component: string; fields: string[] }[];
+  private netSyncFields: { component: string; fields: string[]; tags?: string[] }[];
 
   /**
    * 组件注册表引用，用于 netSync 配置中按名称查找 bitecs 组件对象。
@@ -232,6 +234,34 @@ export class GameSimulation implements SimulationPort {
   }
 
   /**
+   * 提交玩家命令（离散动作）：食用 / 丢弃 / 槽位移动。
+   * 立即执行服务端权威变更；立即返回是否成功。
+   *
+   * @param sessionId Colyseus 连接标识
+   * @param command 命令数据（consume/drop/transfer）
+   */
+  submitCommand(sessionId: string, command: PlayerCommand): boolean {
+    const eid = this.playerEidBySessionId.get(sessionId);
+    if (typeof eid !== "number") return false;
+
+    switch (command.type) {
+      case "consume":
+        return consumeSlot(this.world, eid, command.slot ?? -1);
+      case "drop":
+        return dropSlot(this.world, eid, command.slot ?? -1);
+      case "transfer":
+        return transferSlot(
+          Inventory[eid]!,
+          command.slot ?? -1,
+          command.toSlot ?? -1,
+          (kind) => this.world.gameDef.itemsByKind?.get(kind)?.maxStack ?? 1,
+        );
+      default:
+        return false;
+    }
+  }
+
+  /**
    * 获取碰撞调试快照。
    *
    * 返回值是 unknown 而非具体类型，因为传输层不需要理解快照结构——
@@ -255,6 +285,9 @@ export class GameSimulation implements SimulationPort {
    *
    * 与旧实现的差异：旧实现不清空缓存，导致断线后玩家持续移动。
    * 现在改为每帧"消费即丢弃"，每个输入只生效一帧。
+   *
+   * 另外：若 input.interact 为真，写入 Intent[eid] = "interact"，
+   * 由 interactionSystem 在本帧 step 内消费。
    */
   private applyInputs(): void {
     for (const eid of this.playerEidBySessionId.values()) {
@@ -267,6 +300,10 @@ export class GameSimulation implements SimulationPort {
       if (typeof eid !== "number") continue;
       Velocity.vx[eid] = input.moveX;
       Velocity.vy[eid] = input.moveY;
+      // 交互意图：本帧按下则置位，由 interactionSystem 在 step 中消费并清空
+      if (input.interact) {
+        Intent[eid] = "interact";
+      }
     }
 
     this.latestInputBySessionId.clear();
@@ -275,69 +312,84 @@ export class GameSimulation implements SimulationPort {
   /**
    * 从 ECS World 构建快照——读取所有存活实体的同步字段。
    *
-   * **bitecs query 机制**（初学者理解这个很重要）：
+   * **OR 语义**：按每个 netSync 条目独立查询并合并，实体只要命中任一条目
+   * 的限定条件就会被同步对应字段。历史单一 AND-query 会把"缺一个同步组件
+   * 的实体"整体排除（如裸 Transform 的 item 实体对客户端不可见），已废弃。
    *
-   * bitecs 实体是一个整数（eid），组件是 SoA（Structure of Arrays）——
-   * 每种组件属性的所有实体值存在一个数组中。例如：
-   * ```
-   * Transform.x = [undefined, 100, 200, 50, ...]
-   *    索引 eid=1 的 x 值是 100
-   *    索引 eid=2 的 x 值是 200
-   * ```
-   *
-   * `query(world, [ComponentA, ComponentB])` 返回同时拥有这些组件的所有 eid。
-   *
-   * **buildSnapshot 的工作流程**：
-   * 1. 根据 netSync 配置构造 query 的组件列表：[NetworkId, Transform, Health, ...]
-   * 2. 调用 bitecs query 获取所有需要同步的实体 eid
-   * 3. 对每个实体：通过 NetworkId.value[eid] 获取稳定 ID，通过 comp[field][eid] 读字段值
-   * 4. 组装成 TickSnapshot DTO
+   * **两条数据路径**：
+   * - SoA 组件（bitecs）：按该组件 query，读 `comp[field][eid]` 标量数值
+   * - AoS 组件（JS 数组）：按 entry.tags 限定 query 范围，交 aosSyncAdapter
+   *   展平为 `{ numbers, strings }`，字符串写入 stringValues（见 EntityState）
    *
    * @returns 本帧纯数据快照（无 bitecs/ECS 依赖）
    */
   private buildSnapshot(): TickSnapshot {
     const tick = this.world.time.tick;
-    const entities = new Map<number, Record<string, number>>();
+    const entities = new Map<number, EntitySnapshot>();
 
-    // 如果 game.json 没有配置 netSync 字段，返回空快照（客户端看不到实体）
+    // 无同步配置 → 空快照（客户端看不到实体）
     if (this.netSyncFields.length === 0) return { tick, entities };
 
-    // 构建 bitecs query 组件列表
-    // NetworkId 是必需的——它是快照中实体的 key
-    const queryComponents: unknown[] = [NetworkId];
     for (const field of this.netSyncFields) {
-      if (this.componentRegistry.has(field.component)) {
-        queryComponents.push(this.componentRegistry.get(field.component));
+      const comp = this.componentRegistry.get(field.component) as
+        | Record<string, unknown>
+        | unknown[]
+        | undefined;
+      if (!comp) continue;
+
+      const ensure = (id: number): EntitySnapshot => {
+        let snap = entities.get(id);
+        if (!snap) {
+          snap = { values: {}, strings: {} };
+          entities.set(id, snap);
+        }
+        return snap;
+      };
+
+      if (Array.isArray(comp)) {
+        // AoS 组件：通过 tags 限定查询范围，再交适配器展平为 numbers/strings
+        const adapter = getAosSyncAdapter(field.component);
+        if (!adapter) continue;
+        for (const eid of this.queryByTags(field.tags)) {
+          const snap = ensure(NetworkId.value[eid]);
+          const result = adapter(this.world, eid, field.fields);
+          Object.assign(snap.values, result.numbers);
+          Object.assign(snap.strings, result.strings);
+        }
+        continue;
       }
-    }
 
-    // 遍历每一个同时拥有 NetworkId + 配置组件的实体
-    for (const eid of query(this.world, queryComponents)) {
-      const id = NetworkId.value[eid]; // 稳定网络 ID（不等于 eid）
-      const values: Record<string, number> = {};
-
-      // 读取 netSync 配置的每个字段值
-      for (const field of this.netSyncFields) {
-        // 从注册表拿到 bitecs 组件对象（如 Transform 组件）
-        const comp = this.componentRegistry.get(field.component) as
-          Record<string, unknown> | undefined;
-        if (!comp) continue;
-
+      // SoA 组件：按该组件查询实体（含 NetworkId），读标量数值
+      for (const eid of query(this.world, [NetworkId, comp as object])) {
+        const id = NetworkId.value[eid];
+        const snap = ensure(id);
         for (const fname of field.fields) {
-          // 组件对象是一个 SoA 结构：comp.x = [undefined, 100, 200, ...]
-          // comp.x[eid] 就是 eid 号实体的 x 值
           const arr = (comp as Record<string, { [eid: number]: number }>)[fname];
           if (typeof arr === "object" && eid in arr) {
-            // key 格式："Transform.x"、"Health.current" 等
-            values[`${field.component}.${fname}`] = arr[eid];
+            snap.values[`${field.component}.${fname}`] = arr[eid];
           }
         }
       }
-
-      entities.set(id, values);
     }
 
     return { tick, entities };
+  }
+
+  /**
+   * 按 netSync 条目的 tags 限定查询实体（始终含 NetworkId）。
+   * tags 提供 AoS 适配查询范围（如 ItemMeta 仅查 [Item] 实体）；
+   * 不提供 tags 时返回所有带 NetworkId 的实体，由适配器判断 AoS 数据是否在。
+   */
+  private queryByTags(tags: readonly string[] | undefined): ReturnType<typeof query> {
+    const comps: object[] = [NetworkId];
+    if (tags) {
+      for (const t of tags) {
+        if (this.componentRegistry.has(t)) {
+          comps.push(this.componentRegistry.get(t) as object);
+        }
+      }
+    }
+    return query(this.world, comps);
   }
 }
 
