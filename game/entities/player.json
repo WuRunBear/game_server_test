@@ -13,7 +13,8 @@
       { "name": "hunger", "current": 100, "max": 100, "decayPerSec": 0.5, "starveDmg": 1 },
       { "name": "thirst", "current": 100, "max": 100, "decayPerSec": 0.7, "starveDmg": 1 }
     ],
-    "Inventory": { "capacity": 12 }
+    "Inventory": { "capacity": 12 },
+    "Equipment": { "weaponSlot": -1, "toolSlot": -1, "armorSlot": -1 }
   },
   "team": 1
 }

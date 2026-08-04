@@ -1,8 +1,8 @@
 # 通用 2D 游戏框架系统路线图
 
 > 目标：将当前框架演进为通用 2D 游戏框架。
-> Phase 0（切片前止血）已完成 5 个框架级缺陷修复；Slice 1（生存循环）与 Slice 2（战斗闭环）已完成。
-> 现状：8 个内置核心系统 + Slice 1 新增 2 个生存系统（needDecay / gathering）+ Slice 2 新增 3 个系统（perception / death / respawn），共 13 个内置系统。
+> Phase 0（切片前止血）已完成 5 个框架级缺陷修复；Slice 1（生存循环）、Slice 2（战斗闭环）与 Slice 3（合成与装备）已完成。
+> 现状：8 个内置核心系统 + Slice 1 新增 2 个生存系统（needDecay / gathering）+ Slice 2 新增 3 个系统（perception / death / respawn）+ Slice 3 新增 1 个系统（equipment），共 14 个内置系统；crafting 为命令驱动的原子模块（无 tick 体，inventoryOps 先例）。
 > 详见下文「已有系统状态」。
 
 ## 一、核心仿真
@@ -89,9 +89,12 @@
 - gathering（Slice 1：资源节点采集 + 再生；directConsume / 部分入落地）
 - interaction（Slice 1：意图路由按 range 找最近 Resource 调 harvest；Slice 2 加 attack 路由）
 - inventory（Slice 1：堆叠拾取 + 服务端原子 transfer/drop/consume + pickupAfterMs 防瞬回）
+- equipment（Slice 3：equipSlot 穿戴原子 + getEquipModifiers 加成读取（on-read，组件值不变）+ tick 体槽位引用卫生；加成经 ItemKindSchema.equip 声明）
+- crafting（Slice 3：craftRecipe 原子模块，PlayerCommand `craft` 驱动；站类型/距离校验、缺料/满包拒零副作用、dry-run 防满包丢产出；recipes 经 CraftingRuleSchema 校验 + validateIntegrity 引用检查）
 - AoS 组件家族（Inventory / Kind / Needs / ResourceNode / ItemMeta / Intent / LootTable）+ spawn AoS 初始化钩子（Inventory/Needs/ResourceNode/LootTable 注册了钩子；ItemMeta/Intent/Kind 由运行时写入）
+- SoA 组件补充（Slice 3）：Equipment（weapon/tool/armor 三槽引用 inventory 槽 idx，-1=空）、CraftingStation（stationType: ui32，0=通用手搓）
 - BT 通用节点（Slice 2）：conditions IsTargetInVision/InAttackRange + actions Chase/Flee/Attack（ActionFactory 放宽为 `State | boolean`）
-- items 加载段（game/items/*.json + ItemKindSchema）+ 通用规则 schema 注册表
+- items 加载段（game/items/*.json + ItemKindSchema，Slice 3 加 equip 穿戴效果）+ 通用规则 schema 注册表（combat/needs/crafting）
 - sync：netSync OR 语义 + AoS 适配器（numbers/strings 分流，修旧 AND-query 缺陷）
 - logger
 
@@ -107,9 +110,11 @@
 > **Slice 1（生存循环）已完成**：玩家持续衰减的 Needs，采集食物补给否则饿死。验收 `pnpm test`（73 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空。
 >
 > **Slice 2（战斗闭环）已完成**：boar 感知→追击→攻击，玩家 attack 意图近战反击，击杀掉肉，玩家死亡自动重生。验收 `pnpm test`（102 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空。下一切片为 Slice 3 合成与装备。
+>
+> **Slice 3（合成与装备）已完成**：采集石头/木头 → 合成工具（gatherMult×2）/武器（attackBonus）→ 装备生效；cooked_meat 需火堆站点；缺料/满包/站点校验零副作用。验收 `pnpm test`（126 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空。下一切片为 Slice 4 世界氛围。
 
 **切片内待补全（非框架缺陷）**：
 - （已补全）inventorySystem：堆叠/丢弃/使用已落地（Slice 1）
 - （已补全）interactionSystem：意图路由已落地（Slice 1）
 - （已补全）deathSystem / respawn / loot：已落地（Slice 2，loot 并入 deathSystem）
-- equip 原子：待 Slice 3 有真实装备需求时再加
+- （已补全）equip 原子：已落地（Slice 3，equipSlot + on-read 加成修正）

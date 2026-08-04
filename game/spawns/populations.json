@@ -5,6 +5,8 @@
     { "kind": "tree", "zoneId": 1, "max": 6, "respawnMs": 1000 },
     { "kind": "water_pool", "zoneId": 1, "max": 2, "respawnMs": 1000 },
     { "kind": "boar", "zoneId": 1, "max": 3, "respawnMs": 20000 },
-    { "kind": "rabbit", "zoneId": 1, "max": 4, "respawnMs": 15000 }
+    { "kind": "rabbit", "zoneId": 1, "max": 4, "respawnMs": 15000 },
+    { "kind": "rock", "zoneId": 1, "max": 6, "respawnMs": 1000 },
+    { "kind": "campfire", "zoneId": 1, "max": 1, "respawnMs": 1000 }
   ]
 }

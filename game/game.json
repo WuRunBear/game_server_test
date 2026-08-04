@@ -19,6 +19,7 @@
     { "id": "inventory" },
     { "id": "gathering" },
     { "id": "interaction", "config": { "range": 24 } },
+    { "id": "equipment" },
     { "id": "death" },
     { "id": "respawn" }
   ],
@@ -36,7 +37,9 @@
       { "component": "Needs", "tags": ["Player"], "fields": ["name", "current", "max"] },
       { "component": "Inventory", "tags": ["Player"], "fields": ["slots"] },
       { "component": "ItemMeta", "tags": ["Item"], "fields": ["kind", "count"] },
-      { "component": "ResourceNode", "tags": ["Resource"], "fields": ["remaining"] }
+      { "component": "ResourceNode", "tags": ["Resource"], "fields": ["remaining"] },
+      { "component": "Equipment", "fields": ["weaponSlot", "toolSlot", "armorSlot"] },
+      { "component": "CraftingStation", "fields": ["stationType"] }
     ]
   }
 }

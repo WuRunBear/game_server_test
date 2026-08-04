@@ -3,6 +3,7 @@ import { Health, Attack, Defense, Team } from "components";
 import { Cooldown, Transform } from "components";
 import type { GameWorld } from "world";
 import { getRuleModule } from "framework/api";
+import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
 
 export const DEFAULT_COOLDOWN_MS = 1000;
 export const DEFAULT_ATTACK_RANGE = 32;
@@ -76,8 +77,9 @@ export function attackTarget(world: GameWorld, attackerEid: number, targetEid: n
   );
   if (dist > attackerRange) return false;
 
-  const attackerDamage = Attack.value[attackerEid] ?? 10;
-  const targetDefense = Defense.value[targetEid] ?? 0;
+  const attackerDamage = (Attack.value[attackerEid] ?? 10) + getEquipModifiers(world, attackerEid).attackBonus;
+  const targetDefense =
+    (Defense.value[targetEid] ?? 0) + getEquipModifiers(world, targetEid).defenseBonus;
 
   let damage = Math.max(1, attackerDamage - targetDefense);
 

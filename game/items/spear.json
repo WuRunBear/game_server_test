@@ -1,0 +1,5 @@
+{
+  "kind": "spear",
+  "maxStack": 1,
+  "equip": { "slot": "weapon", "attackBonus": 15 }
+}

@@ -1,0 +1,8 @@
+{
+  "kind": "campfire",
+  "components": {
+    "Size": { "w": 24, "h": 24 },
+    "Collider": { "shape": 1, "halfW": 12, "halfH": 12 },
+    "CraftingStation": { "stationType": 1 }
+  }
+}

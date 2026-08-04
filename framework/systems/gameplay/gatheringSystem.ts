@@ -2,6 +2,7 @@ import { query } from "bitecs";
 import { Resource, ResourceNode, Needs, Inventory, type ResourceNodeState } from "components";
 import type { GameWorld } from "world";
 import { addToInventory, spawnDroppedItem } from "framework/systems/gameplay/inventoryOps";
+import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
 import type { ConsumeEffect } from "framework/config/schema/ItemKindSchema";
 
 /**
@@ -22,7 +23,8 @@ export function harvest(world: GameWorld, actorEid: number, nodeEid: number): bo
   const item = itemKinds?.get(nodeState.yieldsKind);
   if (!item) return false;
 
-  const amount = nodeState.amountPerHit;
+  // 采集倍率：工具槽的 gatherMult 修正单次产出量
+  const amount = Math.round(nodeState.amountPerHit * getEquipModifiers(world, actorEid).gatherMult);
 
   if (nodeState.directConsume) {
     // 直接施加 consume 效果（如直接饮用），不经过背包

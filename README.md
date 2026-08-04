@@ -55,21 +55,23 @@ framework/
     index.ts                # 模块 barrel 导出
   components/               # ECS 组件 + componentRegistry
     componentRegistry.ts    # 组件注册表: 名 → defineComponent
-    registerBuiltin.ts      # 注册 29 个内置组件
+    registerBuiltin.ts      # 注册 31 个内置组件
     index.ts                # barrel 导出
     transform.ts, size.ts, physics.ts (Velocity/Acceleration/Collider/ColliderShape),
     combat.ts (Health/Attack/Defense/Team), ai.ts (AIState/Target/BlackboardRef),
-    perception.ts (SoA 感知), inventory.ts (AoS 例外), network.ts (NetworkId/LastSynced),
+    perception.ts (SoA 感知), equipment.ts / craftingStation.ts (SoA 装备/站点),
+    inventory.ts (AoS 例外), network.ts (NetworkId/LastSynced),
     timer.ts (Cooldown/Duration), tags.ts (Player/Enemy/NPC/Item/Resource),
     needs.ts / resourceNode.ts / loot.ts / intent.ts / kind.ts / itemMeta.ts (AoS 家族)
   systems/
     systemRegistry.ts       # 系统注册表 + buildSystems (拓扑排序, Kahn 算法)
-    registerBuiltinSystems.ts   # 注册 13 个内置系统
+    registerBuiltinSystems.ts   # 注册 14 个内置系统
     index.ts                # barrel 导出
     core/                   # physicsSystem, movementSystem, collisionSystem
     gameplay/               # perceptionSystem, aiSystem, combatSystem, spawningSystem,
                             # inventorySystem, interactionSystem, needDecaySystem,
-                            # gatheringSystem, deathSystem, respawnSystem
+                            # gatheringSystem, deathSystem, respawnSystem, equipmentSystem
+                            # (craftingSystem 为命令驱动的原子模块，无 tick 体，不注册为系统)
   entities/
     archetypeRegistry.ts    # 原型注册表: kind → ArchetypeSpec
     registerBuiltinArchetypes.ts   # 注册 player, villager 2 个内置原型
@@ -118,12 +120,12 @@ src/
   register.ts               # 扩展注册入口（当前仅调用 bootstrapFramework()，无自定义扩展）
 
 game/
-  game.json                 # GameDefinition 主入口：tickRate=20, 13 个系统, netSync 配置
-  entities/                 # player, villager, boar, rabbit, berry_bush, tree, water_pool, item
+  game.json                 # GameDefinition 主入口：tickRate=20, 14 个系统, netSync 配置
+  entities/                 # player, villager, boar, rabbit, berry_bush, tree, water_pool, item, rock, campfire
   behaviors/                # wander-default, boar-hostile, rabbit-flee
-  rules/                    # combat.json, needs.json, respawn.json
+  rules/                    # combat.json, needs.json, respawn.json, crafting.json
   spawns/                   # populations.json
-  items/                    # berry, wood, water, raw_meat (item kind 数据)
+  items/                    # berry, wood, water, raw_meat, stone, axe, stone_axe, spear, berry_pie, cooked_meat (item kind 数据)
   maps/                     # registry.json
 
 tools/
@@ -138,7 +140,7 @@ tools/
 由 `GameRoom.setSimulationInterval` 驱动，每 tick：
 1. 接收客户端输入 → Velocity
 2. `gameInstance.step(dtMs)`
-3. 系统按拓扑排序执行：AI → Physics → Movement → Collision → Combat → Spawning → Inventory → Interaction
+3. 系统按拓扑排序执行：AI → Physics → Movement → Collision → Combat → Spawning → Inventory → Interaction → Equipment
 4. 同步 ECS 状态 → Colyseus RoomState
 
 ### 配置系统

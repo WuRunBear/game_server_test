@@ -182,34 +182,58 @@
 
 ---
 
-## Slice 3 — 合成与装备（"有成长"）
+## Slice 3 — 合成与装备（"有成长"）✅ 已完成
+
+> **S3 实施修正（来自落地探查，写回此计划）**：
+> - `Equipment` 落地为 **SoA**（固定三标量字段 weapon/tool/armorSlot，引用 Inventory 槽
+>    idx，-1=空）——固定长度不属变长结构，SoA 可原生 query/netSync，无需 AoS 钩子/适配器
+> - **craftingSystem 落地为命令驱动的原子模块（无 tick 体）**：合成是离散事件且需选配方，
+>   意图通道（字符串脉冲）承载不了 recipe id，改走 PlayerCommand `{type:"craft", recipe}`
+>   （inventoryOps 先例）；不注册系统、不进 game.json；GameRoom 仅扩展命令白名单
+> - **equipmentSystem 注册为系统**（id="equipment"，after interaction），tick 体只做
+>   装备槽引用卫生（指向空槽的 ref → -1，保证 netSync 的 Equipment 字段诚实）；
+>   穿戴原子 `equipSlot` 走 PlayerCommand `{type:"equip", slot}`
+> - **装备加成 on-read 修正**：combatSystem/gatheringSystem 每次读 `getEquipModifiers`
+>   （攻击/防御数值累加、采集倍率乘算），组件值不变——无 base 字段、无逐 tick 变异、
+>   测试残留面最小（legacy 数组跨 world 互踩是 S2 主要测试坑）；`unequip` 不做：
+>   drop/transfer/consume 后引用被读取方自愈 + tick 体归 -1
+> - item 穿戴效果进 `ItemKindSchema.equip`（slot/attackBonus/defenseBonus/gatherMult），
+>   装备加成单源在 item kind 配置；combat 参数仍单源 `rules/combat.json`
+> - armor 物品与 campfire_kit 的 Placeable 推迟到有真实需求（装备槽与加成数学已通用就绪）；
+>   campfire 以静态实体 + population 规则放置（框架暂无地图静态实体机制）
+> - `validateIntegrity` 补 recipe input/output 引用 item kind 存在性校验（防配置笔误）
 
 ### 新增框架组件
 
-| 组件 | 字段 |
-|------|------|
-| `Equipment` | `weaponSlot, toolSlot, armorSlot`（引用 inventory 槽 idx） |
-| `CraftingStation` | `stationType: u32` |
+| 组件 | 形态 | 字段 |
+|------|------|------|
+| `Equipment` | SoA（落地修正） | `weaponSlot, toolSlot, armorSlot`（引用 inventory 槽 idx，-1=空） |
+| `CraftingStation` | SoA | `stationType: ui32` |
 
 ### 新增/扩展框架系统
 
 | 系统 | 职责 |
 |------|------|
-| `craftingSystem` | Recipe：inputs 消耗 → output 产出；校 stationType；缺料/满包则拒 |
-| `equipmentSystem` | 穿戴 → 影响 Attack/Defense/采集速率（S1 预留的 equip 原子在此生效） |
-| `gatheringSystem` | 读 Equipment 修正（axe→wood×2） |
-| `combatSystem` | 读 Equipment 攻防加成 |
+| `craftingSystem` | **原子模块**（落地修正：无 tick 体，PlayerCommand `craft` 驱动）：Recipe inputs 消耗 → output 产出；校 stationType；缺料/满包则拒（零副作用）；dry-run 防满包丢产出 |
+| `equipmentSystem` | `equipSlot` 穿戴原子 + `getEquipModifiers` 加成读取 + tick 体槽位卫生（落地修正：加成 on-read 修正，组件值不变） |
+| `gatheringSystem` | 读 Equipment 修正（工具 gatherMult 乘算单次产出） |
+| `combatSystem` | 读 Equipment 攻防加成（攻击者 attackBonus / 目标 defenseBonus） |
 
 ### game/ 配置
 
-- `game/rules/crafting.json`：recipes（wood_axe:2wood→axe / stone_axe:1wood+1stone / spear:2wood+1stone→近战+15 / berry_pie:3berry→高饱腹 / cooked_meat:需 stationType=cook）
+- `game/rules/crafting.json`：recipes（wood_axe:2wood→axe / stone_axe:1wood+1stone→tool 采集×2 / spear:2wood+1stone→weapon+15 / berry_pie:3berry→高饱腹 / cooked_meat:1raw_meat→高饱腹，stationType=1）+ stationRange
 - `game/entities/rock.json`：ResourceNode yields stone
-- `game/items/{axe,stone_axe,spear,berry_pie,cooked_meat}.json`
-- `game/items/campfire_kit.json`：可 Placeable CraftingStation（火堆烹饪实际进 S4，本切片先放静态 campfire 实体）
+- `game/entities/campfire.json`：静态 CraftingStation(stationType=1) 实体（落地修正：本切片以 population 规则放置；Placeable/摆放进 S4）
+- `game/items/{axe,stone_axe,spear,berry_pie,cooked_meat,stone}.json`：equip 效果声明在 item kind（落地修正：ItemKindSchema 加 equip 字段）
+- `game/entities/player.json`：加 Equipment{-1,-1,-1}
+- `game/game.json`：systems 启用 equipment；netSync 加 Equipment/CraftingStation 字段
 
 ### 测试点
 
-- 合成成功/缺料拒绝/满包拒绝、装备数值生效、采集速率修正
+- 合成成功/缺料拒绝/满包拒绝（dry-run 零副作用）、半满堆叠合并、站点类型与距离校验
+- equipSlot 三槽写入/拒绝、getEquipModifiers 槽类型匹配 + 空槽自愈、tick 体槽位卫生
+- 装备数值生效（combat 攻防加成）、采集速率修正（gatherMult 翻倍）
+- 命令路由（GameSimulation craft/equip）+ netSync 接线 + 真实 game 配置集成（validateIntegrity 校验 recipe 引用）
 
 ### demo 里程碑
 

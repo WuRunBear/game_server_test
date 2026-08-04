@@ -1,0 +1,10 @@
+{
+  "recipes": [
+    { "id": "wood_axe", "inputs": [{ "kind": "wood", "count": 2 }], "outputs": [{ "kind": "axe", "count": 1 }] },
+    { "id": "stone_axe", "inputs": [{ "kind": "wood", "count": 1 }, { "kind": "stone", "count": 1 }], "outputs": [{ "kind": "stone_axe", "count": 1 }] },
+    { "id": "spear", "inputs": [{ "kind": "wood", "count": 2 }, { "kind": "stone", "count": 1 }], "outputs": [{ "kind": "spear", "count": 1 }] },
+    { "id": "berry_pie", "inputs": [{ "kind": "berry", "count": 3 }], "outputs": [{ "kind": "berry_pie", "count": 1 }] },
+    { "id": "cooked_meat", "stationType": 1, "inputs": [{ "kind": "raw_meat", "count": 1 }], "outputs": [{ "kind": "cooked_meat", "count": 1 }] }
+  ],
+  "stationRange": 64
+}

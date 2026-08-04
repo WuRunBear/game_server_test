@@ -36,18 +36,20 @@ export interface PlayerInput {
 }
 
 /**
- * 玩家命令——非逐帧的离散操作（背包原子：食用/丢弃/移动槽）。
+ * 玩家命令——非逐帧的离散操作（背包原子：食用/丢弃/移动槽/合成/穿戴）。
  *
  * 与 PlayerInput（脉冲式逐帧移动）区别：命令是即刻执行的服务端权威动作，
- * 不进入 seq 去重 / 帧缓存。type 保持框架通用机制词（consume/drop/transfer），
- * 不含游戏语义。
+ * 不进入 seq 去重 / 帧缓存。type 保持框架通用机制词（consume/drop/transfer/
+ * craft/equip），不含游戏语义。
  */
 export interface PlayerCommand {
-  type: "consume" | "drop" | "transfer";
-  /** 目标槽索引（consume/drop 用）；transfer 的源槽。 */
+  type: "consume" | "drop" | "transfer" | "craft" | "equip";
+  /** 目标槽索引（consume/drop/equip 用）；transfer 的源槽。 */
   slot?: number;
   /** transfer 目标槽。 */
   toSlot?: number;
+  /** 合成配方 id（craft 用，引用 rules/crafting.json 的 recipes[].id）。 */
+  recipe?: string;
 }
 
 /**

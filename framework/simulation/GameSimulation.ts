@@ -9,6 +9,8 @@ import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import type { EntityId, GameWorld } from "world";
 import { consumeSlot, dropSlot, transferSlot } from "framework/systems/gameplay/inventoryOps";
+import { equipSlot } from "framework/systems/gameplay/equipmentSystem";
+import { craftRecipe } from "framework/systems/gameplay/craftingSystem";
 import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
 
 import type { SimulationPort } from "./SimulationPort";
@@ -256,6 +258,10 @@ export class GameSimulation implements SimulationPort {
           command.toSlot ?? -1,
           (kind) => this.world.gameDef.itemsByKind?.get(kind)?.maxStack ?? 1,
         );
+      case "equip":
+        return equipSlot(this.world, eid, command.slot ?? -1);
+      case "craft":
+        return craftRecipe(this.world, eid, command.recipe ?? "");
       default:
         return false;
     }

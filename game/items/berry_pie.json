@@ -1,0 +1,5 @@
+{
+  "kind": "berry_pie",
+  "maxStack": 10,
+  "consume": [{ "need": "hunger", "amount": 40 }]
+}

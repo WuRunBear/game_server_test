@@ -37,9 +37,14 @@ function isPlayerCommand(message: unknown): message is PlayerCommand {
   const obj = message as Record<string, unknown>;
   return (
     typeof obj.type === "string" &&
-    (obj.type === "consume" || obj.type === "drop" || obj.type === "transfer") &&
+    (obj.type === "consume" ||
+      obj.type === "drop" ||
+      obj.type === "transfer" ||
+      obj.type === "craft" ||
+      obj.type === "equip") &&
     (obj.slot === undefined || typeof obj.slot === "number") &&
-    (obj.toSlot === undefined || typeof obj.toSlot === "number")
+    (obj.toSlot === undefined || typeof obj.toSlot === "number") &&
+    (obj.recipe === undefined || typeof obj.recipe === "string")
   );
 }
 

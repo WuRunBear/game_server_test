@@ -15,6 +15,7 @@ import { createInteractionSystem } from "framework/systems/gameplay/interactionS
 import { spawningSystem } from "framework/systems/gameplay/spawningSystem";
 import { needDecaySystem } from "framework/systems/gameplay/needDecaySystem";
 import { gatheringSystem } from "framework/systems/gameplay/gatheringSystem";
+import { equipmentSystem } from "framework/systems/gameplay/equipmentSystem";
 
 import { setDefaultActionRegistry } from "framework/ai/btFactory";
 import { registerBuiltinActions } from "framework/ai/registerBuiltinActions";
@@ -84,6 +85,12 @@ export function registerBuiltinSystems(
     id: "interaction",
     factory: (_world: GameWorld, config?: Record<string, unknown>) => createInteractionSystem(config),
     after: ["gathering"],
+  });
+
+  systemRegistry.register({
+    id: "equipment",
+    factory: (_world: GameWorld) => equipmentSystem,
+    after: ["interaction"],
   });
 
   systemRegistry.register({

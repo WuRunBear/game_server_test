@@ -1,5 +1,9 @@
 import type { ZodType } from "zod";
-import { CombatRuleSchema, NeedsRuleSchema } from "framework/config/schema/RuleSchema";
+import {
+  CombatRuleSchema,
+  NeedsRuleSchema,
+  CraftingRuleSchema,
+} from "framework/config/schema/RuleSchema";
 
 /**
  * 通用规则 schema 注册表。
@@ -29,4 +33,5 @@ export function hasRuleSchema(name: string): boolean {
 export function registerBuiltinRuleSchemas(): void {
   registerRuleSchema("combat", CombatRuleSchema);
   registerRuleSchema("needs", NeedsRuleSchema);
+  registerRuleSchema("crafting", CraftingRuleSchema);
 }

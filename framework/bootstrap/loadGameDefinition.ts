@@ -201,6 +201,20 @@ function validateIntegrity(data: LoadedGameDefinition): void {
         }
       }
     }
+
+    const crafting = data.resolvedRules["crafting"] as
+      | { recipes?: { id: string; inputs: { kind: string }[]; outputs: { kind: string }[] }[] }
+      | undefined;
+    if (crafting?.recipes) {
+      const knownKinds = new Set(data.resolvedItems.map((i) => i.kind));
+      for (const recipe of crafting.recipes) {
+        for (const io of [...recipe.inputs, ...recipe.outputs]) {
+          if (!knownKinds.has(io.kind)) {
+            throw new Error(`Recipe "${recipe.id}" references unknown item kind "${io.kind}"`);
+          }
+        }
+      }
+    }
   } catch (err) {
     if (err instanceof Error && err.message.includes("not bootstrapped")) {
       return;

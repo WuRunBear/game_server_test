@@ -21,3 +21,32 @@ export const NeedsRuleSchema = z.object({
 }).passthrough();
 
 export type NeedsRule = z.infer<typeof NeedsRuleSchema>;
+
+/**
+ * 合成配方：inputs 消耗 → outputs 产出。
+ *
+ * - `stationType`：需要的站点类型编号（缺省 0 = 通用手搓，无需站点）；
+ *   非 0 时要求合成者在 stationRange 内有匹配类型的 CraftingStation
+ * - `inputs` / `outputs`：kind 字符串引用 item 表 + 数量
+ *
+ * 字段名保持游戏无关（kind/stationType 皆为通用机制词）。
+ */
+const RecipeInputSchema = z.object({
+  kind: z.string(),
+  count: z.number().int().positive(),
+});
+
+const RecipeSchema = z.object({
+  id: z.string(),
+  stationType: z.number().int().nonnegative().optional(),
+  inputs: z.array(RecipeInputSchema).min(1),
+  outputs: z.array(RecipeInputSchema).min(1),
+});
+
+export const CraftingRuleSchema = z.object({
+  recipes: z.array(RecipeSchema).optional(),
+  stationRange: z.number().positive().optional(),
+}).passthrough();
+
+export type CraftingRecipe = z.infer<typeof RecipeSchema>;
+export type CraftingRule = z.infer<typeof CraftingRuleSchema>;
