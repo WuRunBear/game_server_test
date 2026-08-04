@@ -202,6 +202,17 @@
 > - armor 物品与 campfire_kit 的 Placeable 推迟到有真实需求（装备槽与加成数学已通用就绪）；
 >   campfire 以静态实体 + population 规则放置（框架暂无地图静态实体机制）
 > - `validateIntegrity` 补 recipe input/output 引用 item kind 存在性校验（防配置笔误）
+>
+> **S3 审查修复（第一轮，写回此计划）**：
+> - 装备引用卫生与读取规则对齐：槽内换入不匹配物品（transfer 换物）也归 -1——
+>   否则物品换回时加成会未经 equip 命令静默恢复，且 netSync 持续广播过期 ref
+> - `submitCommand` 统一死亡/重生窗口守卫（与 applyInputs/interactionSystem 一致）：
+>   死亡玩家不可 craft/equip/consume/drop/transfer（补的是 slice-2 遗留的同类缺口）
+> - gatheringSystem：gatherMult 取整为 0 时（含 directConsume 路径）不动节点
+> - framework/index 补导出 EquipEffect / CraftingRecipe / CraftingRule 类型
+> - 记录不修（即需即补）：Equipment/CraftingStation 的 spawn 未声明字段残留
+>   （潜伏，当前 game 配置三槽全声明规避；S5 联机前再议）、craftRecipe 部分产出
+>   （全量拒绝是设计取舍）、attackTarget 缺 Transform/Team 边界（slice-2 既有）
 
 ### 新增框架组件
 
