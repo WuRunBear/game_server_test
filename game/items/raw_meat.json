@@ -1,0 +1,5 @@
+{
+  "kind": "raw_meat",
+  "maxStack": 20,
+  "consume": [{ "need": "hunger", "amount": 30 }]
+}

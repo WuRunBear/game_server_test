@@ -8,6 +8,8 @@ import { Inventory, initInventory } from "framework/components/inventory";
 import { ItemMeta } from "framework/components/itemMeta";
 import { Needs, initNeeds } from "framework/components/needs";
 import { ResourceNode, initResourceNode } from "framework/components/resourceNode";
+import { LootTable, initLootTable } from "framework/components/loot";
+import { Perception } from "framework/components/perception";
 import { Intent } from "framework/components/intent";
 import { NetworkId, LastSynced } from "framework/components/network";
 import { Cooldown, Duration } from "framework/components/timer";
@@ -31,6 +33,8 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("ItemMeta", ItemMeta);
   registry.register("Needs", Needs);
   registry.register("ResourceNode", ResourceNode);
+  registry.register("LootTable", LootTable);
+  registry.register("Perception", Perception);
   registry.register("Intent", Intent);
   registry.register("NetworkId", NetworkId);
   registry.register("LastSynced", LastSynced);
@@ -47,4 +51,5 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.registerAosInitializer("Inventory", initInventory);
   registry.registerAosInitializer("Needs", initNeeds);
   registry.registerAosInitializer("ResourceNode", initResourceNode);
+  registry.registerAosInitializer("LootTable", initLootTable);
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { addComponent, addEntity, hasComponent, query } from "bitecs";
+import { addComponent, addEntity, hasComponent, query, removeEntity } from "bitecs";
+import { State } from "mistreevous";
 import {
   bootstrapFramework,
   createGameInstance,
@@ -8,28 +9,47 @@ import {
   loadGameDefinition,
   spawnEntity,
   getRegistries,
+  createActionRegistry,
 } from "framework/index";
 import { Transform } from "framework/components/transform";
 import { Size } from "framework/components/size";
-import { Health } from "framework/components/combat";
+import { Velocity } from "framework/components/physics";
+import { Health, Attack, Defense, Team } from "framework/components/combat";
+import { Cooldown } from "framework/components/timer";
 import { NetworkId } from "framework/components/network";
-import { Player, Resource, Item } from "framework/components/tags";
+import { Player, Resource, Item, Enemy, NPC } from "framework/components/tags";
+import { Perception } from "framework/components/perception";
 import { Inventory, type InventoryEntry } from "framework/components/inventory";
 import { ItemMeta } from "framework/components/itemMeta";
 import { Needs, type Need } from "framework/components/needs";
 import { ResourceNode } from "framework/components/resourceNode";
+import { LootTable } from "framework/components/loot";
 import { Intent } from "framework/components/intent";
 import { needDecaySystem } from "framework/systems/gameplay/needDecaySystem";
 import { inventorySystem } from "framework/systems/gameplay/inventorySystem";
 import { harvest } from "framework/systems/gameplay/gatheringSystem";
 import { createInteractionSystem } from "framework/systems/gameplay/interactionSystem";
+import { attackTarget } from "framework/systems/gameplay/combatSystem";
+import { deathSystem } from "framework/systems/gameplay/deathSystem";
+import { respawnSystem } from "framework/systems/gameplay/respawnSystem";
+import { perceptionSystem } from "framework/systems/gameplay/perceptionSystem";
 import {
   addToInventory,
   consumeSlot,
   dropSlot,
   transferSlot,
 } from "framework/systems/gameplay/inventoryOps";
-import { setEntityKind } from "framework/systems/gameplay/aiSystem";
+import { setEntityKind, getOrCreateBlackboard } from "framework/systems/gameplay/aiSystem";
+import {
+  createBlackboard,
+  bbGet,
+  bbSet,
+  BB_PERCEPTION_TARGET,
+  type PerceivedTarget,
+} from "framework/ai/blackboard";
+import { createNpcTree } from "framework/ai/btFactory";
+import { stepBehaviourTree } from "framework/ai/btRunner";
+import { registerBuiltinActions } from "framework/ai/registerBuiltinActions";
 import type { GameWorld } from "framework/world";
 import type { ItemKindSpec } from "framework/config/schema/ItemKindSchema";
 
@@ -48,6 +68,7 @@ function setItemKind(world: GameWorld, spec: ItemKindSpec): void {
 
 interface PlayerOpts {
   x?: number; y?: number; hp?: number; capacity?: number; needs?: Need[];
+  attack?: { value: number; range?: number };
 }
 
 /** 手工 spawn 测试玩家：写 Player/Health/Transform + Inventory/Needs AoS。 */
@@ -57,10 +78,17 @@ function spawnTestPlayer(world: GameWorld, opts: PlayerOpts = {}): number {
   addComponent(world, eid, NetworkId);
   addComponent(world, eid, Player);
   addComponent(world, eid, Health);
+  addComponent(world, eid, Team);
   Transform.x[eid] = opts.x ?? 0;
   Transform.y[eid] = opts.y ?? 0;
   Health.current[eid] = opts.hp ?? 100;
   Health.max[eid] = 100;
+  Team.id[eid] = 1;
+  if (opts.attack) {
+    addComponent(world, eid, Attack);
+    Attack.value[eid] = opts.attack.value;
+    Attack.range[eid] = opts.attack.range ?? 0;
+  }
   const capacity = opts.capacity ?? 4;
   Inventory[eid] = { capacity, slots: Array.from({ length: capacity }, () => null) };
   Needs[eid] = opts.needs ?? [];
@@ -116,6 +144,39 @@ function spawnGroundItem(world: GameWorld, opts: GroundItemOpts = {}): number {
   };
   NetworkId.value[eid] = world.nextNetworkId++;
   setEntityKind(world, eid, "test-item");
+  return eid;
+}
+
+interface EnemyOpts {
+  x?: number; y?: number; hp?: number;
+  attack?: { value: number; range?: number };
+  visionRadius?: number;
+  team?: number;
+}
+
+/** 手工 spawn 测试敌实体：NPC+Enemy 标签 + Perception + 可选 Attack/LootTable。 */
+function spawnTestEnemy(world: GameWorld, opts: EnemyOpts = {}): number {
+  const eid = addEntity(world);
+  addComponent(world, eid, Transform);
+  addComponent(world, eid, NetworkId);
+  addComponent(world, eid, NPC);
+  addComponent(world, eid, Enemy);
+  addComponent(world, eid, Health);
+  addComponent(world, eid, Perception);
+  addComponent(world, eid, Team);
+  Transform.x[eid] = opts.x ?? 0;
+  Transform.y[eid] = opts.y ?? 0;
+  Health.current[eid] = opts.hp ?? 30;
+  Health.max[eid] = opts.hp ?? 30;
+  Perception.visionRadius[eid] = opts.visionRadius ?? 100;
+  Team.id[eid] = opts.team ?? 2;
+  if (opts.attack) {
+    addComponent(world, eid, Attack);
+    Attack.value[eid] = opts.attack.value;
+    Attack.range[eid] = opts.attack.range ?? 0;
+  }
+  NetworkId.value[eid] = world.nextNetworkId++;
+  setEntityKind(world, eid, "test-enemy");
   return eid;
 }
 
@@ -228,7 +289,7 @@ describe("needDecaySystem", () => {
     expect(Needs[player]![0].current).toBeCloseTo(99.5, 5);
   });
 
-  it("归零时扣 Health；Health≤0 移除实体", () => {
+  it("归零时扣 Health；实体保留（死亡统一归 deathSystem）", () => {
     const world = createBareWorld();
     const player = spawnTestPlayer(world, {
       hp: 50,
@@ -237,7 +298,8 @@ describe("needDecaySystem", () => {
     world.time.dtMs = 1000;
     needDecaySystem(world);
     expect(Health.current[player]).toBeLessThanOrEqual(0);
-    expect(query(world, [Player]).length).toBe(0);
+    // 饿死不直接移除：玩家分支由 deathSystem 标记重生
+    expect(query(world, [Player]).length).toBe(1);
   });
 
   it("decayedScale 规则倍率生效", () => {
@@ -388,19 +450,265 @@ describe("Slice 1 集成：生存循环两条路径", () => {
     expect(Needs[player]![0].current).toBe(60);
   });
 
-  it("路径 B：不补给 → 饿死移除", () => {
+  it("路径 B：不补给 → 饿死 → deathSystem 标记 → respawnSystem 原地重生", () => {
     const world = createBareWorld();
+    world.gameDef.resolvedRules["respawn"] = { delayMs: 0 };
     const player = spawnTestPlayer(world, {
       hp: 50,
       needs: [{ name: "n1", current: 0, max: 100, decayPerSec: 0, starveDmg: 200 },
               { name: "n2", current: 0, max: 100, decayPerSec: 0, starveDmg: 200 }],
     });
     world.time.dtMs = 1000;
-    let alive = true;
-    for (let i = 0; i < 100 && alive; i++) {
+    for (let i = 0; i < 100 && (Health.current[player] ?? 0) > 0; i++) {
       needDecaySystem(world);
-      if (query(world, [Player]).length === 0) alive = false;
     }
-    expect(alive).toBe(false);
+    expect(Health.current[player]).toBeLessThanOrEqual(0);
+    // 玩家不被移除 → death 标记 → respawn 重置回满
+    expect(query(world, [Player]).length).toBe(1);
+    deathSystem(world);
+    respawnSystem(world);
+    expect(Health.current[player]).toBe(100);
+    expect(Needs[player]![0].current).toBe(100);
+  });
+});
+
+describe("Slice 2：combatSystem attackTarget 原子", () => {
+  it("冷却中拒绝攻击", () => {
+    const world = createBareWorld();
+    const player = spawnTestPlayer(world, { attack: { value: 10 } });
+    addComponent(world, player, Cooldown);
+    Cooldown.remainingMs[player] = 500;
+    const enemy = spawnTestEnemy(world, { x: 10, y: 0, hp: 100 });
+    expect(attackTarget(world, player, enemy)).toBe(false);
+    expect(Health.current[enemy]).toBe(100);
+  });
+
+  it("目标已死（Health ≤ 0）拒绝攻击", () => {
+    const world = createBareWorld();
+    const player = spawnTestPlayer(world, { attack: { value: 10 } });
+    const enemy = spawnTestEnemy(world, { x: 10, y: 0, hp: 0 });
+    expect(attackTarget(world, player, enemy)).toBe(false);
+  });
+});
+
+describe("Slice 2：perceptionSystem", () => {
+  it("视野内写最近敌对目标；同队不写", () => {
+    const world = createBareWorld();
+    const self = spawnTestEnemy(world, { x: 0, y: 0, visionRadius: 50 });
+    const ally = spawnTestEnemy(world, { x: 5, y: 0, visionRadius: 50, team: 2 });
+    const near = spawnTestPlayer(world, { x: 10, y: 0 });
+    const far = spawnTestPlayer(world, { x: 100, y: 0 });
+    perceptionSystem(world);
+    const bb = getOrCreateBlackboard(world, self);
+    const target = bbGet<PerceivedTarget>(bb, BB_PERCEPTION_TARGET);
+    expect(target?.eid).toBe(near);
+    expect(target?.dist).toBe(10);
+  });
+
+  it("视野内无敌对 → 黑板写 null", () => {
+    const world = createBareWorld();
+    const self = spawnTestEnemy(world, { x: 0, y: 0, visionRadius: 50 });
+    const ally = spawnTestEnemy(world, { x: 5, y: 0, visionRadius: 50, team: 2 });
+    perceptionSystem(world);
+    const bb = getOrCreateBlackboard(world, self);
+    expect(bbGet(bb, BB_PERCEPTION_TARGET)).toBeNull();
+  });
+});
+
+describe("Slice 2：deathSystem", () => {
+  it("非玩家无掉落 → removeEntity", () => {
+    const world = createBareWorld();
+    spawnTestEnemy(world, { hp: 0 });
+    deathSystem(world);
+    expect(query(world, [Enemy]).length).toBe(0);
+  });
+
+  it("有 LootTable 且命中 → 生成地面 item 实体", () => {
+    const world = createBareWorld();
+    setItemKind(world, { kind: "m1", maxStack: 20 });
+    const enemy = spawnTestEnemy(world, { x: 0, y: 0, hp: 0 });
+    LootTable[enemy] = [{ kind: "m1", qty: 2, chance: 1 }];
+    deathSystem(world);
+    const items = query(world, [Item]);
+    expect(items.length).toBe(1);
+    expect(ItemMeta[items[0]]).toMatchObject({ kind: "m1", count: 2 });
+  });
+
+  it("chance 0 不产出掉落", () => {
+    const world = createBareWorld();
+    setItemKind(world, { kind: "m1", maxStack: 20 });
+    const enemy = spawnTestEnemy(world, { hp: 0 });
+    LootTable[enemy] = [{ kind: "m1", qty: 1, chance: 0 }];
+    deathSystem(world);
+    expect(query(world, [Item]).length).toBe(0);
+  });
+
+  it("玩家分支：不移除，标记重生", () => {
+    const world = createBareWorld();
+    world.gameDef.resolvedRules["respawn"] = { delayMs: 0 };
+    const player = spawnTestPlayer(world, { hp: 0 });
+    deathSystem(world);
+    expect(query(world, [Player]).length).toBe(1);
+    respawnSystem(world);
+    expect(Health.current[player]).toBe(100);
+  });
+});
+
+describe("Slice 2：respawnSystem", () => {
+  it("延迟未到不重置", () => {
+    const world = createBareWorld();
+    world.gameDef.resolvedRules["respawn"] = { delayMs: 1000 };
+    const player = spawnTestPlayer(world, { hp: 0, x: 5, y: 5 });
+    deathSystem(world);
+    respawnSystem(world);
+    expect(Health.current[player]).toBe(0);
+  });
+
+  it("到期重置 Health + 传送出生点 + Needs 回满", () => {
+    const world = createBareWorld();
+    world.gameDef.resolvedRules["respawn"] = { delayMs: 0 };
+    const player = spawnTestPlayer(world, {
+      hp: 0, x: 42, y: 42,
+      needs: [{ name: "n1", current: 0, max: 100, decayPerSec: 0, starveDmg: 0 }],
+    });
+    deathSystem(world);
+    respawnSystem(world);
+    expect(Health.current[player]).toBe(100);
+    expect(Transform.x[player]).toBe(0);
+    expect(Transform.y[player]).toBe(0);
+    expect(Needs[player]![0].current).toBe(100);
+  });
+
+  it("断线残留标记（实体已移除）被清理，不抛错", () => {
+    const world = createBareWorld();
+    const player = spawnTestPlayer(world, { hp: 0 });
+    deathSystem(world);
+    removeEntity(world, player);
+    expect(() => respawnSystem(world)).not.toThrow();
+    expect(query(world, [Player]).length).toBe(0);
+  });
+});
+
+describe("Slice 2：BT 战斗节点", () => {
+  function makeInstance(definition: Parameters<typeof createNpcTree>[0]) {
+    const registry = createActionRegistry();
+    registerBuiltinActions(registry);
+    return createNpcTree(definition, registry);
+  }
+
+  it("IsTargetInVision：有目标 true / 无目标 false", () => {
+    const world = createBareWorld();
+    const self = spawnTestEnemy(world, {});
+    const inst = makeInstance({ type: "root", child: { type: "condition", call: "IsTargetInVision" } });
+    const bb = createBlackboard(self);
+    stepBehaviourTree(inst, { world, self, bb });
+    expect(inst.tree.getState()).toBe(State.FAILED);
+    bbSet(bb, BB_PERCEPTION_TARGET, { eid: 999, dist: 10 });
+    inst.tree.reset();
+    stepBehaviourTree(inst, { world, self, bb });
+    expect(inst.tree.getState()).toBe(State.SUCCEEDED);
+  });
+
+  it("Chase：朝目标移动并保持 RUNNING", () => {
+    const world = createBareWorld();
+    const self = spawnTestEnemy(world, { x: 0, y: 0 });
+    const target = spawnTestPlayer(world, { x: 20, y: 0 });
+    const inst = makeInstance({ type: "root", child: { type: "action", call: "Chase", args: { speed: 10 } } });
+    const bb = createBlackboard(self);
+    bbSet(bb, BB_PERCEPTION_TARGET, { eid: target, dist: 20 });
+    stepBehaviourTree(inst, { world, self, bb });
+    expect(inst.tree.getState()).toBe(State.RUNNING);
+    expect(Velocity.vx[self]).toBeGreaterThan(0);
+  });
+
+  it("InAttackRange：射程内 true / 射程外 false", () => {
+    const world = createBareWorld();
+    const self = spawnTestEnemy(world, { x: 0, y: 0, attack: { value: 5, range: 30 } });
+    const target = spawnTestPlayer(world, { x: 10, y: 0 });
+    const inst = makeInstance({ type: "root", child: { type: "condition", call: "InAttackRange" } });
+    const bb = createBlackboard(self);
+    bbSet(bb, BB_PERCEPTION_TARGET, { eid: target, dist: 10 });
+    stepBehaviourTree(inst, { world, self, bb });
+    expect(inst.tree.getState()).toBe(State.SUCCEEDED);
+    bbSet(bb, BB_PERCEPTION_TARGET, { eid: target, dist: 99 });
+    inst.tree.reset();
+    stepBehaviourTree(inst, { world, self, bb });
+    expect(inst.tree.getState()).toBe(State.FAILED);
+  });
+
+  it("Attack：射程内命中扣血", () => {
+    const world = createBareWorld();
+    const self = spawnTestEnemy(world, { x: 0, y: 0, attack: { value: 10, range: 30 } });
+    const target = spawnTestPlayer(world, { x: 10, y: 0, hp: 100 });
+    const inst = makeInstance({ type: "root", child: { type: "action", call: "Attack" } });
+    const bb = createBlackboard(self);
+    bbSet(bb, BB_PERCEPTION_TARGET, { eid: target, dist: 10 });
+    stepBehaviourTree(inst, { world, self, bb });
+    expect(Health.current[target]).toBe(90);
+  });
+
+  it("Flee：背向目标移动", () => {
+    const world = createBareWorld();
+    const self = spawnTestEnemy(world, { x: 0, y: 0 });
+    const target = spawnTestPlayer(world, { x: 20, y: 0 });
+    const inst = makeInstance({ type: "root", child: { type: "action", call: "Flee", args: { speed: 10 } } });
+    const bb = createBlackboard(self);
+    bbSet(bb, BB_PERCEPTION_TARGET, { eid: target, dist: 20 });
+    stepBehaviourTree(inst, { world, self, bb });
+    expect(inst.tree.getState()).toBe(State.RUNNING);
+    expect(Velocity.vx[self]).toBeLessThan(0);
+  });
+});
+
+describe("Slice 2 集成：战斗闭环", () => {
+  it("玩家攻击意图击杀敌人 → 掉落落地", () => {
+    const world = createBareWorld();
+    setItemKind(world, { kind: "m1", maxStack: 20 });
+    const player = spawnTestPlayer(world, { x: 0, y: 0, attack: { value: 50, range: 40 } });
+    const enemy = spawnTestEnemy(world, { x: 10, y: 0, hp: 30 });
+    LootTable[enemy] = [{ kind: "m1", qty: 1, chance: 1 }];
+    Intent[player] = "attack";
+    createInteractionSystem({ range: 24 })(world);
+    expect(Health.current[enemy]).toBeLessThanOrEqual(0);
+    deathSystem(world);
+    expect(query(world, [Enemy]).length).toBe(0);
+    const items = query(world, [Item]);
+    expect(items.length).toBe(1);
+    expect(ItemMeta[items[0]]?.kind).toBe("m1");
+  });
+
+  it("敌人感知 → BT Attack 击杀玩家 → 重生回出生点", () => {
+    const world = createBareWorld();
+    world.gameDef.resolvedRules["respawn"] = { delayMs: 0 };
+    const player = spawnTestPlayer(world, { x: 20, y: 0, hp: 30 });
+    const enemy = spawnTestEnemy(world, {
+      x: 0, y: 0, hp: 100,
+      attack: { value: 50, range: 40 },
+      visionRadius: 100,
+    });
+    perceptionSystem(world);
+    const bb = getOrCreateBlackboard(world, enemy);
+    expect(bbGet<PerceivedTarget>(bb, BB_PERCEPTION_TARGET)?.eid).toBe(player);
+
+    const registry = createActionRegistry();
+    registerBuiltinActions(registry);
+    const inst = createNpcTree({
+      type: "root",
+      child: {
+        type: "sequence",
+        children: [
+          { type: "condition", call: "IsTargetInVision" },
+          { type: "action", call: "Attack" },
+        ],
+      },
+    }, registry);
+    stepBehaviourTree(inst, { world, self: enemy, bb });
+    expect(Health.current[player]).toBeLessThanOrEqual(0);
+
+    deathSystem(world);
+    respawnSystem(world);
+    expect(Health.current[player]).toBe(100);
+    expect(Transform.x[player]).toBe(0);
+    expect(Transform.y[player]).toBe(0);
   });
 });

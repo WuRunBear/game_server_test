@@ -1,8 +1,11 @@
-import { query, removeEntity, hasComponent } from "bitecs";
+import { hasComponent, query } from "bitecs";
 import { Health, Attack, Defense, Team } from "components";
 import { Cooldown, Transform } from "components";
 import type { GameWorld } from "world";
 import { getRuleModule } from "framework/api";
+
+export const DEFAULT_COOLDOWN_MS = 1000;
+export const DEFAULT_ATTACK_RANGE = 32;
 
 interface SystemConfig {
   friendlyFire?: boolean;
@@ -12,82 +15,92 @@ interface SystemConfig {
   attackRange?: number;
 }
 
-const DEFAULT_COOLDOWN_MS = 1000;
-const DEFAULT_ATTACK_RANGE = 32;
-
-export function createCombatSystem(config?: Record<string, unknown>) {
-  const cfg: SystemConfig = {
-    friendlyFire: config?.friendlyFire as boolean | undefined,
-    damageFormula: config?.damageFormula as string | undefined,
-    damageFormulaRef: config?.damageFormulaRef as string | undefined,
-    attackCooldownMs: config?.attackCooldownMs as number | undefined,
-    attackRange: config?.attackRange as number | undefined,
-  };
-
+/**
+ * combatSystem：攻击冷却递减 + 攻击原子。
+ *
+ * - 系统体只负责逐 tick 递减所有实体的攻击冷却。
+ * - 伤害施加统一走导出的 attackTarget 原子：BT Attack 动作与玩家 attack 意图
+ *   都调它，不再有系统级的"范围内自动攻击"（避免与显式目标攻击双重伤害）。
+ *   参数全部从 `rules/combat.json` 读取（friendlyFire / 公式 / 冷却 / 射程），
+ *   系统级 config 仅保留向后兼容的占位（不再生效）。
+ */
+export function createCombatSystem(_config?: Record<string, unknown>) {
   return function combatSystem(world: GameWorld): GameWorld {
-    const rules = world.gameDef.resolvedRules["combat"] as SystemConfig | undefined;
-    const friendlyFire = cfg.friendlyFire ?? rules?.friendlyFire ?? true;
-    const damageFormula = cfg.damageFormula ?? rules?.damageFormula ?? "standard";
-    const damageFormulaRef = cfg.damageFormulaRef ?? rules?.damageFormulaRef;
-    const cooldownMs = cfg.attackCooldownMs ?? rules?.attackCooldownMs ?? DEFAULT_COOLDOWN_MS;
-    const configuredRange = cfg.attackRange ?? rules?.attackRange;
-
-    const attackers = query(world, [Attack, Team, Transform]);
-    const targets = query(world, [Health, Defense, Team, Transform]);
-
-    for (const attackerId of attackers) {
-      if (hasComponent(world, attackerId, Cooldown)) {
-        const remaining = Cooldown.remainingMs[attackerId];
-        if (remaining !== undefined && remaining > 0) {
-          Cooldown.remainingMs[attackerId] = Math.max(0, remaining - world.time.dtMs);
-          continue;
-        }
+    for (const eid of query(world, [Cooldown])) {
+      const remaining = Cooldown.remainingMs[eid];
+      if (remaining !== undefined && remaining > 0) {
+        Cooldown.remainingMs[eid] = Math.max(0, remaining - world.time.dtMs);
       }
-
-      const componentRange = Attack.range[attackerId];
-      const attackerRange =
-        configuredRange ??
-        (typeof componentRange === "number" && componentRange > 0 ? componentRange : DEFAULT_ATTACK_RANGE);
-      const attackerX = Transform.x[attackerId];
-      const attackerY = Transform.y[attackerId];
-
-      for (const targetId of targets) {
-        if (attackerId === targetId) continue;
-
-        if (!friendlyFire && Team.id[attackerId] === Team.id[targetId]) continue;
-
-        const dist = Math.hypot(attackerX - Transform.x[targetId], attackerY - Transform.y[targetId]);
-        if (dist > attackerRange) continue;
-
-        const attackerDamage = Attack.value[attackerId] ?? 10;
-        const targetDefense = Defense.value[targetId] ?? 0;
-
-        let damage = Math.max(1, attackerDamage - targetDefense);
-
-        if (damageFormula === "custom" && damageFormulaRef) {
-          try {
-            const customFn = getRuleModule(damageFormulaRef);
-            const customDamage = customFn(world, attackerId, targetId, attackerDamage, targetDefense);
-            if (typeof customDamage === "number") damage = customDamage;
-          } catch {
-            // fallback to standard formula
-          }
-        }
-
-        Health.current[targetId] = (Health.current[targetId] ?? 0) - damage;
-
-        if (Health.current[targetId] <= 0) {
-          removeEntity(world, targetId);
-        }
-      }
-
-      Cooldown.remainingMs[attackerId] = cooldownMs;
     }
-
     return world;
   };
 }
 
+/**
+ * 攻击原子：attacker 对 target 发动一次攻击。
+ *
+ * 校验顺序：双方组件齐全 → 目标存活（Health > 0）→ 冷却 → 友伤 → 射程；
+ * 命中后按规则公式计算伤害并扣减 Health。**不负责死亡处理**（统一归
+ * deathSystem），只负责伤害本身。
+ *
+ * @returns 本次攻击是否命中（失败原因：无组件/目标已死/冷却中/友军/超射程）。
+ */
+export function attackTarget(world: GameWorld, attackerEid: number, targetEid: number): boolean {
+  if (attackerEid === targetEid) return false;
+  if (!hasComponent(world, attackerEid, Attack) || !hasComponent(world, targetEid, Health)) {
+    return false;
+  }
+  if ((Health.current[targetEid] ?? 0) <= 0) return false;
+
+  const rules = world.gameDef.resolvedRules["combat"] as SystemConfig | undefined;
+  const friendlyFire = rules?.friendlyFire ?? true;
+  const damageFormula = rules?.damageFormula ?? "standard";
+  const damageFormulaRef = rules?.damageFormulaRef;
+  const cooldownMs = rules?.attackCooldownMs ?? DEFAULT_COOLDOWN_MS;
+
+  if (hasComponent(world, attackerEid, Cooldown)) {
+    if ((Cooldown.remainingMs[attackerEid] ?? 0) > 0) return false;
+  }
+
+  if (!friendlyFire && Team.id[attackerEid] === Team.id[targetEid]) return false;
+
+  const componentRange = Attack.range[attackerEid];
+  const attackerRange =
+    typeof componentRange === "number" && componentRange > 0
+      ? componentRange
+      : (rules?.attackRange ?? DEFAULT_ATTACK_RANGE);
+
+  const dist = Math.hypot(
+    Transform.x[attackerEid] - Transform.x[targetEid],
+    Transform.y[attackerEid] - Transform.y[targetEid],
+  );
+  if (dist > attackerRange) return false;
+
+  const attackerDamage = Attack.value[attackerEid] ?? 10;
+  const targetDefense = Defense.value[targetEid] ?? 0;
+
+  let damage = Math.max(1, attackerDamage - targetDefense);
+
+  if (damageFormula === "custom" && damageFormulaRef) {
+    try {
+      const customFn = getRuleModule(damageFormulaRef);
+      const customDamage = customFn(world, attackerEid, targetEid, attackerDamage, targetDefense);
+      if (typeof customDamage === "number") damage = customDamage;
+    } catch {
+      // fallback to standard formula
+    }
+  }
+
+  Health.current[targetEid] = (Health.current[targetEid] ?? 0) - damage;
+
+  if (hasComponent(world, attackerEid, Cooldown)) {
+    Cooldown.remainingMs[attackerEid] = cooldownMs;
+  }
+
+  return true;
+}
+
+/** 无配置默认实例（向后兼容直接注册形态）。 */
 export function combatSystem(world: GameWorld): GameWorld {
   return createCombatSystem()(world);
 }

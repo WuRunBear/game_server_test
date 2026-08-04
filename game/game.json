@@ -8,6 +8,7 @@
     "default": "generated-map"
   },
   "systems": [
+    { "id": "perception" },
     { "id": "ai" },
     { "id": "physics" },
     { "id": "movement" },
@@ -17,7 +18,9 @@
     { "id": "spawning" },
     { "id": "inventory" },
     { "id": "gathering" },
-    { "id": "interaction", "config": { "range": 24 } }
+    { "id": "interaction", "config": { "range": 24 } },
+    { "id": "death" },
+    { "id": "respawn" }
   ],
   "entities": "./entities/*.json",
   "behaviors": "./behaviors/*.json",

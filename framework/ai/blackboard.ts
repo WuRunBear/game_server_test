@@ -2,6 +2,15 @@ import type { EntityId } from "framework/world";
 
 export type BlackboardKey = string;
 
+/** 感知结果：最近敌对目标（perceptionSystem 写入）。 */
+export interface PerceivedTarget {
+  eid: EntityId;
+  dist: number;
+}
+
+/** 黑板 key：最近敌对目标。 */
+export const BB_PERCEPTION_TARGET = "perception.target";
+
 export interface Blackboard {
   owner: EntityId;
   data: Map<BlackboardKey, unknown>;

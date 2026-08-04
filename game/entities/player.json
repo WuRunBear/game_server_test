@@ -7,6 +7,8 @@
     "Acceleration": {},
     "Collider": { "shape": 1, "halfW": 8, "halfH": 8 },
     "Health": { "current": 100, "max": 100 },
+    "Attack": { "value": 10, "range": 40 },
+    "Cooldown": {},
     "Needs": [
       { "name": "hunger", "current": 100, "max": 100, "decayPerSec": 0.5, "starveDmg": 1 },
       { "name": "thirst", "current": 100, "max": 100, "decayPerSec": 0.7, "starveDmg": 1 }

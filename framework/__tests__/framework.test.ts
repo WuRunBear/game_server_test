@@ -19,6 +19,8 @@ import { setEntityKind } from "framework/systems/gameplay/aiSystem";
 import { spawningSystem } from "framework/systems/gameplay/spawningSystem";
 import { inventorySystem } from "framework/systems/gameplay/inventorySystem";
 import { collisionSystem } from "framework/systems/core/collisionSystem";
+import { attackTarget } from "framework/systems/gameplay/combatSystem";
+import { deathSystem } from "framework/systems/gameplay/deathSystem";
 import { createNpcTree } from "framework/ai/btFactory";
 
 import { Transform } from "framework/components/transform";
@@ -180,7 +182,7 @@ describe("loadGameDefinition integrity validation (Item 2)", () => {
   });
 });
 
-describe("combatSystem (Item 3: damage calculation)", () => {
+describe("combatSystem (Item 3: damage calculation via attackTarget)", () => {
   let world: GameWorld;
 
   beforeEach(() => {
@@ -202,16 +204,13 @@ describe("combatSystem (Item 3: damage calculation)", () => {
       Team: { id: 2 },
     });
 
-    const { systemRegistry } = getRegistries();
-    const combatSpec = systemRegistry.get("combat");
-    const sys = combatSpec.factory(world, { friendlyFire: true, attackCooldownMs: 0 });
-
-    sys(world);
-
-    expect(Health.current[target]).toBeLessThan(100);
+    expect(attackTarget(world, attacker, target)).toBe(true);
+    expect(Health.current[target]).toBe(90);
   });
 
   it("should skip friendly fire when disabled", () => {
+    world.gameDef.resolvedRules["combat"] = { friendlyFire: false };
+
     const attacker = spawnCustomEntity(world, "test-attacker", {
       Health: { current: 100, max: 100 },
       Attack: { value: 15 },
@@ -224,16 +223,11 @@ describe("combatSystem (Item 3: damage calculation)", () => {
       Team: { id: 1 },
     });
 
-    const { systemRegistry } = getRegistries();
-    const combatSpec = systemRegistry.get("combat");
-    const sys = combatSpec.factory(world, { friendlyFire: false });
-
-    sys(world);
-
+    expect(attackTarget(world, attacker, target)).toBe(false);
     expect(Health.current[target]).toBe(100);
   });
 
-  it("should remove entity when health reaches 0", () => {
+  it("should not remove entity at 0 hp; deathSystem removes it", () => {
     const attacker = spawnCustomEntity(world, "test-attacker", {
       Health: { current: 100, max: 100 },
       Attack: { value: 999 },
@@ -246,12 +240,11 @@ describe("combatSystem (Item 3: damage calculation)", () => {
       Team: { id: 2 },
     });
 
-    const { systemRegistry } = getRegistries();
-    const combatSpec = systemRegistry.get("combat");
-    const sys = combatSpec.factory(world, { friendlyFire: true, attackCooldownMs: 0 });
-
-    sys(world);
-
+    expect(attackTarget(world, attacker, target)).toBe(true);
+    expect(Health.current[target]).toBeLessThanOrEqual(0);
+    // 伤害原子不负责死亡：实体仍在，统一由 deathSystem 移除
+    expect(hasComponent(world, target, Health)).toBe(true);
+    deathSystem(world);
     expect(hasComponent(world, target, Health)).toBe(false);
   });
 
@@ -280,13 +273,9 @@ describe("combatSystem (Item 3: damage calculation)", () => {
     Transform.x[farTarget] = 100;
     Transform.y[farTarget] = 0;
 
-    const { systemRegistry } = getRegistries();
-    const combatSpec = systemRegistry.get("combat");
-    const sys = combatSpec.factory(world, { friendlyFire: true, attackCooldownMs: 0 });
-
-    sys(world);
-
-    expect(Health.current[nearTarget]).toBeLessThan(100);
+    expect(attackTarget(world, attacker, nearTarget)).toBe(true);
+    expect(Health.current[nearTarget]).toBe(80);
+    expect(attackTarget(world, attacker, farTarget)).toBe(false);
     expect(Health.current[farTarget]).toBe(100);
   });
 });

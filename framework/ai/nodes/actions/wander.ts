@@ -2,6 +2,11 @@ import { State } from "mistreevous";
 
 import { bbGet, bbSet } from "framework/ai/blackboard";
 import type { BtContext } from "framework/ai/btRunner";
+import {
+  normalizeOrFallback,
+  mapPixelBounds,
+  clampDirectionToMapBounds,
+} from "framework/ai/nodes/steer";
 import { Transform, Velocity } from "framework/components";
 
 type WanderRuntime = {
@@ -14,36 +19,6 @@ const BB_KEY = "ai.wander.runtime";
 
 function randInt(min: number, maxInclusive: number): number {
   return Math.floor(Math.random() * (maxInclusive - min + 1)) + min;
-}
-
-function normalizeOrFallback(x: number, y: number): { x: number; y: number } {
-  const len = Math.hypot(x, y);
-  if (len <= 1e-6) return { x: 1, y: 0 };
-  return { x: x / len, y: y / len };
-}
-
-function clampDirectionToMapBounds(
-  x: number,
-  y: number,
-  dirX: number,
-  dirY: number,
-  tileW: number,
-  tileH: number,
-  mapPixelW: number,
-  mapPixelH: number,
-): { x: number; y: number } {
-  const marginX = tileW;
-  const marginY = tileH;
-
-  let dx = dirX;
-  let dy = dirY;
-
-  if (x < marginX) dx = Math.abs(dx);
-  if (x > mapPixelW - marginX) dx = -Math.abs(dx);
-  if (y < marginY) dy = Math.abs(dy);
-  if (y > mapPixelH - marginY) dy = -Math.abs(dy);
-
-  return normalizeOrFallback(dx, dy);
 }
 
 export function createWanderAction(args?: Record<string, unknown>): () => State {
@@ -70,24 +45,18 @@ export function createWanderAction(args?: Record<string, unknown>): () => State 
       rt.nextChangeTick = tick + randInt(20, 60);
     }
 
-    const grid = world.map?.grid;
-    const tileW = grid?.tileWidth ?? 16;
-    const tileH = grid?.tileHeight ?? 16;
+    const bounds = mapPixelBounds(world.map?.grid);
+    const tileW = bounds?.tileW ?? 16;
     const finalSpeed = speed ?? tileW * 2;
 
     let dir = normalizeOrFallback(rt.dirX, rt.dirY);
-    if (grid) {
-      const mapPixelW = grid.width * grid.tileWidth;
-      const mapPixelH = grid.height * grid.tileHeight;
+    if (bounds) {
       dir = clampDirectionToMapBounds(
         Transform.x[self],
         Transform.y[self],
         dir.x,
         dir.y,
-        tileW,
-        tileH,
-        mapPixelW,
-        mapPixelH,
+        bounds,
       );
     }
 

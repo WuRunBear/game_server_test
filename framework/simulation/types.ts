@@ -28,6 +28,11 @@ export interface PlayerInput {
    * 由 interactionSystem 在该 tick 内消费并清空。
    */
   interact?: boolean;
+  /**
+   * 攻击意图信号：本帧玩家按下攻击键（近战等）。
+   * 由 interactionSystem 在该 tick 内消费并清空（与 interact 同槽互斥）。
+   */
+  attack?: boolean;
 }
 
 /**

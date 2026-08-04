@@ -1,10 +1,11 @@
 /**
  * Intent 组件：玩家交互意图（AoS 结构）。
  *
- * 由 GameSimulation.applyInputs 把输入里的 interact 信号写入 `Intent[eid]`，
- * interactionSystem 消费并清空。
+ * 由 GameSimulation.applyInputs 把输入里的 interact / attack 信号写入
+ * `Intent[eid]`，interactionSystem 消费并清空。单槽位语义：同帧至多一个意图
+ * （后写覆盖，无堆积）。
  *
- * S1 值仅为字符串 `"interact"`；后续切片若有更多意图类型再扩为带 payload 的
- * 结构（即需即补，不提前造枚举）。游戏无关。
+ * 值域：`"interact"`（采集）/ `"attack"`（攻击）；后续切片若有更多意图类型
+ * 再扩为带 payload 的结构（即需即补，不提前造枚举）。游戏无关。
  */
 export const Intent = [] as (string | null | undefined)[];

@@ -32,6 +32,17 @@ export function setEntityKind(world: GameWorld, eid: EntityId, kind: string): vo
   Kind[eid] = kind;
 }
 
+/** 取实体黑板；不存在则创建（perceptionSystem 等先于 aiSystem 消费时用）。 */
+export function getOrCreateBlackboard(world: GameWorld, eid: EntityId): Blackboard {
+  const rt = getRuntime(world);
+  let bb = rt.blackboards.get(eid);
+  if (!bb) {
+    bb = createBlackboard(eid);
+    rt.blackboards.set(eid, bb);
+  }
+  return bb;
+}
+
 export function aiSystem(world: GameWorld): GameWorld {
   const rt = getRuntime(world);
   const alive = new Set<EntityId>();
@@ -39,11 +50,7 @@ export function aiSystem(world: GameWorld): GameWorld {
   for (const eid of query(world, [NPC])) {
     alive.add(eid);
 
-    let bb = rt.blackboards.get(eid);
-    if (!bb) {
-      bb = createBlackboard(eid);
-      rt.blackboards.set(eid, bb);
-    }
+    const bb = getOrCreateBlackboard(world, eid);
 
     let bt = rt.npcTrees.get(eid);
     if (!bt) {

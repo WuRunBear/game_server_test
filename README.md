@@ -55,28 +55,34 @@ framework/
     index.ts                # 模块 barrel 导出
   components/               # ECS 组件 + componentRegistry
     componentRegistry.ts    # 组件注册表: 名 → defineComponent
-    registerBuiltin.ts      # 注册 21 个内置组件
+    registerBuiltin.ts      # 注册 29 个内置组件
     index.ts                # barrel 导出
     transform.ts, size.ts, physics.ts (Velocity/Acceleration/Collider/ColliderShape),
     combat.ts (Health/Attack/Defense/Team), ai.ts (AIState/Target/BlackboardRef),
-    inventory.ts (AoS 例外), network.ts (NetworkId/LastSynced), timer.ts (Cooldown/Duration), tags.ts (Player/Enemy/NPC/Item)
+    perception.ts (SoA 感知), inventory.ts (AoS 例外), network.ts (NetworkId/LastSynced),
+    timer.ts (Cooldown/Duration), tags.ts (Player/Enemy/NPC/Item/Resource),
+    needs.ts / resourceNode.ts / loot.ts / intent.ts / kind.ts / itemMeta.ts (AoS 家族)
   systems/
     systemRegistry.ts       # 系统注册表 + buildSystems (拓扑排序, Kahn 算法)
-    registerBuiltinSystems.ts   # 注册 8 个内置系统
+    registerBuiltinSystems.ts   # 注册 13 个内置系统
     index.ts                # barrel 导出
     core/                   # physicsSystem, movementSystem, collisionSystem
-    gameplay/               # aiSystem, combatSystem, spawningSystem, inventorySystem, interactionSystem
+    gameplay/               # perceptionSystem, aiSystem, combatSystem, spawningSystem,
+                            # inventorySystem, interactionSystem, needDecaySystem,
+                            # gatheringSystem, deathSystem, respawnSystem
   entities/
     archetypeRegistry.ts    # 原型注册表: kind → ArchetypeSpec
     registerBuiltinArchetypes.ts   # 注册 player, villager 2 个内置原型
     spawn.ts                # spawnEntity(world, archetype, componentRegistry, overrides)
   ai/
-    actionRegistry.ts       # 动作注册表: 名 → ActionFactory
+    actionRegistry.ts       # 动作注册表: 名 → ActionFactory (返回 State | boolean)
     btFactory.ts            # 行为树工厂 (配置 → mistreevous 树)
     btRunner.ts             # stepBehaviourTree(instance, ctx)
-    blackboard.ts           # 每实体黑板
-    registerBuiltinActions.ts   # 注册 Idle, Wander 2 个内置动作
-    nodes/actions/          # idle.ts, wander.ts
+    blackboard.ts           # 每实体黑板 (perception.target 等 key)
+    registerBuiltinActions.ts   # 注册 Idle/Wander/Chase/Flee/Attack/IsTargetInVision/InAttackRange
+    nodes/actions/          # idle.ts, wander.ts, chase.ts, flee.ts, attack.ts
+    nodes/conditions/       # isTargetInVision.ts, inAttackRange.ts
+    nodes/steer.ts          # 移动方向/边界钳制共用工具
   map/
     types.ts                # MapRuntime / MapSource / MapZone / Vec2
     tiled.ts                # Tiled JSON 解析 (collision/objects/zones 三层)
@@ -112,11 +118,12 @@ src/
   register.ts               # 扩展注册入口（当前仅调用 bootstrapFramework()，无自定义扩展）
 
 game/
-  game.json                 # GameDefinition 主入口：tickRate=20, 8 个系统, netSync 配置
-  entities/                 # player.json, villager.json
-  behaviors/                # wander-default.json
-  rules/                    # combat.json
+  game.json                 # GameDefinition 主入口：tickRate=20, 13 个系统, netSync 配置
+  entities/                 # player, villager, boar, rabbit, berry_bush, tree, water_pool, item
+  behaviors/                # wander-default, boar-hostile, rabbit-flee
+  rules/                    # combat.json, needs.json, respawn.json
   spawns/                   # populations.json
+  items/                    # berry, wood, water, raw_meat (item kind 数据)
   maps/                     # registry.json
 
 tools/

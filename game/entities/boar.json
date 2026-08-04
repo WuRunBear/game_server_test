@@ -1,0 +1,16 @@
+{
+  "kind": "boar",
+  "tags": ["NPC", "Enemy"],
+  "components": {
+    "Size": { "w": 20, "h": 14 },
+    "Velocity": {},
+    "Collider": { "shape": 1, "halfW": 10, "halfH": 7 },
+    "Health": { "current": 60, "max": 60 },
+    "Attack": { "value": 8, "range": 32 },
+    "Cooldown": {},
+    "Perception": { "visionRadius": 160, "hostilityRange": 80 },
+    "LootTable": [{ "kind": "raw_meat", "qty": 1, "chance": 1.0 }]
+  },
+  "behavior": "boar-hostile",
+  "team": 2
+}

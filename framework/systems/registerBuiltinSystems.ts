@@ -6,7 +6,10 @@ import { physicsSystem } from "framework/systems/core/physicsSystem";
 import { movementSystem } from "framework/systems/core/movementSystem";
 import { collisionSystem } from "framework/systems/core/collisionSystem";
 import { aiSystem } from "framework/systems/gameplay/aiSystem";
+import { perceptionSystem } from "framework/systems/gameplay/perceptionSystem";
 import { createCombatSystem } from "framework/systems/gameplay/combatSystem";
+import { deathSystem } from "framework/systems/gameplay/deathSystem";
+import { respawnSystem } from "framework/systems/gameplay/respawnSystem";
 import { inventorySystem } from "framework/systems/gameplay/inventorySystem";
 import { createInteractionSystem } from "framework/systems/gameplay/interactionSystem";
 import { spawningSystem } from "framework/systems/gameplay/spawningSystem";
@@ -22,6 +25,12 @@ export function registerBuiltinSystems(
 ): void {
   registerBuiltinActions(actionRegistry);
   setDefaultActionRegistry(actionRegistry);
+
+  systemRegistry.register({
+    id: "perception",
+    factory: (_world: GameWorld) => perceptionSystem,
+    before: ["ai"],
+  });
 
   systemRegistry.register({
     id: "ai",
@@ -81,5 +90,17 @@ export function registerBuiltinSystems(
     id: "needDecay",
     factory: (_world: GameWorld) => needDecaySystem,
     after: ["combat"],
+  });
+
+  systemRegistry.register({
+    id: "death",
+    factory: (_world: GameWorld) => deathSystem,
+    after: ["needDecay"],
+  });
+
+  systemRegistry.register({
+    id: "respawn",
+    factory: (_world: GameWorld) => respawnSystem,
+    after: ["death"],
   });
 }

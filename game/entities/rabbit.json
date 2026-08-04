@@ -1,0 +1,13 @@
+{
+  "kind": "rabbit",
+  "tags": ["NPC", "Enemy"],
+  "components": {
+    "Size": { "w": 12, "h": 10 },
+    "Velocity": {},
+    "Collider": { "shape": 1, "halfW": 6, "halfH": 5 },
+    "Health": { "current": 20, "max": 20 },
+    "Perception": { "visionRadius": 120, "hostilityRange": 60 }
+  },
+  "behavior": "rabbit-flee",
+  "team": 2
+}

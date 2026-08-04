@@ -17,5 +17,7 @@ export { Cooldown, Duration } from "components/timer";
 export { Player, Enemy, NPC, Item, Resource } from "components/tags";
 export { Needs, initNeeds, type Need } from "components/needs";
 export { ResourceNode, initResourceNode, type ResourceNodeState } from "components/resourceNode";
+export { LootTable, initLootTable, type LootEntry } from "components/loot";
+export { Perception } from "components/perception";
 export { Intent } from "components/intent";
 export { Kind } from "components/kind";

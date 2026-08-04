@@ -300,9 +300,12 @@ export class GameSimulation implements SimulationPort {
       if (typeof eid !== "number") continue;
       Velocity.vx[eid] = input.moveX;
       Velocity.vy[eid] = input.moveY;
-      // 交互意图：本帧按下则置位，由 interactionSystem 在 step 中消费并清空
+      // 交互/攻击意图：本帧按下则置位，由 interactionSystem 在 step 中消费并清空
       if (input.interact) {
         Intent[eid] = "interact";
+      }
+      if (input.attack) {
+        Intent[eid] = "attack";
       }
     }
 

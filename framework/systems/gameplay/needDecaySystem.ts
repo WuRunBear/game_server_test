@@ -1,4 +1,4 @@
-import { query, removeEntity } from "bitecs";
+import { query } from "bitecs";
 import { Health, Needs } from "components";
 import type { GameWorld } from "world";
 
@@ -9,8 +9,8 @@ interface NeedsRule {
 /**
  * needDecaySystem：按 dt 衰减实体的所有需求；归零则每秒扣 Health。
  *
- * 死亡处理沿用现行 combatSystem 语义：Health ≤ 0 → removeEntity。
- * （统一 deathSystem / 重生属 Slice 2，本切片不引入）
+ * 死亡处理统一归 deathSystem（Slice 2 起不再自行 removeEntity）——
+ * 本系统只负责扣血，Health ≤ 0 的实体由 deathSystem 做掉落/重生/移除。
  * 游戏无关——只按 Need.{name,decayPerSec,starveDmg} 通用字段处理。
  */
 export function needDecaySystem(world: GameWorld): GameWorld {
@@ -40,9 +40,6 @@ export function needDecaySystem(world: GameWorld): GameWorld {
         }
       }
       Health.current[eid] = (Health.current[eid] ?? 0) - totalStarveDmg * dtSec;
-      if (Health.current[eid] <= 0) {
-        removeEntity(world, eid);
-      }
     }
   }
 

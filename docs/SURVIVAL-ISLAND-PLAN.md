@@ -37,7 +37,7 @@
 | **netSync** | `组件.标量字段` 清单；AND-query 排除缺组件的实体；线路仅 number | S1 | 三层改造：① OR 语义（逐条目独立查询合并）② AoS 适配器（`registerAosSyncAdapter` 按 tags 限定，展平 numbers/strings）③ `EntityState.stringValues` 字符串线路 |
 | **SpawnSchema** | `{kind,zoneId,max,respawnMs}` | S4 | 加可选 `condition` 字段引用通用 condition 模块（夜刷狼用） |
 | **RuleSchema** | 仅有 CombatRule（`.passthrough()`） | S1/S3/S4 | 加 `NeedsRuleSchema`（S1 已落地）/`CraftingRuleSchema`/`DayNightRuleSchema`；`ruleSchemas` 注册表已建（S1） |
-| **BT 通用节点** | 已支持 action+condition | S2 | 在 `framework/ai/nodes/` 加通用 condition/action（IsTargetInView/IsNight/Chase/Flee/Sleep）注册到 actionRegistry |
+| **BT 通用节点** | 已支持 action+condition | S2 | 在 `framework/ai/nodes/` 加通用 condition/action（IsTargetInVision/InAttackRange/Chase/Flee/Attack ✅ S2；IsNight/Sleep 属 S4）注册到 actionRegistry |
 | **Persistence 接口** | stub | S5 | 补 `repository.ts` 实现 |
 
 ---
@@ -105,43 +105,64 @@
 
 ---
 
-## Slice 2 — 战斗闭环（"能打、有收益"）
+## Slice 2 — 战斗闭环（"能打、有收益"）✅ 已完成
 
 **依赖**：Phase 0 combat 射程、bt condition 已修。
+
+> **S2 实施修正（来自落地探查，写回此计划）**：
+> - `LootTable` 由计划的 "runtime Map" 改为 **AoS 数组 + spawn 初始化钩子**
+>   （S1 已确立"变长结构统一 AoS"先例，可进 archetype 配置、spawn 自动写）
+> - **combatSystem 重构为攻击原子**：原"范围内无差别自动攻击"与 BT 驱动战斗
+>   冲突（双重伤害）且玩家无攻击入口；改为导出 `attackTarget` 原子（冷却/友伤/
+>   射程/公式统一校验，不负责死亡），BT Attack 动作与玩家 attack 意图都调它，
+>   系统体只递减冷却。参数从 `rules/combat.json` 读取，系统级 config 保留占位
+> - **死亡统一归 deathSystem**：needDecaySystem 不再自行 removeEntity；
+>   deathSystem 收编全部致死源（战斗/饿死），玩家分支写重生标记（原地重置：
+>   同 networkId 免会话重绑，respawnSystem 重置 Health + 传送出生点 + Needs）
+> - **重生规则**：`game/rules/respawn.json`（delayMs/resetNeeds）
+> - BT 行为 JSON 用 mistreevous JSON 形态（selector/sequence/condition/action），
+>   计划文中的 MDSL（`seq[...] else ...`）仅示意
+> - `Perception` 按计划含 visionRadius + hostilityRange 双字段（hostilityRange
+>   当前无消费方，字段先占位）
 
 ### 新增框架组件
 
 | 组件 | 形态 | 字段 |
 |------|------|------|
-| `LootTable` | **runtime `Map<eid, LootEntry[]>`** | `LootEntry={kindId, qty, chance}` |
+| `LootTable` | AoS `(LootEntry[] \| undefined)[]` + 初始化钩子 | `LootEntry={kind, qty, chance}` |
 | `Perception` | SoA | `visionRadius, hostilityRange` |
 
 ### 新增/扩展框架系统
 
 | 系统 | 职责 |
 |------|------|
-| `perceptionSystem` | 扫视野内实体写黑板 nearbyTargets（攻击/逃跑用） |
-| `lootSystem` | 实体死亡 → 按 LootTable spawn item 实体 |
-| `deathSystem` | Health≤0 → loot → removeEntity；玩家分支留死亡标记 |
-| `respawnSystem` | 玩家死后按 SpawnPoint 重生 |
+| `perceptionSystem` | 扫视野内敌对实体写黑板 `perception.target`（Chase/Flee/Attack 用），先于 aiSystem 执行 |
+| `lootSystem` | **并入 deathSystem**（即需即补：死亡按 LootTable 掷骰 spawn item 实体，无需独立系统） |
+| `deathSystem` | Health≤0 → 掉落 → removeEntity；玩家分支留重生标记（原地重置语义） |
+| `respawnSystem` | 玩家死后到期重置 Health/位置/Needs（同 eid 原地重生） |
 
 ### 框架通用 BT 节点（`framework/ai/nodes/`）
 
 - conditions：`IsTargetInVision`、`InAttackRange`
-- actions：`Chase`、`Attack`、`Flee`
+- actions：`Chase`、`Attack`、`Flee`（移动钳制工具抽到 `nodes/steer.ts` 共用）
+- `ActionFactory` 返回类型放宽为 `State | boolean`（condition 返回布尔）
 
 ### game/ 配置
 
-- `game/entities/boar.json`：Health, Attack, Perception, LootTable:[{raw_meat,1,1.0}], team 2
-- `game/entities/rabbit.json`：rabbit-flee 行为
-- `game/behaviors/boar-hostile.json`：`seq[cond[IsTargetInVision],act[Chase],cond[InAttackRange],act[Attack]] else act[Wander]`
-- `game/behaviors/rabbit-flee.json`
-- `game/items/raw_meat.json`
+- `game/entities/boar.json`：Health 60, Attack{8,32}, Perception{160,80}, LootTable:[{raw_meat,1,1.0}], team 2, boar-hostile 行为
+- `game/entities/rabbit.json`：Health 20, Perception{120,60}, rabbit-flee 行为（无攻击/无掉落）
+- `game/behaviors/boar-hostile.json`：selector[ seq[IsTargetInVision,Chase,InAttackRange,Attack], Wander ]
+- `game/behaviors/rabbit-flee.json`：selector[ seq[IsTargetInVision,Flee], Wander ]
+- `game/items/raw_meat.json`：consume 回 hunger +30
+- `game/entities/player.json`：加 Attack{10,40} + Cooldown（攻击入口：input.attack → Intent "attack"）
+- `game/rules/respawn.json`：`{delayMs:2000, resetNeeds:true}`
+- `game/spawns/populations.json`：boar max 3 / rabbit max 4
 
 ### 测试点
 
-- perception 写黑板、loot 概率掉落、玩家死亡触发 respawn
-- 集成：spawn boar + 玩家，跑 tick 至战斗结束，断言掉肉 + 重生
+- perception 写黑板、attackTarget（射程/冷却/友伤/死亡守卫）、death 三分支（掉落/玩家标记/移除）、respawn 重置+传送+Needs、5 个 BT 节点经 createNpcTree+step 断言
+- 集成：玩家击杀 boar → 掉肉落地；boar 感知 BT Attack 击杀玩家 → 重生回出生点
+- 既有用例同步：combatSystem 自动攻击用例 → attackTarget 显式调用；needDecay 移除用例 → death/respawn 全链路
 
 ### demo 里程碑
 
