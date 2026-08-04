@@ -77,14 +77,22 @@ export function getEquipModifiers(world: GameWorld, eid: number): EquipModifiers
   return out;
 }
 
-/** 槽位卫生：装备引用指向的槽已空 → 归 -1（同步诚实 + 防御过期引用）。 */
+/**
+ * 槽位卫生：装备引用指向的槽为空，或槽内物品已不再匹配该槽类型 → 归 -1。
+ * 与 getEquipModifiers 的读取规则对齐——否则 transfer 换物后引用残留，
+ * 物品换回时加成会未经 equip 命令静默恢复，且 netSync 持续广播过期 ref。
+ */
 export function equipmentSystem(world: GameWorld): GameWorld {
+  const itemsByKind = world.gameDef.itemsByKind;
   for (const eid of query(world, [Equipment])) {
     const inv = Inventory[eid];
     if (!inv) continue;
     for (const entry of SLOT_FIELDS) {
       const ref = entry.field[eid];
-      if (typeof ref === "number" && ref >= 0 && !inv.slots[ref]) {
+      if (typeof ref !== "number" || ref < 0) continue;
+      const stack = inv.slots[ref];
+      const effect = stack ? itemsByKind?.get(stack.kind)?.equip : undefined;
+      if (!stack || effect?.slot !== entry.slot) {
         entry.field[eid] = -1;
       }
     }

@@ -251,6 +251,22 @@ describe("Slice 3：getEquipModifiers 加成读取", () => {
     expect(Equipment.weaponSlot[player]).toBe(-1);
   });
 
+  it("槽内换入不匹配物品（transfer 换物）→ tick 体归 -1，防静默重穿", () => {
+    const world = createBareWorld();
+    setItemKind(world, W1);
+    setItemKind(world, M1);
+    const player = spawnTestPlayer(world);
+    Inventory[player]!.slots[1] = { kind: "w1", count: 1 };
+    equipSlot(world, player, 1);
+    expect(getEquipModifiers(world, player).attackBonus).toBe(5);
+
+    // transfer 把另一物品换进槽 1（模拟 transferSlot 交换）
+    Inventory[player]!.slots[1] = { kind: "m1", count: 3 };
+    equipmentSystem(world);
+    expect(Equipment.weaponSlot[player]).toBe(-1);
+    expect(getEquipModifiers(world, player).attackBonus).toBe(0);
+  });
+
   it("无背包实体的加成读取返回零值", () => {
     const world = createBareWorld();
     const enemy = spawnTestEnemy(world);
@@ -467,6 +483,12 @@ describe("Slice 3：GameSimulation 命令路由", () => {
     expect(Equipment.weaponSlot[playerEid]).toBe(1);
 
     expect(sim.submitCommand("s1", { type: "craft", recipe: "missing" })).toBe(false);
+
+    // 死亡/重生窗口内命令被拒（与 applyInputs 守卫语义一致）
+    Health.current[playerEid] = 0;
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "r1" })).toBe(false);
+    expect(sim.submitCommand("s1", { type: "equip", slot: 1 })).toBe(false);
+    expect(sim.submitCommand("s1", { type: "consume", slot: 0 })).toBe(false);
   });
 });
 
@@ -550,6 +572,49 @@ describe("Slice 3 集成：合成→装备→采集翻倍 / 合成矛→攻击�
     expect(playerSnap!.values["Equipment.weaponSlot"]).toBe(-1);
     expect(playerSnap!.values["Equipment.toolSlot"]).toBe(-1);
     expect(playerSnap!.values["Equipment.armorSlot"]).toBe(-1);
+  });
+
+  it("真实 game 配置端到端：真实 player/campfire 原型 + 命令通道 + 站点合成全链路", () => {
+    const def = loadGameDefinition({ gameJsonPath: "game/game.json" });
+    def.resolvedSpawns = [];
+    def.resolvedRules["crafting"] = {
+      recipes: [
+        { id: "r1", inputs: [{ kind: "m1", count: 1 }, { kind: "m2", count: 1 }], outputs: [{ kind: "m3", count: 1 }] },
+        { id: "r2", stationType: 1, inputs: [{ kind: "m3", count: 1 }], outputs: [{ kind: "m4", count: 1 }] },
+      ],
+      stationRange: 64,
+    };
+    const sim = createGameSimulation(def);
+    const world = (sim as unknown as { world: GameWorld }).world;
+    const { componentRegistry, archetypeRegistry } = getRegistries();
+    setItemKind(world, { kind: "m1", maxStack: 50 });
+    setItemKind(world, { kind: "m2", maxStack: 50 });
+    setItemKind(world, { kind: "m3", maxStack: 1, equip: { slot: "tool", gatherMult: 2 } });
+    setItemKind(world, { kind: "m4", maxStack: 1 });
+
+    sim.addPlayer("s1");
+    const playerEid = query(world, [Player])[0];
+    expect(hasComponent(world, playerEid, Equipment)).toBe(true); // 真实 player 原型带 Equipment
+    const inv = Inventory[playerEid]!;
+    expect(inv.capacity).toBe(12); // 真实原型容量
+    inv.slots[0] = { kind: "m1", count: 1 };
+    inv.slots[1] = { kind: "m2", count: 1 };
+
+    // 命令通道合成 + 装备
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "r1" })).toBe(true);
+    const toolSlot = inv.slots.findIndex((s) => s?.kind === "m3");
+    expect(toolSlot).toBeGreaterThanOrEqual(0);
+    expect(sim.submitCommand("s1", { type: "equip", slot: toolSlot })).toBe(true);
+    expect(getEquipModifiers(world, playerEid).gatherMult).toBe(2);
+
+    // 站点合成：无站点拒 → 在玩家处放置真实 campfire 原型 → 成功
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "r2" })).toBe(false);
+    spawnEntity(world, archetypeRegistry.get("campfire"), componentRegistry, {
+      x: Transform.x[playerEid],
+      y: Transform.y[playerEid],
+    });
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "r2" })).toBe(true);
+    expect(inv.slots.some((s) => s?.kind === "m4")).toBe(true);
   });
 });
 

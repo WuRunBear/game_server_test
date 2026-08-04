@@ -25,8 +25,9 @@ export type {
 export { registerAosSyncAdapter, getAosSyncAdapter, type AosSyncAdapter, type AosSyncOutput } from "framework/simulation/aosSyncAdapters";
 
 export { GameDefinitionSchema, type GameDefinition, type LoadedGameDefinition, type BehaviorDefinition, type SpawnRule, type SystemEnableEntry, type NetSyncField } from "framework/config/schema/GameDefinitionSchema";
-export { ItemKindSchema, type ItemKindSpec, type ConsumeEffect } from "framework/config/schema/ItemKindSchema";
+export { ItemKindSchema, type ItemKindSpec, type ConsumeEffect, type EquipEffect } from "framework/config/schema/ItemKindSchema";
 export { registerRuleSchema, getRuleSchema, hasRuleSchema, registerBuiltinRuleSchemas } from "framework/config/schema/ruleSchemas";
+export { CombatRuleSchema, NeedsRuleSchema, CraftingRuleSchema, type CombatRule, type NeedsRule, type CraftingRule, type CraftingRecipe } from "framework/config/schema/RuleSchema";
 
 export {
   registerSystem,

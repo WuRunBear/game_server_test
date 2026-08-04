@@ -25,6 +25,7 @@ export function harvest(world: GameWorld, actorEid: number, nodeEid: number): bo
 
   // 采集倍率：工具槽的 gatherMult 修正单次产出量
   const amount = Math.round(nodeState.amountPerHit * getEquipModifiers(world, actorEid).gatherMult);
+  if (amount <= 0) return false; // 倍率取整后为 0：不动节点（含 directConsume）
 
   if (nodeState.directConsume) {
     // 直接施加 consume 效果（如直接饮用），不经过背包

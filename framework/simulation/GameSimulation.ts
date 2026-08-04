@@ -246,6 +246,10 @@ export class GameSimulation implements SimulationPort {
     const eid = this.playerEidBySessionId.get(sessionId);
     if (typeof eid !== "number") return false;
 
+    // 死亡/重生窗口内（原地重置语义，实体未移除）不执行背包命令——
+    // 与 applyInputs / interactionSystem 的死亡守卫语义一致，防幽灵操作
+    if ((Health.current[eid] ?? 0) <= 0) return false;
+
     switch (command.type) {
       case "consume":
         return consumeSlot(this.world, eid, command.slot ?? -1);
