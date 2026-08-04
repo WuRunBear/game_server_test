@@ -13,7 +13,7 @@
     { "id": "physics" },
     { "id": "movement" },
     { "id": "collision" },
-    { "id": "combat", "config": { "friendlyFire": false } },
+    { "id": "combat" },
     { "id": "needDecay" },
     { "id": "spawning" },
     { "id": "inventory" },

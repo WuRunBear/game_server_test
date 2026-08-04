@@ -41,6 +41,10 @@ export function deathSystem(world: GameWorld): GameWorld {
   for (const eid of query(world, [Health])) {
     if ((Health.current[eid] ?? 0) > 0) continue;
 
+    const isPlayer = hasComponent(world, eid, Player);
+    // 已标记的玩家：掉落只掷一次（首帧），重生窗口内不再重复掷骰
+    if (isPlayer && markers.has(eid)) continue;
+
     const table = LootTable[eid];
     if (table && table.length > 0) {
       for (const entry of table) {
@@ -56,7 +60,7 @@ export function deathSystem(world: GameWorld): GameWorld {
       }
     }
 
-    if (hasComponent(world, eid, Player)) {
+    if (isPlayer) {
       // 原地重生：标记一次（已标记则保持原截止时间，避免每 tick 顺延）
       if (!markers.has(eid)) {
         markers.set(eid, { respawnAtMs: now + respawnDelayMs });

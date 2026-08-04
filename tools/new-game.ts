@@ -64,7 +64,7 @@ export function newGame(argv: string[]): void {
       { id: "physics" },
       { id: "movement" },
       { id: "collision" },
-      { id: "combat", config: { friendlyFire: false } },
+      { id: "combat" },
       { id: "spawning" },
       { id: "inventory" },
       { id: "interaction" },

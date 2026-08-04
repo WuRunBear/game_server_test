@@ -124,6 +124,18 @@
 >   计划文中的 MDSL（`seq[...] else ...`）仅示意
 > - `Perception` 按计划含 visionRadius + hostilityRange 双字段（hostilityRange
 >   当前无消费方，字段先占位）
+>
+> **S2 审查修复（第二轮，写回此计划）**：
+> - `IsTargetInVision` 必须 `!= null` 判定：perception 无目标时**写 null 而非不写 key**，
+>   旧 `!== undefined` 在 set-null 时恒 true（rabbit 不逃不游荡的根因）
+> - `Chase` 到位语义：进入攻击射程时返回 SUCCEEDED 并清零速度——mistreevous
+>   sequence 中 RUNNING 子节点会卡住序列，Chase 恒 RUNNING 导致 InAttackRange/Attack
+>   永不执行（敌追到射程内却永不攻击）
+> - perception 可感知判定：排除 team 0（中立）与 Health ≤ 0（尸体/重生窗口）
+> - 死亡/重生窗口玩家不接收输入不路由意图（applyInputs + interactionSystem 守卫）
+> - deathSystem 已标记玩家不重复掷骰掉落；`game.json` 删除失效的 combat.config
+> - aiSystem 对未注册 kind 的原型回退默认树（防手工 spawn NPC 时 tick 降级）
+> - `Attack` 冷却中返回 RUNNING 保持接战（不再退回 Wander）
 
 ### 新增框架组件
 

@@ -55,7 +55,9 @@ export function aiSystem(world: GameWorld): GameWorld {
     let bt = rt.npcTrees.get(eid);
     if (!bt) {
       const kind = rt.eidKind.get(eid);
-      if (kind) {
+      // 防御：kind 可能未注册原型（如测试/工具手工 spawn 的 NPC），
+      // 此时无行为树配置，回退默认树，不抛错中断 tick。
+      if (kind && world.archetypes.has(kind)) {
         const archetype = world.archetypes.get(kind);
         if (archetype?.behavior) {
           const behaviorDef = world.gameDef.resolvedBehaviors.find((b) => b.id === archetype.behavior);

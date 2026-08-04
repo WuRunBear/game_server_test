@@ -29,7 +29,7 @@ import { needDecaySystem } from "framework/systems/gameplay/needDecaySystem";
 import { inventorySystem } from "framework/systems/gameplay/inventorySystem";
 import { harvest } from "framework/systems/gameplay/gatheringSystem";
 import { createInteractionSystem } from "framework/systems/gameplay/interactionSystem";
-import { attackTarget } from "framework/systems/gameplay/combatSystem";
+import { attackTarget, combatSystem } from "framework/systems/gameplay/combatSystem";
 import { deathSystem } from "framework/systems/gameplay/deathSystem";
 import { respawnSystem } from "framework/systems/gameplay/respawnSystem";
 import { perceptionSystem } from "framework/systems/gameplay/perceptionSystem";
@@ -393,6 +393,24 @@ describe("interactionSystem 路由", () => {
     expect(Intent[player]).toBe(null);
     expect(ResourceNode[node]!.remaining).toBe(5);
   });
+
+  it("死亡玩家残留意图被消费：不跨重生窗口触发幽灵攻击", () => {
+    const world = createBareWorld();
+    world.gameDef.resolvedRules["respawn"] = { delayMs: 0 };
+    const player = spawnTestPlayer(world, { x: 0, y: 0, hp: 0, attack: { value: 50, range: 40 } });
+    const enemy = spawnTestEnemy(world, { x: 10, y: 0, hp: 100 });
+    Intent[player] = "attack";
+    // 死亡 tick：意图先被消费（置 null），再被死亡守卫拒绝路由
+    createInteractionSystem({ range: 24 })(world);
+    expect(Intent[player]).toBe(null);
+    expect(Health.current[enemy]).toBe(100);
+    // 重生后不留攻击意图，无需输入也不会发出幽灵一击
+    deathSystem(world);
+    respawnSystem(world);
+    expect(Intent[player]).toBe(null);
+    createInteractionSystem({ range: 24 })(world);
+    expect(Health.current[enemy]).toBe(100);
+  });
 });
 
 describe("netSync：OR 语义 + AoS 适配（用真实 game 配置的 netSync 接线）", () => {
@@ -489,6 +507,20 @@ describe("Slice 2：combatSystem attackTarget 原子", () => {
     const enemy = spawnTestEnemy(world, { x: 10, y: 0, hp: 0 });
     expect(attackTarget(world, player, enemy)).toBe(false);
   });
+
+  it("combatSystem 递减冷却，冷却结束后 attackTarget 再次命中", () => {
+    const world = createBareWorld();
+    const player = spawnTestPlayer(world, { attack: { value: 10 } });
+    addComponent(world, player, Cooldown);
+    Cooldown.remainingMs[player] = 0; // 清跨 world 残留（legacy 组件数组全局共享）
+    const enemy = spawnTestEnemy(world, { x: 10, y: 0, hp: 100 });
+    expect(attackTarget(world, player, enemy)).toBe(true);
+    expect(attackTarget(world, player, enemy)).toBe(false); // 冷却中
+    world.time.dtMs = 1000;
+    combatSystem(world);
+    expect(attackTarget(world, player, enemy)).toBe(true);
+    expect(Health.current[enemy]).toBe(80);
+  });
 });
 
 describe("Slice 2：perceptionSystem", () => {
@@ -509,6 +541,32 @@ describe("Slice 2：perceptionSystem", () => {
     const world = createBareWorld();
     const self = spawnTestEnemy(world, { x: 0, y: 0, visionRadius: 50 });
     const ally = spawnTestEnemy(world, { x: 5, y: 0, visionRadius: 50, team: 2 });
+    perceptionSystem(world);
+    const bb = getOrCreateBlackboard(world, self);
+    expect(bbGet(bb, BB_PERCEPTION_TARGET)).toBeNull();
+  });
+
+  it("不感知尸体（Health ≤ 0，含重生窗口玩家）", () => {
+    const world = createBareWorld();
+    const self = spawnTestEnemy(world, { x: 0, y: 0, visionRadius: 50 });
+    const corpse = spawnTestPlayer(world, { x: 10, y: 0, hp: 0 });
+    perceptionSystem(world);
+    const bb = getOrCreateBlackboard(world, self);
+    expect(bbGet(bb, BB_PERCEPTION_TARGET)).toBeNull();
+  });
+
+  it("team 0 视为中立：不构成感知目标", () => {
+    const world = createBareWorld();
+    const self = spawnTestEnemy(world, { x: 0, y: 0, visionRadius: 50 });
+    const neutral = addEntity(world);
+    addComponent(world, neutral, Transform);
+    addComponent(world, neutral, Team);
+    addComponent(world, neutral, Health);
+    Transform.x[neutral] = 5;
+    Transform.y[neutral] = 0;
+    Team.id[neutral] = 0;
+    Health.current[neutral] = 50;
+    Health.max[neutral] = 50;
     perceptionSystem(world);
     const bb = getOrCreateBlackboard(world, self);
     expect(bbGet(bb, BB_PERCEPTION_TARGET)).toBeNull();
@@ -551,6 +609,18 @@ describe("Slice 2：deathSystem", () => {
     expect(query(world, [Player]).length).toBe(1);
     respawnSystem(world);
     expect(Health.current[player]).toBe(100);
+  });
+
+  it("已标记玩家不重复掷骰掉落（重生窗口内只掷一次）", () => {
+    const world = createBareWorld();
+    setItemKind(world, { kind: "m1", maxStack: 20 });
+    world.gameDef.resolvedRules["respawn"] = { delayMs: 1000 };
+    const player = spawnTestPlayer(world, { hp: 0, x: 0, y: 0 });
+    LootTable[player] = [{ kind: "m1", qty: 1, chance: 1 }];
+    deathSystem(world);
+    deathSystem(world);
+    const items = query(world, [Item]);
+    expect(items.length).toBe(1);
   });
 });
 
@@ -596,29 +666,84 @@ describe("Slice 2：BT 战斗节点", () => {
     return createNpcTree(definition, registry);
   }
 
-  it("IsTargetInVision：有目标 true / 无目标 false", () => {
+  it("IsTargetInVision：有目标 true / 无目标（未写与写 null）false", () => {
     const world = createBareWorld();
     const self = spawnTestEnemy(world, {});
     const inst = makeInstance({ type: "root", child: { type: "condition", call: "IsTargetInVision" } });
     const bb = createBlackboard(self);
+    // 从未写入（undefined）→ false
     stepBehaviourTree(inst, { world, self, bb });
     expect(inst.tree.getState()).toBe(State.FAILED);
+    // 生产无目标形态：perception 写入 null → false（Defect：旧实现 null!==undefined 恒 true）
+    bbSet(bb, BB_PERCEPTION_TARGET, null);
+    inst.tree.reset();
+    stepBehaviourTree(inst, { world, self, bb });
+    expect(inst.tree.getState()).toBe(State.FAILED);
+    // 有目标 → true
     bbSet(bb, BB_PERCEPTION_TARGET, { eid: 999, dist: 10 });
     inst.tree.reset();
     stepBehaviourTree(inst, { world, self, bb });
     expect(inst.tree.getState()).toBe(State.SUCCEEDED);
   });
 
-  it("Chase：朝目标移动并保持 RUNNING", () => {
+  it("rabbit 整树：无目标（bb 写 null）时回退 Wander 移动", () => {
     const world = createBareWorld();
     const self = spawnTestEnemy(world, { x: 0, y: 0 });
-    const target = spawnTestPlayer(world, { x: 20, y: 0 });
+    const inst = makeInstance({
+      type: "root",
+      child: {
+        type: "selector",
+        children: [
+          {
+            type: "sequence",
+            children: [
+              { type: "condition", call: "IsTargetInVision" },
+              { type: "action", call: "Flee", args: { speed: 80 } },
+            ],
+          },
+          { type: "action", call: "Wander", args: { speed: 40 } },
+        ],
+      },
+    });
+    const bb = createBlackboard(self);
+    bbSet(bb, BB_PERCEPTION_TARGET, null);
+    stepBehaviourTree(inst, { world, self, bb });
+    expect(inst.tree.getState()).toBe(State.RUNNING);
+    expect(Math.hypot(Velocity.vx[self], Velocity.vy[self])).toBeGreaterThan(0);
+  });
+
+  it("Attack：冷却中保持 RUNNING 接战（不退回 Wander）", () => {
+    const world = createBareWorld();
+    const self = spawnTestEnemy(world, { x: 0, y: 0, attack: { value: 10, range: 30 } });
+    addComponent(world, self, Cooldown);
+    Cooldown.remainingMs[self] = 500;
+    const target = spawnTestPlayer(world, { x: 10, y: 0, hp: 100 });
+    const inst = makeInstance({ type: "root", child: { type: "action", call: "Attack" } });
+    const bb = createBlackboard(self);
+    bbSet(bb, BB_PERCEPTION_TARGET, { eid: target, dist: 10 });
+    stepBehaviourTree(inst, { world, self, bb });
+    expect(inst.tree.getState()).toBe(State.RUNNING);
+    expect(Health.current[target]).toBe(100);
+  });
+
+  it("Chase：射程外朝目标移动并保持 RUNNING；到位（进入射程）→ SUCCEEDED 推进序列", () => {
+    const world = createBareWorld();
+    const self = spawnTestEnemy(world, { x: 0, y: 0 });
+    const farTarget = spawnTestPlayer(world, { x: 50, y: 0 });
     const inst = makeInstance({ type: "root", child: { type: "action", call: "Chase", args: { speed: 10 } } });
     const bb = createBlackboard(self);
-    bbSet(bb, BB_PERCEPTION_TARGET, { eid: target, dist: 20 });
+    // 射程外（默认射程 32 < dist 50）→ RUNNING + 朝目标移动
+    bbSet(bb, BB_PERCEPTION_TARGET, { eid: farTarget, dist: 50 });
     stepBehaviourTree(inst, { world, self, bb });
     expect(inst.tree.getState()).toBe(State.RUNNING);
     expect(Velocity.vx[self]).toBeGreaterThan(0);
+    // 到位（dist 10 ≤ 32）→ SUCCEEDED，让 sequence 继续到 InAttackRange/Attack
+    const nearTarget = spawnTestPlayer(world, { x: 10, y: 0 });
+    bbSet(bb, BB_PERCEPTION_TARGET, { eid: nearTarget, dist: 10 });
+    inst.tree.reset();
+    stepBehaviourTree(inst, { world, self, bb });
+    expect(inst.tree.getState()).toBe(State.SUCCEEDED);
+    expect(Velocity.vx[self]).toBe(0);
   });
 
   it("InAttackRange：射程内 true / 射程外 false", () => {
@@ -710,5 +835,94 @@ describe("Slice 2 集成：战斗闭环", () => {
     expect(Health.current[player]).toBe(100);
     expect(Transform.x[player]).toBe(0);
     expect(Transform.y[player]).toBe(0);
+  });
+
+  it("GameSimulation：applyInputs 把 attack 意图写入 → interactionSystem 路由命中", () => {
+    const gameDef = createDefaultGameDefinition();
+    const sim = createGameSimulation(gameDef);
+    const world = (sim as unknown as { world: GameWorld }).world;
+    const { networkId } = sim.addPlayer("s1");
+    const playerEid = query(world, [Player])[0];
+    addComponent(world, playerEid, Attack);
+    Attack.value[playerEid] = 50;
+    Attack.range[playerEid] = 40;
+    const enemy = spawnTestEnemy(world, { x: 10, y: 0, hp: 30 });
+    // 跨 world 残留清理：真实 game.json 的 override 会替换全局 player 原型（含 Cooldown），
+    // 且 legacy 组件数组全局共享——显式清零防止上一用例残留的冷却拦截本次攻击
+    Cooldown.remainingMs[playerEid] = 0;
+    sim.submitInput("s1", { seq: 1, moveX: 0, moveY: 0, attack: true });
+    sim.tick(50);
+    expect(Health.current[enemy]).toBeLessThanOrEqual(0);
+  });
+
+  it("集成：真实 aiSystem 全链路——hostile 感知→追击→击杀玩家→死亡标记→重生", () => {
+    const gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
+    gameDef.resolvedSpawns = []; // 确定性：关掉随机生成规则
+    // delayMs 2000：死亡与重生跨 tick 分离（0 会在同一 tick 内完成，循环检测不到中间态）
+    gameDef.resolvedRules["respawn"] = { delayMs: 2000, resetNeeds: true };
+    const instance = createGameInstance(gameDef);
+    const world = instance.world;
+    const { componentRegistry, archetypeRegistry } = getRegistries();
+
+    // 游戏无关：测试本地注册一个带敌对行为的通用原型，走真实 archetype→behavior→BT 链路
+    archetypeRegistry.register({
+      kind: "test-hostile",
+      tags: ["NPC", "Enemy"],
+      components: {
+        Size: { w: 20, h: 14 },
+        Velocity: {},
+        Collider: { shape: 1, halfW: 10, halfH: 7 },
+        Health: { current: 60, max: 60 },
+        Attack: { value: 8, range: 32 },
+        Cooldown: {},
+        Perception: { visionRadius: 160, hostilityRange: 80 },
+        LootTable: [{ kind: "m1", qty: 1, chance: 1 }],
+      },
+      behavior: "test-hostile-bt",
+      team: 2,
+    });
+    gameDef.resolvedBehaviors.push({
+      id: "test-hostile-bt",
+      definition: {
+        type: "root",
+        child: {
+          type: "selector",
+          children: [
+            {
+              type: "sequence",
+              children: [
+                { type: "condition", call: "IsTargetInVision" },
+                { type: "action", call: "Chase", args: { speed: 60 } },
+                { type: "condition", call: "InAttackRange" },
+                { type: "action", call: "Attack" },
+              ],
+            },
+            { type: "action", call: "Wander", args: { speed: 40 } },
+          ],
+        },
+      },
+    });
+
+    const player = spawnEntity(world, archetypeRegistry.get("player"), componentRegistry, { x: 0, y: 0 });
+    Health.current[player] = 10; // 快速死亡（hostile 8 dmg/1s）
+    const hostile = spawnEntity(world, archetypeRegistry.get("test-hostile"), componentRegistry, { x: 40, y: 0 });
+    // 清零 Velocity 残留（legacy 组件数组全局共享，前序用例可能写过同 eid 槽），防玩家/敌漂移出视野
+    Velocity.vx[player] = 0;
+    Velocity.vy[player] = 0;
+    Velocity.vx[hostile] = 0;
+    Velocity.vy[hostile] = 0;
+    setItemKind(world, { kind: "m1", maxStack: 20 });
+
+    let sawDead = false;
+    let sawRespawn = false;
+    for (let i = 0; i < 400 && !sawRespawn; i++) {
+      instance.step(50);
+      if ((Health.current[player] ?? 0) <= 0) sawDead = true;
+      if (sawDead && (Health.current[player] ?? 0) > 0) sawRespawn = true;
+    }
+
+    expect(sawDead).toBe(true);
+    expect(sawRespawn).toBe(true);
+    expect(Health.current[player]).toBe(100);
   });
 });

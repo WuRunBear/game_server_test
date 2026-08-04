@@ -32,8 +32,11 @@ export function createInteractionSystem(config?: Record<string, unknown>) {
     for (const playerEid of query(world, [Player, Transform])) {
       const intent = Intent[playerEid];
       if (!intent) continue;
-      // 先清空：意图只在本帧生效
+      // 先清空：意图只在本帧生效（无论是否路由）——死亡玩家残留的意图
+      // 也必须消费，否则会在重生后的第一个存活 tick 触发幽灵攻击/采集
       Intent[playerEid] = null;
+      // 死亡/重生窗口内的玩家不路由交互意图（防幽灵采集/攻击）
+      if ((Health.current[playerEid] ?? 0) <= 0) continue;
 
       const px = Transform.x[playerEid];
       const py = Transform.y[playerEid];

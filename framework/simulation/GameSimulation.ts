@@ -1,5 +1,5 @@
 import { query, removeEntity } from "bitecs";
-import { NetworkId, Velocity, Inventory, Intent } from "components";
+import { NetworkId, Velocity, Inventory, Intent, Health } from "components";
 import { spawnEntity } from "framework/entities/spawn";
 import { createGameInstance, type GameInstance } from "framework/bootstrap/GameInstance";
 import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
@@ -298,6 +298,8 @@ export class GameSimulation implements SimulationPort {
     for (const [sessionId, input] of this.latestInputBySessionId) {
       const eid = this.playerEidBySessionId.get(sessionId);
       if (typeof eid !== "number") continue;
+      // 死亡/重生窗口内（原地重置语义，实体未移除）：不接收移动与意图输入
+      if ((Health.current[eid] ?? 0) <= 0) continue;
       Velocity.vx[eid] = input.moveX;
       Velocity.vy[eid] = input.moveY;
       // 交互/攻击意图：本帧按下则置位，由 interactionSystem 在 step 中消费并清空

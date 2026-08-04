@@ -8,6 +8,9 @@ export default defineConfig({
   test: {
     include: ["framework/__tests__/**/*.test.ts"],
     exclude: ["node_modules", "dist"],
+    // legacy ECS（bitecs legacy 组件数组/注册表为模块级全局单例，eid 位槽跨 world 共享）
+    // 多测试文件并发会交错污染——文件间串行执行
+    fileParallelism: false,
   },
   resolve: {
     alias: [

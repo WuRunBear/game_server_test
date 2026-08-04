@@ -1,5 +1,5 @@
-import { query } from "bitecs";
-import { Perception, Transform, Team, NPC } from "components";
+import { hasComponent, query } from "bitecs";
+import { Perception, Transform, Team, Health, NPC } from "components";
 import { bbSet, BB_PERCEPTION_TARGET, type PerceivedTarget } from "ai/blackboard";
 import { getOrCreateBlackboard } from "framework/systems/gameplay/aiSystem";
 import type { GameWorld } from "world";
@@ -7,9 +7,13 @@ import type { GameWorld } from "world";
 /**
  * perceptionSystem：感知扫描。
  *
- * 对每个 [Perception, NPC] 实体：在 visionRadius 内找最近的非同队实体，
- * 结果写黑板 `perception.target`（{eid, dist}，无则 null），供 BT
- * 条件/动作（IsTargetInVision / Chase / Flee / Attack）消费。
+ * 对每个 [Perception, NPC] 实体：在 visionRadius 内找最近的可感知敌对实体，
+ * 结果写黑板 `perception.target`（{eid, dist}，无则 **null**——注意是写入
+ * null 而非不写 key），供 BT 条件/动作（IsTargetInVision / Chase / Flee / Attack）消费。
+ *
+ * 可感知判定（通用约定）：
+ * - 非本队（Team.id 不同）且非中立（Team.id = 0 视为中立，不构成感知目标）
+ * - 必须是活物：有 Health 组件且当前 Health > 0（尸体/重生窗口内的玩家不追猎）
  *
  * 游戏无关——只按 Team 分组与半径通用字段，不识别具体阵营语义。
  */
@@ -23,7 +27,9 @@ export function perceptionSystem(world: GameWorld): GameWorld {
     if (radius > 0) {
       for (const other of query(world, [Transform, Team])) {
         if (other === eid) continue;
-        if (Team.id[other] === myTeam) continue;
+        const otherTeam = Team.id[other];
+        if (otherTeam === 0 || otherTeam === myTeam) continue;
+        if (!hasComponent(world, other, Health) || (Health.current[other] ?? 0) <= 0) continue;
         const dist = Math.hypot(
           Transform.x[eid] - Transform.x[other],
           Transform.y[eid] - Transform.y[other],
