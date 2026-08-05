@@ -272,6 +272,20 @@
 > - **未做（即需即补，记录不修）**：Weather（无消费方）、SeekLight（无行为树引用）、
 >   zone 分区（simple 生成器硬编码单 zone，装饰性；wolf 用整图 zone + isNight 即可）
 > - LightSource.fuelRemainingMs 无消耗系统（静态/放置火堆常亮大值；燃料消耗留待真实需求）
+>
+> **S4 审查修复（第一轮，写回此计划）**：
+> - **Sleep 从 RUNNING 改为 SUCCEEDED**（树根每 tick 重置 → 全树重评估）：原 guard 方案
+>   （Sleep + while IsTargetNotInVision）虽能"见敌即醒"，但 guard 中止不执行节点本体，
+>   白天有目标等路径会残留追击速度；且 RUNNING 记忆使分支 1 光内入睡无 guard 时睡死。
+>   SUCCEEDED 后"见敌即醒/天亮停手/光源失效改判"全部由树重置自然达成，无需额外 guard
+> - **wolf-night 分支 2（追击）加 `while: {call:"IsNight"}` guard**：修复"追击中天亮仍攻击"
+>   （guard 每 tick 重求值，天立即中断）；分支 3 改无条件 Sleep（清零速度兜底）
+> - **`IsTargetNotInVision` 节点删除**（重设计后无消费方，即需即补）
+> - **validateIntegrity 行为树校验修复**（S2 遗留顺手修）：collectActionNames 补
+>   `child` 递归与 `call` 形态收集（原只认 `children` + `{name,type:"action"}`，所有
+>   行为树引用未注册动作时校验静默放行）；guard 条件名收集随之真正生效
+> - **guard 单对象形态**（问题 4）：mistreevous 校验层只接受单个 `{call}` 对象，
+>   数组形态是误导性死代码，btFactory/loadGameDefinition 删除数组分支
 
 ### 新增框架组件
 
@@ -292,8 +306,8 @@
 ### 扩展点
 
 - `SpawnSchema` 加 `condition` 字段（引用 spawnConditions 注册表，isNight 内建）→ 夜刷狼用
-- 通用 BT：condition `IsNight`/`IsInLight`/`IsTargetNotInVision`（guard 用），action `Sleep`；
-  btFactory/validateIntegrity 支持 mistreevous `while/until` guard 条件收集
+- 通用 BT：condition `IsNight`/`IsInLight`，action `Sleep`（SUCCEEDED 语义）；
+  btFactory/validateIntegrity 支持 mistreevous `while/until` guard 条件收集（单对象形态）
 - **火光回避**：perceptionSystem 感知侧——目标在有效光源半径内不可感知（通用"光=安全区"机制）
 
 ### game/ 配置
@@ -301,7 +315,8 @@
 - `game/rules/daynight.json`：`{cycleLengthSec:600, nightStartHour:19, nightEndHour:5}`（计划原 dayLengthSec 更名）
 - `game/rules/place.json`：`{placeRange:64}`
 - `game/entities/wolf.json`：夜间敌对，回避 LightSource
-- `game/behaviors/wolf-night.json`：`selector[ seq[IsNight,IsInLight,Sleep], seq[IsNight,IsTargetInVision,Chase,InAttackRange,Attack], Sleep(while IsTargetNotInVision) ]`
+- `game/behaviors/wolf-night.json`：`selector[ seq[IsNight,IsInLight,Sleep], seq(while IsNight)[IsTargetInVision,Chase,InAttackRange,Attack], Sleep ]`
+  （Sleep 为 SUCCEEDED 语义，树每 tick 重置——见敌即醒/天亮停手由重评估 + guard 达成）
 - `game/entities/campfire.json`：LightSource{radius:80} + CraftingStation(cook) + Placeable
 - `game/items/campfire_kit.json`：place→campfire + 配方（3 木 + 2 石）
 - `game/maps/registry.json`：zone 划分**未做**（记录不修：simple 生成器硬编码单 zone）

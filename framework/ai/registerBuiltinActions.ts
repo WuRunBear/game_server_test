@@ -6,7 +6,6 @@ import { createFleeAction } from "framework/ai/nodes/actions/flee";
 import { createAttackAction } from "framework/ai/nodes/actions/attack";
 import { createSleepAction } from "framework/ai/nodes/actions/sleep";
 import { createIsTargetInVisionCondition } from "framework/ai/nodes/conditions/isTargetInVision";
-import { createIsTargetNotInVisionCondition } from "framework/ai/nodes/conditions/isTargetNotInVision";
 import { createInAttackRangeCondition } from "framework/ai/nodes/conditions/inAttackRange";
 import { createIsNightCondition } from "framework/ai/nodes/conditions/isNight";
 import { createIsInLightCondition } from "framework/ai/nodes/conditions/isInLight";
@@ -19,7 +18,6 @@ export function registerBuiltinActions(registry: ActionRegistry): void {
   registry.register("Attack", createAttackAction);
   registry.register("Sleep", createSleepAction);
   registry.register("IsTargetInVision", createIsTargetInVisionCondition);
-  registry.register("IsTargetNotInVision", createIsTargetNotInVisionCondition);
   registry.register("InAttackRange", createInAttackRangeCondition);
   registry.register("IsNight", createIsNightCondition);
   registry.register("IsInLight", createIsInLightCondition);

@@ -238,6 +238,11 @@ function validateIntegrity(data: LoadedGameDefinition): void {
   }
 }
 
+/**
+ * 收集行为树中引用的全部动作/条件名（供 validateIntegrity 校验注册表存在性）。
+ * 与 btFactory 的收集器对齐：递归 children + child、认 name 与 call 两种形态、
+ * 收集 while/until guard 里的条件名（guard 是单个 `{call}` 对象，无 type 字段）。
+ */
 function collectActionNames(node: unknown, names: Set<string>): void {
   if (typeof node === "string") {
     for (const match of node.matchAll(/action\s*\[([^\]]+)\]/g)) {
@@ -247,23 +252,23 @@ function collectActionNames(node: unknown, names: Set<string>): void {
   }
   if (!node || typeof node !== "object") return;
   const obj = node as Record<string, unknown>;
-  if (typeof obj.name === "string" && obj.type === "action") {
-    names.add(obj.name);
+  const name = typeof obj.name === "string" ? obj.name : typeof obj.call === "string" ? obj.call : undefined;
+  if (typeof name === "string") {
+    names.add(name);
   }
-  // mistreevous while/until guard 条件是 `{call}` 形态（无 type 字段），按条件名收集
   for (const key of ["while", "until"]) {
     const guard = obj[key];
-    const guards = Array.isArray(guard) ? guard : guard ? [guard] : [];
-    for (const g of guards) {
-      if (g && typeof g === "object" && typeof (g as Record<string, unknown>).call === "string") {
-        names.add((g as Record<string, unknown>).call as string);
-      }
+    if (guard && typeof guard === "object" && typeof (guard as Record<string, unknown>).call === "string") {
+      names.add((guard as Record<string, unknown>).call as string);
     }
   }
   if (Array.isArray(obj.children)) {
     for (const child of obj.children) {
       collectActionNames(child, names);
     }
+  }
+  if (obj.child) {
+    collectActionNames(obj.child, names);
   }
 }
 

@@ -16,6 +16,7 @@ import {
 import { Transform } from "framework/components/transform";
 import { Velocity, Collider, ColliderShape } from "framework/components/physics";
 import { Health, Team } from "framework/components/combat";
+import { Cooldown } from "framework/components/timer";
 import { NetworkId } from "framework/components/network";
 import { Player, NPC, Enemy, Resource } from "framework/components/tags";
 import { Perception } from "framework/components/perception";
@@ -32,7 +33,7 @@ import { perceptionSystem } from "framework/systems/gameplay/perceptionSystem";
 import { movementSystem } from "framework/systems/core/movementSystem";
 import { createNpcTree } from "framework/ai/btFactory";
 import { stepBehaviourTree } from "framework/ai/btRunner";
-import { createBlackboard, bbSet, BB_PERCEPTION_TARGET } from "framework/ai/blackboard";
+import { createBlackboard } from "framework/ai/blackboard";
 import type { GameWorld } from "framework/world";
 import type { ItemKindSpec } from "framework/config/schema/ItemKindSchema";
 
@@ -122,6 +123,8 @@ function spawnTestHunter(world: GameWorld, opts: HunterOpts = {}): number {
     y: opts.y ?? 0,
   });
   if (opts.hp !== undefined) Health.current[eid] = opts.hp;
+  // legacy 组件数组全局共享：显式清零残留，防上一用例的冷却拦截本次攻击
+  Cooldown.remainingMs[eid] = 0;
   return eid;
 }
 
@@ -160,15 +163,15 @@ function registerHunterArchetypeAndBehavior(world: GameWorld): void {
             },
             {
               type: "sequence",
+              while: { call: "IsNight" },
               children: [
-                { type: "condition", call: "IsNight" },
                 { type: "condition", call: "IsTargetInVision" },
                 { type: "action", call: "Chase", args: { speed: 70 } },
                 { type: "condition", call: "InAttackRange" },
                 { type: "action", call: "Attack" },
               ],
             },
-            { type: "action", call: "Sleep", while: { call: "IsTargetNotInVision" } },
+            { type: "action", call: "Sleep" },
           ],
         },
       },
@@ -307,7 +310,7 @@ describe("Slice 4：BT 通用节点 IsNight / Sleep / IsInLight", () => {
     expect(inst.tree.getState()).toBe(State.FAILED);
   });
 
-  it("Sleep：清零速度并保持 RUNNING", () => {
+  it("Sleep：清零速度并完成一帧（SUCCEEDED，树每 tick 重置 → 条件变化即时改判）", () => {
     const world = createBareWorld();
     const self = addEntity(world);
     addComponent(world, self, Velocity);
@@ -315,7 +318,7 @@ describe("Slice 4：BT 通用节点 IsNight / Sleep / IsInLight", () => {
     Velocity.vy[self] = 50;
     const { inst, bb } = makeInstance(world, { type: "action", call: "Sleep" });
     stepBehaviourTree(inst, { world, self, bb });
-    expect(inst.tree.getState()).toBe(State.RUNNING);
+    expect(inst.tree.getState()).toBe(State.SUCCEEDED);
     expect(Velocity.vx[self]).toBe(0);
     expect(Velocity.vy[self]).toBe(0);
   });
@@ -343,18 +346,6 @@ describe("Slice 4：BT 通用节点 IsNight / Sleep / IsInLight", () => {
     Transform.x[self] = 20;
     inst.tree.reset();
     stepBehaviourTree(inst, { world, self, bb });
-    expect(inst.tree.getState()).toBe(State.FAILED);
-  });
-
-  it("IsTargetNotInVision：无目标 true / 有目标 false（guard 用）", () => {
-    const world = createBareWorld();
-    const { inst, bb } = makeInstance(world, { type: "condition", call: "IsTargetNotInVision" });
-    stepBehaviourTree(inst, { world, self: 1, bb });
-    expect(inst.tree.getState()).toBe(State.SUCCEEDED);
-
-    bbSet(bb, BB_PERCEPTION_TARGET, { eid: 2, dist: 10 });
-    inst.tree.reset();
-    stepBehaviourTree(inst, { world, self: 1, bb });
     expect(inst.tree.getState()).toBe(State.FAILED);
   });
 });
@@ -390,6 +381,26 @@ describe("Slice 4 集成：夜间敌对 + 火光回避（通用光源机制）",
     world.time.timeOfDay.phase = PHASE_NIGHT;
     for (let i = 0; i < 5; i++) stepTick(world);
     expect(Health.current[player]).toBeLessThan(100);
+  });
+
+  it("昼夜切换：追击中天亮 → while guard 中断追击，狼入睡且速度清零（不再攻击）", () => {
+    const world = createBareWorld();
+    registerHunterArchetypeAndBehavior(world);
+    const player = spawnTestPlayer(world, { x: 0, y: 0, hp: 100 });
+    const hunter = spawnTestHunter(world, { x: 10, y: 0 });
+
+    // 夜：追击并攻击
+    world.time.timeOfDay.phase = PHASE_NIGHT;
+    for (let i = 0; i < 5; i++) stepTick(world);
+    expect(Health.current[player]).toBeLessThan(100);
+
+    // 天亮：分支 2 的 while IsNight guard 每 tick 重评估 → 中断追击
+    world.time.timeOfDay.phase = PHASE_DAY;
+    const hpAfterDawn = Health.current[player];
+    for (let i = 0; i < 10; i++) stepTick(world);
+    expect(Health.current[player]).toBe(hpAfterDawn);
+    expect(Velocity.vx[hunter]).toBe(0);
+    expect(Velocity.vy[hunter]).toBe(0);
   });
 
   it("火光回避：夜晚玩家在火光内 → 猎手不接近也不攻击（感知侧回避）", () => {

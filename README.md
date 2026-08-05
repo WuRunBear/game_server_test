@@ -83,9 +83,9 @@ framework/
     btFactory.ts            # 行为树工厂 (配置 → mistreevous 树)
     btRunner.ts             # stepBehaviourTree(instance, ctx)
     blackboard.ts           # 每实体黑板 (perception.target 等 key)
-    registerBuiltinActions.ts   # 注册 Idle/Wander/Chase/Flee/Attack/Sleep/IsTargetInVision/IsTargetNotInVision/InAttackRange/IsNight/IsInLight
+    registerBuiltinActions.ts   # 注册 Idle/Wander/Chase/Flee/Attack/Sleep/IsTargetInVision/InAttackRange/IsNight/IsInLight
     nodes/actions/          # idle.ts, wander.ts, chase.ts, flee.ts, attack.ts, sleep.ts
-    nodes/conditions/       # isTargetInVision.ts, isTargetNotInVision.ts, inAttackRange.ts, isNight.ts, isInLight.ts
+    nodes/conditions/       # isTargetInVision.ts, inAttackRange.ts, isNight.ts, isInLight.ts
     nodes/steer.ts          # 移动方向/边界钳制共用工具
   map/
     types.ts                # MapRuntime / MapSource / MapZone / Vec2

@@ -20,13 +20,12 @@ function getChildNodes(obj: Record<string, unknown>): unknown[] {
   return nodes;
 }
 
-/** mistreevous guard 属性（while/until）里的条件名——guard 是 `{call}` 或 `{call}[]` 形态。 */
+/** mistreevous guard 属性（while/until）里的条件名——guard 是单个 `{call}` 对象形态。 */
 function getGuardConditions(obj: Record<string, unknown>): unknown[] {
   const nodes: unknown[] = [];
   for (const key of ["while", "until"]) {
     const guard = obj[key];
-    if (Array.isArray(guard)) nodes.push(...guard);
-    else if (guard && typeof guard === "object") nodes.push(guard);
+    if (guard && typeof guard === "object") nodes.push(guard);
   }
   return nodes;
 }

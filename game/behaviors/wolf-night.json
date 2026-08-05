@@ -15,19 +15,15 @@
         },
         {
           "type": "sequence",
+          "while": { "call": "IsNight" },
           "children": [
-            { "type": "condition", "call": "IsNight" },
             { "type": "condition", "call": "IsTargetInVision" },
             { "type": "action", "call": "Chase", "args": { "speed": 70 } },
             { "type": "condition", "call": "InAttackRange" },
             { "type": "action", "call": "Attack" }
           ]
         },
-        {
-          "type": "action",
-          "call": "Sleep",
-          "while": { "call": "IsTargetNotInVision" }
-        }
+        { "type": "action", "call": "Sleep" }
       ]
     }
   }
