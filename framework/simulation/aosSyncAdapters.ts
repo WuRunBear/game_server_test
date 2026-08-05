@@ -1,6 +1,6 @@
 import type { GameWorld } from "world";
 import {
-  Needs, Inventory, ItemMeta, ResourceNode,
+  Needs, Inventory, ItemMeta, ResourceNode, Portal,
 } from "components";
 
 /**
@@ -92,6 +92,19 @@ registerAosSyncAdapter("ResourceNode", (_world, eid, fields) => {
     if (f === "remaining") out.numbers["ResourceNode.remaining"] = state.remaining;
     else if (f === "max") out.numbers["ResourceNode.max"] = state.max;
     else if (f === "yieldsKind") out.strings["ResourceNode.yieldsKind"] = state.yieldsKind;
+  }
+  return out;
+});
+
+/** 内建适配器：Portal（目标地图 id + 传送目标坐标）。 */
+registerAosSyncAdapter("Portal", (_world, eid, fields) => {
+  const out = empty();
+  const state = Portal[eid];
+  if (!state) return out;
+  for (const f of fields) {
+    if (f === "targetMap") out.strings["Portal.targetMap"] = state.targetMap;
+    else if (f === "x") out.numbers["Portal.x"] = state.x;
+    else if (f === "y") out.numbers["Portal.y"] = state.y;
   }
   return out;
 });

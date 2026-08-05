@@ -112,42 +112,55 @@ function loadSpawnsFile(baseDir: string, spawnsPattern?: string): SpawnRule[] {
   return results;
 }
 
-function resolveMapSource(baseDir: string, mapRegistryPath?: string): MapSource | undefined {
-  if (!mapRegistryPath) return undefined;
+/**
+ * 解析地图注册表：返回全部地图来源（key=地图 id）与默认地图来源。
+ * 单条解析逻辑与历史 resolveMapSource 一致；无注册表/无地图时返回空。
+ */
+function resolveMapSources(
+  baseDir: string,
+  mapRegistryPath?: string,
+): { sources: Record<string, MapSource>; defaultSource?: MapSource } {
+  if (!mapRegistryPath) return { sources: {} };
   const fullPath = resolve(baseDir, mapRegistryPath);
-  if (!existsSync(fullPath)) return undefined;
+  if (!existsSync(fullPath)) return { sources: {} };
 
   const raw = readJsonFile(fullPath);
   const registry = MapRegistrySchema.parse(raw);
-  const defaultId = registry.default ?? Object.keys(registry.maps)[0];
-  if (!defaultId) return undefined;
+  const sources: Record<string, MapSource> = {};
+  let defaultSource: MapSource | undefined;
 
-  const entry = registry.maps[defaultId];
-  if (!entry) return undefined;
-
-  if (entry.kind === "tiled") {
-    const tiledEntry = entry as TiledMapEntryJson;
-    const tiledPath = resolve(dirname(fullPath), tiledEntry.path);
-    return {
-      kind: "tiled" as const,
-      id: tiledEntry.id ?? defaultId,
-      name: tiledEntry.name ?? defaultId,
-      json: readJsonFile(tiledPath),
-    };
+  for (const [key, entry] of Object.entries(registry.maps)) {
+    let source: MapSource;
+    if (entry.kind === "tiled") {
+      const tiledEntry = entry as TiledMapEntryJson;
+      const tiledPath = resolve(dirname(fullPath), tiledEntry.path);
+      source = {
+        kind: "tiled" as const,
+        id: tiledEntry.id ?? key,
+        name: tiledEntry.name ?? key,
+        json: readJsonFile(tiledPath),
+      };
+    } else {
+      const genEntry = entry as GeneratedMapEntryJson;
+      source = {
+        kind: "generated" as const,
+        generatorId: genEntry.generatorId ?? "simple",
+        id: genEntry.id ?? key,
+        name: genEntry.name ?? key,
+        seed: genEntry.seed ?? 1,
+        width: genEntry.width ?? 64,
+        height: genEntry.height ?? 64,
+        tileWidth: genEntry.tileWidth ?? 16,
+        tileHeight: genEntry.tileHeight ?? 16,
+      };
+    }
+    sources[key] = source;
+    if (key === (registry.default ?? Object.keys(registry.maps)[0])) {
+      defaultSource = source;
+    }
   }
 
-  const genEntry = entry as GeneratedMapEntryJson;
-  return {
-    kind: "generated" as const,
-    generatorId: genEntry.generatorId ?? "simple",
-    id: genEntry.id ?? defaultId,
-    name: genEntry.name ?? defaultId,
-    seed: genEntry.seed ?? 1,
-    width: genEntry.width ?? 64,
-    height: genEntry.height ?? 64,
-    tileWidth: genEntry.tileWidth ?? 16,
-    tileHeight: genEntry.tileHeight ?? 16,
-  };
+  return { sources, defaultSource };
 }
 
 function validateIntegrity(data: LoadedGameDefinition): void {
@@ -193,6 +206,11 @@ function validateIntegrity(data: LoadedGameDefinition): void {
       if (spawn.condition && !hasSpawnCondition(spawn.condition)) {
         throw new Error(
           `Spawn rule for "${spawn.kind}" references unknown condition "${spawn.condition}"`,
+        );
+      }
+      if (spawn.mapId && !data.resolvedMapSources?.[spawn.mapId]) {
+        throw new Error(
+          `Spawn rule for "${spawn.kind}" references unknown map "${spawn.mapId}"`,
         );
       }
     }
@@ -298,7 +316,7 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
   const resolvedRules = loadRulesFile(baseDir, gameDef.rules);
   const resolvedSpawns = loadSpawnsFile(baseDir, gameDef.spawns);
   const resolvedItems = loadItemsFile(baseDir, gameDef.items);
-  const resolvedMapSource = resolveMapSource(baseDir, gameDef.map?.registry);
+  const mapResult = resolveMapSources(baseDir, gameDef.map?.registry);
 
   const loaded: LoadedGameDefinition = {
     ...gameDef,
@@ -307,7 +325,8 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
     resolvedRules,
     resolvedSpawns,
     resolvedItems,
-    resolvedMapSource,
+    resolvedMapSource: mapResult.defaultSource,
+    resolvedMapSources: mapResult.sources,
   };
 
   validateIntegrity(loaded);
@@ -344,5 +363,6 @@ export function createDefaultGameDefinition(): LoadedGameDefinition {
     resolvedSpawns: [],
     resolvedItems: [],
     resolvedMapSource: undefined,
+    resolvedMapSources: {},
   };
 }

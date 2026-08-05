@@ -1,8 +1,8 @@
 # 通用 2D 游戏框架系统路线图
 
 > 目标：将当前框架演进为通用 2D 游戏框架。
-> Phase 0（切片前止血）已完成 5 个框架级缺陷修复；Slice 1（生存循环）、Slice 2（战斗闭环）、Slice 3（合成与装备）、Slice 4（世界氛围）与 Slice 5（联机完整度）已完成。
-> 现状：8 个内置核心系统 + Slice 1 新增 2 个生存系统（needDecay / gathering）+ Slice 2 新增 3 个系统（perception / death / respawn）+ Slice 3 新增 1 个系统（equipment）+ Slice 4 新增 1 个系统（dayNight），共 15 个内置系统；crafting / placeable 为命令驱动的原子模块（无 tick 体，inventoryOps 先例）；persistence / interest / 输入校验为仿真层能力（定时存档 / 视野裁剪 / 输入拦截——异步 I/O 与输入校验不入 ECS tick 系统）。
+> Phase 0（切片前止血）已完成 5 个框架级缺陷修复；Slice 1（生存循环）、Slice 2（战斗闭环）、Slice 3（合成与装备）、Slice 4（世界氛围）、Slice 5（联机完整度）与 Slice 6（建造与场景切换）已完成。
+> 现状：8 个内置核心系统 + Slice 1 新增 2 个生存系统（needDecay / gathering）+ Slice 2 新增 3 个系统（perception / death / respawn）+ Slice 3 新增 1 个系统（equipment）+ Slice 4 新增 1 个系统（dayNight）+ Slice 6 新增 1 个系统（portal），共 16 个内置系统；crafting / placeable / deconstruct 为命令驱动的原子模块（无 tick 体，inventoryOps 先例）；persistence / interest / 输入校验为仿真层能力（定时存档 / 视野裁剪 / 输入拦截——异步 I/O 与输入校验不入 ECS tick 系统）。
 > 详见下文「已有系统状态」。
 
 ## 一、核心仿真
@@ -104,6 +104,10 @@
 - interest management（Slice 5）：computeInterest 仿真层裁剪（viewRadius，own 恒可见）→ TickResult.interest → GameRoom 双路径（有裁剪写 per-client PlayerState.visibleEntities 增量同步；无裁剪走 RoomState.entities 全量广播，兼容旧协议）
 - anti-cheat（Slice 5）：inputValidation 输入校验——maxMoveSpeed 超速输入被拒不推进 seq + maxCommandsPerSec 命令频率按 tick 滑动窗口限流，被拒记日志；无规则全放行
 - server 规则（Slice 5）：game/rules/server.json + ServerRuleSchema（saveIntervalMs / saveId / viewRadius / maxMoveSpeed / maxCommandsPerSec）
+- 静态碰撞（Slice 6）：collisionSystem 按 hasComponent(Velocity) 判静态——无 Velocity 实体（建筑/资源）注册 isStatic body 不被推开（墙阻挡玩家，修复放置物被顶走潜伏缺陷）
+- building（Slice 6）：placeEntity 扩展——rules/place.json gridSnap（配置开关，缺省 false）网格对齐（占位矩形四角落格线）+ GridOccupancy 格组写入与占用冲突校验（同格重放拒、无缝拼接）+ Placeable.ownerNetworkId 所有权写入；deconstructEntity 拆除原子（仅放置者可拆、范围校验、不返还材料），PlayerCommand `deconstruct` + target
+- GridOccupancy / Portal 组件（Slice 6）：GridOccupancy SoA（cellX/cellY/cellW/cellH）；Portal AoS（targetMap/x/y + 初始化钩子 + netSync 适配器）
+- portal（Slice 6）：portalSystem tick（玩家 AABB 相交触发）+ switchMap 原子——setWorldMap（换图 + systemRuntimes 缓存重建）/ enterMap（清场保留玩家内容 Player/Placeable/ItemMeta + 按新图布置 + 传送）；loadGameDefinition 解析全部地图（resolvedMapSources）；WorldRecord.mapId + 读档切回；TickSnapshot/RoomState.mapId；SpawnRule.mapId 限定生效地图；房间级切图语义（全员换图）
 - logger
 
 ### ❌ 缺口最大三类
@@ -123,7 +127,9 @@
 >
 > **Slice 4（世界氛围）已完成**：昼夜循环（dayNightCycleSystem + world.time.timeOfDay 同步到 RoomState）；夜间条件刷怪（SpawnSchema.condition + isNight）；火光回避（感知侧：光内目标不可感知 + 光内入睡 BT）；玩家放置火堆（campfire_kit → place 命令 → Placeable/campfire 实体 + 站点合成）。审查修复：Sleep 改 SUCCEEDED（RUNNING 记忆导致的睡死/追击残留根治）、wolf-night 追击分支 while IsNight guard（天亮停手）、validateIntegrity 行为树校验修复（原空转）、guard 单对象清理。验收 `pnpm test`（155 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空（blackboard 技术词除外）。下一切片为 Slice 5 联机完整度。
 >
-> **Slice 5（联机完整度）已完成**：持久化（worldSerializer 世界快照 + Repository/WorldRecord 接口 + createFileRepository 真实现，postgres/redis 适配接口留 stub；GameSimulation 定时存档 saveIntervalMs + 读档恢复 + 玩家 addPlayer 复用绑定，networkId 保留）；兴趣管理（computeInterest 按 viewRadius 裁剪、own 恒可见；GameRoom 双路径——有规则写 per-client PlayerState.visibleEntities，无规则保留 RoomState.entities 全量广播兼容旧协议）；输入校验（maxMoveSpeed 超速拒 + maxCommandsPerSec 命令频率 tick 窗口限流，被拒记日志）。server 规则经 ServerRuleSchema 校验。验收 `pnpm test`（168 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空（blackboard 技术词除外）。核心 Demo 至此贯通，下一切片（Slice 6+）按需开启。
+> **Slice 5（联机完整度）已完成**：持久化（worldSerializer 世界快照 + Repository/WorldRecord 接口 + createFileRepository 真实现，postgres/redis 适配接口留 stub；GameSimulation 定时存档 saveIntervalMs + 读档恢复 + 玩家 addPlayer 复用绑定，networkId 保留）；兴趣管理（computeInterest 按 viewRadius 裁剪、own 恒可见；GameRoom 双路径——有规则写 per-client PlayerState.visibleEntities，无规则保留 RoomState.entities 全量广播兼容旧协议）；输入校验（maxMoveSpeed 超速拒 + maxCommandsPerSec 命令频率 tick 窗口限流，被拒记日志）。server 规则经 ServerRuleSchema 校验。审查修复：兴趣裁剪 per-client 用 schema 4 `$filter` 实例级过滤（VisibleEntities 子类 + client.view 挂 sessionId）、destroyEntity 统一实体销毁（AoS 残留清理防存档污染）、存档畸形防御与写盘串行化、频率窗口 off-by-one、NetworkId 入瞬态名单。验收 `pnpm test`（173 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空（blackboard 技术词除外）。核心 Demo 至此贯通。
+>
+> **Slice 6（建造与场景切换）已完成**：静态碰撞修复（无 Velocity 实体注册静态碰撞体——墙不被玩家顶走，建造前置）；建造闭环（placeEntity 扩展：gridSnap 网格对齐 + GridOccupancy 格组占用校验/写入 + Placeable.ownerNetworkId 所有权；deconstruct 拆除原子——仅放置者可拆，PlayerCommand `deconstruct` + target）；场景切换（Portal AoS 组件 + portalSystem tick + switchMap 原子 setWorldMap/enterMap——清场保留玩家内容 Player/Placeable/ItemMeta、按新图布置、传送玩家、地图相关缓存选择性重建；loadGameDefinition 多地图解析 resolvedMapSources；WorldRecord.mapId 存档 + 读档切回；TickSnapshot/RoomState.mapId + GameRoom 换图强制重拉碰撞体；SpawnRule.mapId 限定生效地图）。game：wall/floor/door/fence/furniture/portal/portal_back + 5 个 kit 物品与配方 + place.json gridSnap + cave 地图 + 分图 populations。审查修复：portal 触发死锁（严格小于触发判定与 SAT 分离互斥——portal 去 Collider + 接触判定 <= + 完整 tick 链集成用例）、换图缓存改选择性重建（保留 death 重生标记）、读档地图无效告警。验收 `pnpm test`（187 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空（blackboard 技术词除外）。下一切片（Slice 7+）按需开启。
 
 **切片内待补全（非框架缺陷）**：
 - （已补全）inventorySystem：堆叠/丢弃/使用已落地（Slice 1）

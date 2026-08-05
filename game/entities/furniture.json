@@ -1,0 +1,8 @@
+{
+  "kind": "furniture",
+  "components": {
+    "Size": { "w": 16, "h": 16 },
+    "Placeable": { "footprintW": 16, "footprintH": 16, "canCollide": 0 },
+    "GridOccupancy": {}
+  }
+}

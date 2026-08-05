@@ -14,6 +14,8 @@ import { Equipment } from "framework/components/equipment";
 import { CraftingStation } from "framework/components/craftingStation";
 import { LightSource } from "framework/components/lightSource";
 import { Placeable } from "framework/components/placeable";
+import { GridOccupancy } from "framework/components/gridOccupancy";
+import { Portal, initPortal } from "framework/components/portal";
 import { Intent } from "framework/components/intent";
 import { NetworkId, LastSynced } from "framework/components/network";
 import { Cooldown, Duration } from "framework/components/timer";
@@ -43,6 +45,8 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("CraftingStation", CraftingStation);
   registry.register("LightSource", LightSource);
   registry.register("Placeable", Placeable);
+  registry.register("GridOccupancy", GridOccupancy);
+  registry.register("Portal", Portal);
   registry.register("Intent", Intent);
   registry.register("NetworkId", NetworkId);
   registry.register("LastSynced", LastSynced);
@@ -60,4 +64,5 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.registerAosInitializer("Needs", initNeeds);
   registry.registerAosInitializer("ResourceNode", initResourceNode);
   registry.registerAosInitializer("LootTable", initLootTable);
+  registry.registerAosInitializer("Portal", initPortal);
 }

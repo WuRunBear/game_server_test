@@ -33,6 +33,8 @@ export interface WorldRecord {
   nextNetworkId: number;
   /** world 级昼夜状态（可缺省，缺省时恢复到初始值）。 */
   timeOfDay?: { hour: number; phase: number };
+  /** 存档时的地图 id（world.map.id，可缺省；恢复时若与当前图不同则切回该图）。 */
+  mapId?: string;
   /** 存活实体清单。 */
   entities: SerializedEntity[];
 }

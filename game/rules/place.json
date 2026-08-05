@@ -1,3 +1,4 @@
 {
-  "placeRange": 64
+  "placeRange": 64,
+  "gridSnap": true
 }

@@ -96,6 +96,7 @@ export function serializeWorld(world: GameWorld, id: string): WorldRecord {
     tick: world.time.tick,
     nextNetworkId: world.nextNetworkId,
     timeOfDay: { ...world.time.timeOfDay },
+    mapId: world.map?.id,
     entities,
   };
 }

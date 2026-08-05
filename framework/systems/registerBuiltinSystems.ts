@@ -17,6 +17,7 @@ import { needDecaySystem } from "framework/systems/gameplay/needDecaySystem";
 import { gatheringSystem } from "framework/systems/gameplay/gatheringSystem";
 import { equipmentSystem } from "framework/systems/gameplay/equipmentSystem";
 import { dayNightCycleSystem } from "framework/systems/gameplay/dayNightCycleSystem";
+import { portalSystem } from "framework/systems/gameplay/portalSystem";
 
 import { setDefaultActionRegistry } from "framework/ai/btFactory";
 import { registerBuiltinActions } from "framework/ai/registerBuiltinActions";
@@ -116,5 +117,11 @@ export function registerBuiltinSystems(
     id: "respawn",
     factory: (_world: GameWorld) => respawnSystem,
     after: ["death"],
+  });
+
+  systemRegistry.register({
+    id: "portal",
+    factory: (_world: GameWorld) => portalSystem,
+    after: ["respawn"],
   });
 }

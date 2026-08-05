@@ -1,0 +1,5 @@
+{
+  "kind": "fence_kit",
+  "maxStack": 1,
+  "place": { "archetype": "fence" }
+}

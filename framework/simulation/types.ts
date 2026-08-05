@@ -38,14 +38,14 @@ export interface PlayerInput {
 }
 
 /**
- * 玩家命令——非逐帧的离散操作（背包原子：食用/丢弃/移动槽/合成/穿戴/放置）。
+ * 玩家命令——非逐帧的离散操作（背包原子：食用/丢弃/移动槽/合成/穿戴/放置/拆除）。
  *
  * 与 PlayerInput（脉冲式逐帧移动）区别：命令是即刻执行的服务端权威动作，
  * 不进入 seq 去重 / 帧缓存。type 保持框架通用机制词（consume/drop/transfer/
- * craft/equip/place），不含游戏语义。
+ * craft/equip/place/deconstruct），不含游戏语义。
  */
 export interface PlayerCommand {
-  type: "consume" | "drop" | "transfer" | "craft" | "equip" | "place";
+  type: "consume" | "drop" | "transfer" | "craft" | "equip" | "place" | "deconstruct";
   /** 目标槽索引（consume/drop/equip/place 用）；transfer 的源槽。 */
   slot?: number;
   /** transfer 目标槽。 */
@@ -56,6 +56,8 @@ export interface PlayerCommand {
   x?: number;
   /** 放置目标坐标（place 用，世界坐标）。 */
   y?: number;
+  /** 目标实体 networkId（deconstruct 用，拆除的放置物）。 */
+  target?: number;
 }
 
 /**
@@ -108,6 +110,11 @@ export interface TickSnapshot {
    * 传输层可选消费（RoomState 的 hour/phase 字段）；无配置时为 undefined。
    */
   timeOfDay?: { hour: number; phase: number };
+  /**
+   * 当前地图 id（world.map.id，无地图时为 undefined）。
+   * 传输层据此同步 RoomState.mapId 并处理地图级缓存失效（如调试碰撞体）。
+   */
+  mapId?: string;
 }
 
 /**

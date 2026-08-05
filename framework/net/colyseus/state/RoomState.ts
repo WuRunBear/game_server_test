@@ -31,6 +31,13 @@ export class RoomState extends Schema {
   phase: number = 0;
 
   /**
+   * 当前地图 id（来自仿真快照的 mapId；无地图时为空串）。
+   * 客户端据此切换渲染场景。
+   */
+  @type("string")
+  mapId: string = "";
+
+  /**
    * 房间内玩家列表（key=sessionId）。
    */
   @type({ map: PlayerState })

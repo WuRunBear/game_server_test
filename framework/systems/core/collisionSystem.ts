@@ -191,29 +191,37 @@ function createMapBody(
 }
 
 /**
- * 为实体创建动态碰撞体。
+ * 为实体创建碰撞体。
+ *
+ * 静态判定：挂 Velocity 的实体（玩家/生物，movementSystem 驱动）为动态体，
+ * 否则（建筑/资源等无移动能力的实体）注册为静态体——分离时不被推开。
+ * 若无此判定，玩家放置的墙会被玩家顶走（动态 body 互相分离）。
  *
  * @param world ECS World
  * @param system check2d 系统
  * @param eid 实体 id
- * @returns 创建后的动态碰撞体
+ * @returns 创建后的碰撞体
  */
 function createEntityBody(
   world: GameWorld,
   system: Check2dSystem<CollisionBody>,
   eid: EntityId,
 ): CollisionBody {
+  const isStatic = !hasComponent(world, eid, Velocity);
+  const bodyOptions = {
+    isStatic,
+    userData: {
+      kind: "entity",
+      eid,
+      id: `entity:${eid}`,
+    },
+  };
+
   if (Collider.shape[eid] === ColliderShape.Circle) {
     return system.createCircle(
       { x: Transform.x[eid], y: Transform.y[eid] },
       Collider.radius[eid],
-      {
-        userData: {
-          kind: "entity",
-          eid,
-          id: `entity:${eid}`,
-        },
-      },
+      bodyOptions,
     ) as CollisionBody;
   }
 
@@ -224,13 +232,7 @@ function createEntityBody(
     },
     Collider.halfW[eid] * 2,
     Collider.halfH[eid] * 2,
-    {
-      userData: {
-        kind: "entity",
-        eid,
-        id: `entity:${eid}`,
-      },
-    },
+    bodyOptions,
   ) as CollisionBody;
 }
 

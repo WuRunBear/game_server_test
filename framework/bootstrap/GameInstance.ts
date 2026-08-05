@@ -2,7 +2,7 @@ import type { GameWorld, System } from "framework/world";
 import { createGameWorld } from "framework/world";
 import { buildSystems } from "framework/systems/systemRegistry";
 import { buildMapRuntime } from "framework/map/buildRuntime";
-import { spawnEntity } from "framework/entities/spawn";
+import { spawnInitialNpcs } from "framework/map/switchMap";
 import { getRegistries } from "framework/bootstrap";
 import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
 
@@ -61,14 +61,7 @@ export function createGameInstance(gameDef: LoadedGameDefinition): GameInstance 
     },
 
     spawnInitialEntities() {
-      if (!mapBuilt) return;
-      for (const spawn of mapBuilt.spawns.npcs) {
-        const archetype = archetypeRegistry.get(spawn.kind);
-        spawnEntity(world, archetype, componentRegistry, {
-          x: spawn.pos.x,
-          y: spawn.pos.y,
-        });
-      }
+      spawnInitialNpcs(world);
     },
   };
 

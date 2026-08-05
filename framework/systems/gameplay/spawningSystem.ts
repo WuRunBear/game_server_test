@@ -81,6 +81,10 @@ export function spawningSystem(world: GameWorld): GameWorld {
   const now = world.time.tick * world.time.fixedDtMs;
 
   for (const rule of rules) {
+    // 地图限定：规则只在其声明的地图（world.map.id）生效；
+    // portal 场景切换后 world.map 变化，各图规则随之切换作用图
+    if (rule.mapId && rule.mapId !== world.map?.id) continue;
+
     let timer = timers.find((t) => t.rule === rule);
     if (!timer) {
       timer = { lastSpawnTime: -Infinity, rule };

@@ -1,7 +1,7 @@
 # Survival-Island 切片实施计划
 
 > 本文件是 survival-island 游戏从"可玩 demo"到"完整游戏"的切片路线。**demo 阶段
-> 落地核心五切片**（Slice 1-5），完整目标在核心之后追加建造与社交切片。
+> 落地核心六切片**（Slice 1-6），社交切片（Slice 7+）按需开启。
 >
 > 每个切片是一个垂直玩法切片，收尾三同步：可玩 demo 前进 + 框架增长通用系统 +
 > 测试/文档同步。一个切片未完成不开启下一个（缺陷阻塞除外）。
@@ -10,8 +10,8 @@
 
 | 项 | 选型 | 理由 |
 |----|------|------|
-| **demo 边界** | Slice 1-5 核心循环 | 生存+战斗+合成+昼夜+联机存档，约 20-30 分钟单局贯通 |
-| **完整目标** | 核心 + 建造(S6) + 社交(S7+) | demo 跑通后再评估是否继续 |
+| **demo 边界** | Slice 1-6 核心循环 | 生存+战斗+合成+昼夜+联机存档+建造场景切换，约 20-30 分钟单局贯通 |
+| **完整目标** | 核心 + 社交(S7+) | demo 跑通后再评估是否继续 |
 | **变长结构建模** | runtime AoS 数组 + spawn 初始化钩子 | Needs/ResourceNode/Inventory/ItemMeta/Intent 统一为 `[] as T[]` AoS，与现有 Kind/Inventory 先例一致；spawn 经组件注册表的 AoS 初始化钩子按 archetype 配置写入。**S1 已替代原 systemRuntimes Map 选型**（探查发现 Kind/Inventory 已是 AoS，统一一套机制更简；netSync 也据此统一适配） |
 | **Inventory 模型** | slot 存 `{itemId, count}` + 容量走 archetype 配置 + 独立 `Equipment` 组件（weapon/tool/armor 三槽引用 inventory 槽） | 够支撑堆叠/容量/穿戴，不造格子拖拽引擎。客户端拖拽自便（**S1 落地**：slot `{kind,count}`，capacity 进 archetype，经 AoS 钩子初始化） |
 | **服务端操作原子** | `equip/transfer/drop/consume/use` 作为 Inventory/Equipment 系统的对外接口 | 客户端 UI 调这些 RPC，服务端权威做数据变更与校验 |
@@ -376,12 +376,60 @@
 
 ---
 
-## 完整目标（核心之后，按需开启）
+## 完整目标（核心六切片之后，按需开启）
 
-### Slice 6 — 建造（"玩家塑造世界"）
+### Slice 6 — 建造（"玩家塑造世界"）✅ 已完成
 
-- 框架：`buildingSystem`（玩家放置 Placeable + 网格占用 `GridOccupancy`）、`portalSystem`（场景切换）
-- game：wall/floor/door/家具/fence 配置
+> **S6 实施修正（来自落地探查，写回此计划）**：
+> - **静态碰撞缺陷修复（建造前置）**：collisionSystem 原把全部实体注册为动态碰撞体——
+>   玩家放置的墙会被顶走（campfire 潜伏缺陷）。落地为按 `hasComponent(Velocity)` 判静态
+>   （生物/玩家声明 Velocity，建筑/资源不声明），静态体 `isStatic` 不被分离推开
+> - **gridSnap 走配置开关**：`rules/place.json.gridSnap`（缺省 false 保持 S4 任意坐标行为，
+>   既有测试零影响；真实配置开启）——对齐到地图网格（占位矩形四角落格线，中心取格组
+>   中心），写入 `GridOccupancy` 格组 + 占用冲突校验（同格重放被拒），墙/地板无缝拼接
+> - **拆除（deconstruct）原子 + 所有权**：`Placeable` 扩展 `ownerNetworkId`（0=世界物），
+>   `deconstructEntity`（仅放置者可拆、范围校验、destroyEntity、**不返还材料**）；
+>   PlayerCommand 加 `deconstruct` + `target`（networkId），GameRoom 白名单同步
+> - **Portal 落地为 AoS 组件**（targetMap 是字符串引用，SoA 数值存不了）：AoS + 初始化钩子
+>   + netSync 适配器（numbers x/y + strings targetMap）；**portalSystem 按数据存在性筛选**
+>   （AoS 无 bitecs 组件标志，不能进 query——ItemMeta 同类陷阱）
+> - **地图多源解析**：`loadGameDefinition` 由"只解析默认图"扩展为解析 registry 全部条目
+>   （`resolvedMapSources`，key=地图 id，`resolvedMapSource` 保持默认图兼容）
+> - **switchMap 原子**：`setWorldMap`（换图 + `world.systemRuntimes.clear()`——碰撞/刷怪
+>   缓存惰性建，不重建则旧图阻挡格残留）+ `enterMap`（换图 + **清场 + 布置 + 传送玩家**；
+>   清场保留"玩家内容"= Player tag / Placeable / ItemMeta（AoS 按数据存在性判定，
+>   不能 hasComponent）——场景生态随图重置，玩家建筑/掉落物跨场景保留；读档恢复走
+>   `setWorldMap` 不清场（存档实体是用户状态））
+> - **持久化 mapId**：`WorldRecord.mapId`（serialize 写 world.map.id；GameSimulation 构造
+>   读档后若地图不同调 `setWorldMap` 切回）；`TickSnapshot.mapId` → `RoomState.mapId`
+>   （GameRoom 检测变化并强制订阅者重拉新图碰撞体）
+> - **SpawnRule.mapId 过滤**：spawn 规则可限定生效地图（cave 差异化刷怪），validateIntegrity
+>   校验地图存在
+> - **切图语义=房间级**：所有玩家共享 world.map，任一玩家触发全员换图（多人洞穴=全队副本）；
+>   per-player 分图状态不在本切片范围（记录不修）
+> - **记录不修**：门为静态阻挡（可开关门需交互切换碰撞机制，无真实需求）；拆除不返还材料
+>
+> **S6 审查修复（第一轮，写回此计划）**：
+> - **portal 触发死锁（P0，审查发现）**：portal 原型带阻挡 Collider → 玩家每 tick 被
+>   collisionSystem（SAT 分离）推到恰接触距离（= Size 半宽和）→ 触发判定用严格 `<` 时
+>   恒 false——真实运行切图 100% 死锁（测试只直接调 portalSystem 未暴露）。修复双管齐下：
+>   ① game 配置 portal/portal_back 去掉 Collider（传送门是触发区不阻挡移动）②
+>   `aabbOverlap` 放宽为 `<=`（接触即触发，抗碰撞分离/浮点边界，任何带 Collider 的
+>   触发区都可用）；补「movement+collision 分离到接触距离后 portalSystem 仍触发」集成用例
+> - **换图缓存重建改选择性（P1）**：`setWorldMap` 原 `systemRuntimes.clear()` 连带清空
+>   deathSystem 重生标记（玩家死亡窗口内他人切图 → 重复掷掉落 + 重置重生延迟）与
+>   aiSystem 黑名单；改为只删地图相关缓存（collision/spawning），死亡/ai 缓存保留
+> - **读档地图无效告警（P2）**：存档 mapId 不存在（配置删图）时 logger.warn 而非静默
+> - 测试补 2 例（完整 tick 链触发、缓存选择性重建），**187 全绿**
+
+- 框架：`buildingSystem`（`placeEntity` 扩展——网格对齐/格组占用/所有权）、`deconstructSystem`
+  （拆除原子）、`portalSystem`（场景切换 tick）、`switchMap`（setWorldMap/enterMap）、
+  `GridOccupancy`/`Portal` 组件、Placeable 扩展 ownerNetworkId、静态碰撞修复、
+  多地图加载（resolvedMapSources）、持久化 mapId、SpawnRule.mapId
+- game：wall/floor/door/fence/furniture/portal/portal_back 实体 + 5 个 kit 物品与配方 +
+  place.json gridSnap + cave 地图 + populations 分图规则
+- demo 里程碑：合成墙/地板/门/围栏/家具 kit → 网格对齐建造庇护所（墙静态阻挡狼）→
+  放置者拆除；进洞穴（资源/夜狼更多）→ 洞内 portal 回岛；服务端重启庇护所与所在图俱在
 
 ### Slice 7+ — 社交进度（"世界有故事"）
 

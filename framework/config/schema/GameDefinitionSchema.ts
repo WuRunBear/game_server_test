@@ -51,6 +51,8 @@ export interface SpawnRule {
   respawnMs: number;
   /** 可选刷怪条件（引用 spawnConditions 注册表，如 "isNight"）。 */
   condition?: string;
+  /** 可选限定生效的地图 id（缺省全部地图生效）。 */
+  mapId?: string;
 }
 
 export interface BehaviorDefinition {
@@ -60,6 +62,8 @@ export interface BehaviorDefinition {
 
 export interface LoadedGameDefinition extends GameDefinition {
   resolvedMapSource?: MapSource;
+  /** 全部地图来源（maps/registry.json 的 maps 表，key=地图 id）——portal 场景切换用。 */
+  resolvedMapSources?: Record<string, MapSource>;
   resolvedEntities: ArchetypeSpec[];
   resolvedBehaviors: BehaviorDefinition[];
   resolvedRules: Record<string, unknown>;

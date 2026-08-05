@@ -1,0 +1,5 @@
+{
+  "kind": "floor_kit",
+  "maxStack": 1,
+  "place": { "archetype": "floor" }
+}

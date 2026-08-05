@@ -60,18 +60,18 @@ framework/
     fileRepository.ts       # createFileRepository — JSON 文件仓储（默认后端，原子写）
   components/               # ECS 组件 + componentRegistry
     componentRegistry.ts    # 组件注册表: 名 → defineComponent
-    registerBuiltin.ts      # 注册 33 个内置组件
+    registerBuiltin.ts      # 注册 35 个内置组件
     index.ts                # barrel 导出
     transform.ts, size.ts, physics.ts (Velocity/Acceleration/Collider/ColliderShape),
     combat.ts (Health/Attack/Defense/Team), ai.ts (AIState/Target/BlackboardRef),
     perception.ts (SoA 感知), equipment.ts / craftingStation.ts (SoA 装备/站点),
-    lightSource.ts / placeable.ts (SoA 光源/可放置),
+    lightSource.ts / placeable.ts (SoA 光源/可放置), gridOccupancy.ts / portal.ts (SoA 网格占用 / AoS 传送门),
     inventory.ts (AoS 例外), network.ts (NetworkId/LastSynced),
     timer.ts (Cooldown/Duration), tags.ts (Player/Enemy/NPC/Item/Resource),
     needs.ts / resourceNode.ts / loot.ts / intent.ts / kind.ts / itemMeta.ts (AoS 家族)
   systems/
     systemRegistry.ts       # 系统注册表 + buildSystems (拓扑排序, Kahn 算法)
-    registerBuiltinSystems.ts   # 注册 15 个内置系统
+    registerBuiltinSystems.ts   # 注册 16 个内置系统
     index.ts                # barrel 导出
     core/                   # physicsSystem, movementSystem, collisionSystem
     gameplay/               # perceptionSystem, aiSystem, combatSystem, spawningSystem,
@@ -127,12 +127,13 @@ src/
   register.ts               # 扩展注册入口（当前仅调用 bootstrapFramework()，无自定义扩展）
 
 game/
-  game.json                 # GameDefinition 主入口：tickRate=20, 15 个系统, netSync 配置
-  entities/                 # player, villager, boar, rabbit, berry_bush, tree, water_pool, item, rock, campfire, wolf
+  game.json                 # GameDefinition 主入口：tickRate=20, 16 个系统, netSync 配置
+  entities/                 # player, villager, boar, rabbit, berry_bush, tree, water_pool, item, rock, campfire, wolf, wall, floor, door, fence, furniture, portal, portal_back
   behaviors/                # wander-default, boar-hostile, rabbit-flee, wolf-night
-  rules/                    # combat.json, needs.json, respawn.json, crafting.json, daynight.json, place.json, server.json
-  spawns/                   # populations.json（wolf 规则带 condition: "isNight"）
-  items/                    # berry, wood, water, raw_meat, stone, axe, stone_axe, spear, berry_pie, cooked_meat, campfire_kit (item kind 数据)
+  rules/                    # combat.json, needs.json, respawn.json, crafting.json, daynight.json, place.json (gridSnap), server.json
+  maps/                     # registry.json（generated-map + cave 双地图）
+  spawns/                   # populations.json（wolf 规则带 condition: "isNight"；cave 规则带 mapId）
+  items/                    # berry, wood, water, raw_meat, stone, axe, stone_axe, spear, berry_pie, cooked_meat, campfire_kit, wall_kit, floor_kit, door_kit, fence_kit, furniture_kit (item kind 数据)
   maps/                     # registry.json
 
 tools/
@@ -165,6 +166,11 @@ Colyseus Schema 每 tick 同步。`EntityState` 的字段通过 `game.json` 的 
 - **持久化**：`saveIntervalMs` + `saveId` 开启定时存档（`worldSerializer` 全量快照 → `createFileRepository` 写 `data/saves/`，可用 `SAVE_DIR` 覆盖目录）；`GameRoom.onCreate` 启动时读档恢复，玩家实体由 `addPlayer` 复用绑定（networkId/进度保留）。
 - **兴趣管理**：`viewRadius` 开启视野裁剪——每客户端只见视野内实体（`PlayerState.visibleEntities`，own 恒可见）；未配置时全量广播 `RoomState.entities`（兼容旧客户端协议）。
 - **输入校验**：`maxMoveSpeed` 超速输入被拒（记日志）、`maxCommandsPerSec` 命令频率限流；未配置时不校验。
+
+### 建造与场景切换
+
+- **建造**：`place` 命令（`ItemKindSchema.place` → `placeableSystem.placeEntity`）放置 Placeable 实体——`rules/place.json` 的 `gridSnap` 开启时占位矩形对齐地图网格（`GridOccupancy` 格组写入 + 同格重放被拒，墙/地板可无缝拼接）；`deconstruct` 命令（`deconstructSystem`）拆除，仅放置者可拆（`Placeable.ownerNetworkId`，0=世界物不可拆，不返还材料）。静态碰撞：无 `Velocity` 的实体（建筑/资源）注册为静态碰撞体，不会被推开。
+- **场景切换**：`Portal` 组件（AoS，声明 targetMap + 传送坐标）+ `portalSystem` tick 检测玩家 AABB 相交 → `enterMap`（`framework/map/switchMap.ts`）：换 `world.map` + 重建系统缓存 + 清场（保留玩家/放置物/地面掉落，场景生态随图重置）+ 按新图出生点布置 + 传送玩家。房间级语义：所有玩家共享当前地图。存档记录 `mapId`，读档恢复自动切回存档地图。刷怪规则可带 `mapId` 限定生效地图。`RoomState.mapId` 同步给客户端。
 
 ## 扩展指南
 

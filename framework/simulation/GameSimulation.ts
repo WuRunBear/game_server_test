@@ -13,8 +13,10 @@ import { consumeSlot, dropSlot, transferSlot } from "framework/systems/gameplay/
 import { equipSlot } from "framework/systems/gameplay/equipmentSystem";
 import { craftRecipe } from "framework/systems/gameplay/craftingSystem";
 import { placeEntity } from "framework/systems/gameplay/placeableSystem";
+import { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";
 import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
 import { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
+import { setWorldMap } from "framework/map/switchMap";
 import type { Repository } from "framework/repository";
 import type { ServerRule } from "framework/config/schema/RuleSchema";
 import { computeInterest } from "./interest";
@@ -140,6 +142,13 @@ export class GameSimulation implements SimulationPort {
     this.saveId = options?.saveId;
     if (options?.initialRecord) {
       this.orphanPlayerEids = restoreWorld(this.world, options.initialRecord);
+      // 读档地图还原：存档实体是用户状态，仅切图不清场（清场只属于 portal 场景切换）
+      const savedMapId = options.initialRecord.mapId;
+      if (savedMapId && savedMapId !== this.world.map?.id) {
+        if (!setWorldMap(this.world, savedMapId)) {
+          this.world.logger.warn("读档地图不存在，保持当前地图", { savedMapId });
+        }
+      }
     }
 
     const serverRules = this.world.gameDef.resolvedRules["server"] as ServerRule | undefined;
@@ -346,6 +355,8 @@ export class GameSimulation implements SimulationPort {
         return craftRecipe(this.world, eid, command.recipe ?? "");
       case "place":
         return placeEntity(this.world, eid, command.slot ?? -1, command.x ?? 0, command.y ?? 0);
+      case "deconstruct":
+        return deconstructEntity(this.world, eid, command.target ?? -1);
       default:
         return false;
     }
@@ -448,7 +459,7 @@ export class GameSimulation implements SimulationPort {
 
     // 无同步配置 → 空快照（客户端看不到实体）
     if (this.netSyncFields.length === 0) {
-      return { tick, entities, timeOfDay: { ...this.world.time.timeOfDay } };
+      return { tick, entities, timeOfDay: { ...this.world.time.timeOfDay }, mapId: this.world.map?.id };
     }
     for (const field of this.netSyncFields) {
       const comp = this.componentRegistry.get(field.component) as
@@ -496,6 +507,7 @@ export class GameSimulation implements SimulationPort {
       tick,
       entities,
       timeOfDay: { ...this.world.time.timeOfDay },
+      mapId: this.world.map?.id,
     };
   }
 

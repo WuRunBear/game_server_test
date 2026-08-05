@@ -1,0 +1,5 @@
+{
+  "kind": "wall_kit",
+  "maxStack": 1,
+  "place": { "archetype": "wall" }
+}

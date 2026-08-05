@@ -5,7 +5,12 @@
     { "id": "spear", "inputs": [{ "kind": "wood", "count": 2 }, { "kind": "stone", "count": 1 }], "outputs": [{ "kind": "spear", "count": 1 }] },
     { "id": "berry_pie", "inputs": [{ "kind": "berry", "count": 3 }], "outputs": [{ "kind": "berry_pie", "count": 1 }] },
     { "id": "cooked_meat", "stationType": 1, "inputs": [{ "kind": "raw_meat", "count": 1 }], "outputs": [{ "kind": "cooked_meat", "count": 1 }] },
-    { "id": "campfire_kit", "inputs": [{ "kind": "wood", "count": 3 }, { "kind": "stone", "count": 2 }], "outputs": [{ "kind": "campfire_kit", "count": 1 }] }
+    { "id": "campfire_kit", "inputs": [{ "kind": "wood", "count": 3 }, { "kind": "stone", "count": 2 }], "outputs": [{ "kind": "campfire_kit", "count": 1 }] },
+    { "id": "wall_kit", "inputs": [{ "kind": "wood", "count": 2 }, { "kind": "stone", "count": 1 }], "outputs": [{ "kind": "wall_kit", "count": 1 }] },
+    { "id": "floor_kit", "inputs": [{ "kind": "wood", "count": 1 }], "outputs": [{ "kind": "floor_kit", "count": 1 }] },
+    { "id": "door_kit", "inputs": [{ "kind": "wood", "count": 2 }, { "kind": "stone", "count": 1 }], "outputs": [{ "kind": "door_kit", "count": 1 }] },
+    { "id": "fence_kit", "inputs": [{ "kind": "wood", "count": 2 }], "outputs": [{ "kind": "fence_kit", "count": 1 }] },
+    { "id": "furniture_kit", "inputs": [{ "kind": "wood", "count": 2 }, { "kind": "stone", "count": 2 }], "outputs": [{ "kind": "furniture_kit", "count": 1 }] }
   ],
   "stationRange": 64
 }

@@ -10,6 +10,16 @@
       "height": 64,
       "tileWidth": 16,
       "tileHeight": 16
+    },
+    "cave": {
+      "kind": "generated",
+      "generatorId": "simple",
+      "name": "洞穴",
+      "seed": 2,
+      "width": 32,
+      "height": 32,
+      "tileWidth": 16,
+      "tileHeight": 16
     }
   }
 }

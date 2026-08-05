@@ -1,0 +1,9 @@
+{
+  "kind": "wall",
+  "components": {
+    "Size": { "w": 16, "h": 16 },
+    "Collider": { "shape": 1, "halfW": 8, "halfH": 8 },
+    "Placeable": { "footprintW": 16, "footprintH": 16, "canCollide": 1 },
+    "GridOccupancy": {}
+  }
+}

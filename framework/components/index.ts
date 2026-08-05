@@ -23,5 +23,7 @@ export { Equipment } from "components/equipment";
 export { CraftingStation } from "components/craftingStation";
 export { LightSource } from "components/lightSource";
 export { Placeable } from "components/placeable";
+export { GridOccupancy } from "components/gridOccupancy";
+export { Portal, initPortal, type PortalState } from "components/portal";
 export { Intent } from "components/intent";
 export { Kind } from "components/kind";

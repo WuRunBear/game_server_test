@@ -32,9 +32,12 @@ export { createFileRepository } from "framework/persistence/fileRepository";
 export type { Repository, WorldRecord, SerializedEntity } from "framework/repository";
 
 export { dayNightCycleSystem } from "framework/systems/gameplay/dayNightCycleSystem";
+export { portalSystem } from "framework/systems/gameplay/portalSystem";
+export { setWorldMap, enterMap, spawnInitialNpcs } from "framework/map/switchMap";
 export { registerSpawnCondition, getSpawnCondition, hasSpawnCondition, registerBuiltinSpawnConditions, type SpawnCondition } from "framework/systems/gameplay/spawnConditions";
 export { placeEntity } from "framework/systems/gameplay/placeableSystem";
-export { overlapsAnyEntity, overlapsMapBlocked } from "framework/utils/placement";
+export { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";
+export { overlapsAnyEntity, overlapsMapBlocked, overlapsOccupiedGrid, snapToGrid } from "framework/utils/placement";
 
 export { GameDefinitionSchema, type GameDefinition, type LoadedGameDefinition, type BehaviorDefinition, type SpawnRule, type SystemEnableEntry, type NetSyncField } from "framework/config/schema/GameDefinitionSchema";
 export { ItemKindSchema, type ItemKindSpec, type ConsumeEffect, type EquipEffect, type PlaceEffect } from "framework/config/schema/ItemKindSchema";

@@ -129,7 +129,7 @@ describe("Slice 5：世界快照序列化/恢复", () => {
 
     const cs = record.entities.find((e) => e.kind === "c1")!;
     expect(cs.components["LightSource"]).toEqual({ radius: 80, fuelRemainingMs: 1e9 });
-    expect(cs.components["Placeable"]).toEqual({ footprintW: 24, footprintH: 24, canCollide: 1 });
+    expect(cs.components["Placeable"]).toEqual({ footprintW: 24, footprintH: 24, canCollide: 1, ownerNetworkId: 0 });
 
     // 存档必须为纯 JSON（可安全序列化）
     expect(() => JSON.parse(JSON.stringify(record))).not.toThrow();

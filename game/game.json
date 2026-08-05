@@ -22,7 +22,8 @@
     { "id": "interaction", "config": { "range": 24 } },
     { "id": "equipment" },
     { "id": "death" },
-    { "id": "respawn" }
+    { "id": "respawn" },
+    { "id": "portal" }
   ],
   "entities": "./entities/*.json",
   "behaviors": "./behaviors/*.json",
@@ -42,7 +43,9 @@
       { "component": "Equipment", "fields": ["weaponSlot", "toolSlot", "armorSlot"] },
       { "component": "CraftingStation", "fields": ["stationType"] },
       { "component": "LightSource", "fields": ["radius", "fuelRemainingMs"] },
-      { "component": "Placeable", "fields": ["footprintW", "footprintH", "canCollide"] }
+      { "component": "Placeable", "fields": ["footprintW", "footprintH", "canCollide"] },
+      { "component": "GridOccupancy", "fields": ["cellX", "cellY", "cellW", "cellH"] },
+      { "component": "Portal", "fields": ["targetMap", "x", "y"] }
     ]
   }
 }

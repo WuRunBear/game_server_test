@@ -1,0 +1,5 @@
+{
+  "kind": "furniture_kit",
+  "maxStack": 1,
+  "place": { "archetype": "furniture" }
+}

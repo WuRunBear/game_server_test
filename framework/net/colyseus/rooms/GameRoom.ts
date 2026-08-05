@@ -46,12 +46,14 @@ function isPlayerCommand(message: unknown): message is PlayerCommand {
       obj.type === "transfer" ||
       obj.type === "craft" ||
       obj.type === "equip" ||
-      obj.type === "place") &&
+      obj.type === "place" ||
+      obj.type === "deconstruct") &&
     (obj.slot === undefined || typeof obj.slot === "number") &&
     (obj.toSlot === undefined || typeof obj.toSlot === "number") &&
     (obj.recipe === undefined || typeof obj.recipe === "string") &&
     (obj.x === undefined || typeof obj.x === "number") &&
-    (obj.y === undefined || typeof obj.y === "number")
+    (obj.y === undefined || typeof obj.y === "number") &&
+    (obj.target === undefined || typeof obj.target === "number")
   );
 }
 
@@ -108,8 +110,12 @@ export class GameRoom extends Room<{ state: RoomState }> {
    *
    * 首次订阅时推送包含地图碰撞体的完整快照（includeMapBodies=true），
    * 之后只推送实体碰撞体（includeMapBodies=false），避免每帧发送不变的地图数据。
+   * 地图切换（onMapChanged）时清空，强制订阅者重拉新图碰撞体。
    */
   private debugMapSentSubscribers = new Set<string>();
+
+  /** 上一帧同步的地图 id（applySnapshot 检测变化用）。 */
+  private prevMapId = "";
 
   /**
    * 调试推送冷却计时器（毫秒）。
@@ -295,12 +301,32 @@ export class GameRoom extends Room<{ state: RoomState }> {
       this.state.hour = snapshot.timeOfDay.hour;
       this.state.phase = snapshot.timeOfDay.phase;
     }
+    // 地图切换：同步 mapId 并让已订阅调试的客户端重拉地图碰撞体
+    const nextMapId = snapshot.mapId ?? "";
+    if (nextMapId !== this.prevMapId) {
+      this.state.mapId = nextMapId;
+      this.onMapChanged();
+    }
 
     if (result.interest) {
       this.applyInterest(result);
       return;
     }
     this.applyFullSnapshot(snapshot);
+  }
+
+  /**
+   * 地图变更处理：清空"已发过地图碰撞体"标记并给订阅者强制推一次完整快照，
+   * 避免客户端缓存旧图碰撞体（换图后旧图数据过期）。
+   */
+  private onMapChanged(): void {
+    this.debugMapSentSubscribers.clear();
+    if (this.debugSubscribers.size === 0) return;
+    for (const client of this.clients) {
+      if (this.debugSubscribers.has(client.sessionId)) {
+        this.sendCollisionDebugSnapshot(client, true);
+      }
+    }
   }
 
   /** 全量路径：把快照写入共享 RoomState.entities。 */
