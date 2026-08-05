@@ -15,12 +15,13 @@
  * 4. **eid 不保真**：恢复后 eid 由 bitecs 重新分配，跨存档引用（如 Target 的 eid）
  *    一律不入存档（瞬态名单）；客户端凭 networkId 稳定追踪实体。
  */
-import { query, removeEntity, hasComponent } from "bitecs";
+import { query, hasComponent } from "bitecs";
 
 import { NetworkId } from "framework/components/network";
 import { Kind } from "framework/components/kind";
 import { Player } from "framework/components/tags";
 import { spawnEntity } from "framework/entities/spawn";
+import { destroyEntity } from "framework/entities/destroyEntity";
 import type { GameWorld } from "framework/world";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { SerializedEntity, WorldRecord } from "framework/repository";
@@ -46,6 +47,7 @@ const RUNTIME_ONLY_COMPONENTS = new Set([
   "Intent",
   "LastSynced",
   "Kind",
+  "NetworkId",
 ]);
 
 /** 序列化单实体：遍历组件注册表，按 SoA/AoS 读当前值。 */
@@ -98,18 +100,10 @@ export function serializeWorld(world: GameWorld, id: string): WorldRecord {
   };
 }
 
-/** 清空当前 world 的实体（含 AoS 残留，bitecs removeEntity 不覆盖 JS 数组）。 */
+/** 清空当前 world 的实体（destroyEntity 同时清理 AoS 残留）。 */
 function clearWorld(world: GameWorld): void {
-  const eids = [...query(world, [NetworkId])];
-  for (const eid of eids) {
-    removeEntity(world, eid);
-  }
-  const registry = world.components_registry;
-  for (const [name, comp] of Object.entries(registry.all())) {
-    if (!registry.isAosComponent(name)) continue;
-    for (const eid of eids) {
-      (comp as unknown[])[eid] = undefined;
-    }
+  for (const eid of [...query(world, [NetworkId])]) {
+    destroyEntity(world, eid);
   }
 }
 
@@ -125,6 +119,9 @@ function applyEntityState(world: GameWorld, eid: number, saved: SerializedEntity
       (comp as unknown[])[eid] = structuredClone(state);
       continue;
     }
+    // SoA 组件：只写实体上真实挂载的组件（hasComponent 守卫，防版本漂移时
+    // 向未挂载的组件写死数据——数据会静默丢失且污染后续序列化）
+    if (!hasComponent(world, eid, comp as object)) continue;
     const compObj = comp as Record<string, Record<number, unknown>>;
     for (const [field, value] of Object.entries(state as Record<string, unknown>)) {
       if (compObj[field] !== undefined) {
@@ -136,6 +133,9 @@ function applyEntityState(world: GameWorld, eid: number, saved: SerializedEntity
 
 /**
  * 按存档重建 world（先清空当前实体，避免与初始刷怪重复）。
+ *
+ * 防御畸形存档：entities 缺省/非数组按空处理（恢复出一个空世界，不抛错）；
+ * 单实体 components 缺省按空对象处理。
  *
  * @returns 恢复出的玩家实体 eid 列表（供 addPlayer 复用绑定）。
  */
@@ -149,7 +149,9 @@ export function restoreWorld(world: GameWorld, record: WorldRecord): number[] {
   world.nextNetworkId = record.nextNetworkId;
 
   const orphanPlayers: number[] = [];
-  for (const saved of record.entities) {
+  const savedEntities = Array.isArray(record.entities) ? record.entities : [];
+  for (const saved of savedEntities) {
+    if (!saved || typeof saved !== "object") continue;
     const archetype = world.archetypes.has(saved.kind) ? world.archetypes.get(saved.kind) : undefined;
     if (!archetype) {
       world.logger.warn("存档实体原型未知，跳过", { kind: saved.kind, networkId: saved.networkId });

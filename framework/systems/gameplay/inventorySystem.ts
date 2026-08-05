@@ -1,8 +1,8 @@
 import { query } from "bitecs";
 import { Inventory, Transform, Player, Item, ItemMeta } from "components";
-import { removeEntity } from "bitecs";
 import type { GameWorld } from "world";
 import { addToInventory } from "framework/systems/gameplay/inventoryOps";
+import { destroyEntity } from "framework/entities/destroyEntity";
 
 /**
  * inventorySystem：自动拾取。玩家靠近地面 item 实体时把其堆叠并入背包。
@@ -33,7 +33,7 @@ export function inventorySystem(world: GameWorld): GameWorld {
 
       const leftover = addToInventory(inv, itemsByKind, meta.kind, meta.count);
       if (leftover <= 0) {
-        removeEntity(world, itemEid);
+        destroyEntity(world, itemEid);
       } else if (leftover < meta.count) {
         meta.count = leftover;
       }

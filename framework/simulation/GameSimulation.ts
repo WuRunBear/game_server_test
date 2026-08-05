@@ -1,6 +1,7 @@
-import { query, removeEntity } from "bitecs";
+import { query } from "bitecs";
 import { NetworkId, Velocity, Inventory, Intent, Health } from "components";
 import { spawnEntity } from "framework/entities/spawn";
+import { destroyEntity } from "framework/entities/destroyEntity";
 import { createGameInstance, type GameInstance } from "framework/bootstrap/GameInstance";
 import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
 import { getCollisionDebugSnapshot } from "systems/core/collisionSystem";
@@ -260,8 +261,8 @@ export class GameSimulation implements SimulationPort {
   removePlayer(sessionId: string): void {
     const eid = this.playerEidBySessionId.get(sessionId);
     if (typeof eid === "number") {
-      // bitecs 的 removeEntity 会清空该 eid 上的所有组件数据
-      removeEntity(this.world, eid);
+      // destroyEntity 同时清理 AoS 残留（防 eid 复用后被序列化进存档）
+      destroyEntity(this.world, eid);
     }
 
     this.playerEidBySessionId.delete(sessionId);

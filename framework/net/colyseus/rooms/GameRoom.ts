@@ -1,4 +1,5 @@
 import { Room, type Client } from "@colyseus/core";
+import { StateView } from "@colyseus/schema";
 
 import { createGameSimulation, type SimulationPort } from "simulation";
 import type { PlayerInput, PlayerCommand, TickSnapshot, TickResult, EntitySnapshot } from "simulation/types";
@@ -204,6 +205,9 @@ export class GameRoom extends Room<{ state: RoomState }> {
    *
    * Colyseus 在客户端连接并匹配到房间时调用此方法。
    * PlayerState 写入后 Colyseus 自动增量同步给该客户端（其他客户端不影响）。
+   *
+   * 兴趣管理接线：为客户端创建独立 StateView 并挂 sessionId，
+   * 供 PlayerState.visibleEntities 的 $filter 判定（各客户端只见自己的视野表）。
    */
   onJoin(client: Client): void {
     // 让仿真层创建一个玩家实体，拿到稳定网络 ID
@@ -213,7 +217,14 @@ export class GameRoom extends Room<{ state: RoomState }> {
     const playerState = new PlayerState();
     playerState.sessionId = client.sessionId;
     playerState.entityId = networkId;
+    playerState.visibleEntities.ownerSessionId = client.sessionId;
     this.state.players.set(client.sessionId, playerState);
+
+    // per-client 编码视图：$filter 依据 view.sessionId 与 visibleEntities.ownerSessionId 匹配
+    if (!client.view) {
+      client.view = new StateView();
+    }
+    (client.view as unknown as { sessionId?: string }).sessionId = client.sessionId;
   }
 
   /**

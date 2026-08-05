@@ -47,7 +47,9 @@ function buildGuard(options: InputGuardOptions): InputGuard {
 
     submitCommandAllowed(sessionId, currentTick) {
       if (maxCommandsPerSec === undefined) return true;
-      const cutoff = currentTick - windowSize;
+      // 窗口 = windowSize 个 tick 位置（含当前 tick 在内共 windowSize 个）：
+      // cutoff 为窗口最早允许的 tick，+1 修正 off-by-one（20tps 下恰好 1 秒）
+      const cutoff = currentTick - windowSize + 1;
       const recent = (commandTicks.get(sessionId) ?? []).filter((t) => t >= cutoff);
       if (recent.length >= maxCommandsPerSec) {
         commandTicks.set(sessionId, recent);

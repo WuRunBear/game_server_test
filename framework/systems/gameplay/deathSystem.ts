@@ -1,6 +1,7 @@
-import { hasComponent, query, removeEntity } from "bitecs";
+import { hasComponent, query } from "bitecs";
 import { Health, Player, Transform, LootTable } from "components";
 import { spawnDroppedItem } from "framework/systems/gameplay/inventoryOps";
+import { destroyEntity } from "framework/entities/destroyEntity";
 import type { EntityId, GameWorld } from "world";
 
 export interface RespawnMarker {
@@ -26,7 +27,7 @@ export function getRespawnMarkers(world: GameWorld): Map<EntityId, RespawnMarker
  * - 有 LootTable → 逐条掷骰（chance）→ spawnDroppedItem 落地
  * - 玩家 → 写重生标记（含延迟），**不 removeEntity**（原地重置语义，
  *   同 networkId 免会话重绑；由 respawnSystem 重置并传送回出生点）
- * - 其他 → removeEntity
+ * - 其他 → destroyEntity
  *
  * 游戏无关——掉落内容由 LootTable 的 kind 字符串决定。
  */
@@ -68,7 +69,7 @@ export function deathSystem(world: GameWorld): GameWorld {
       continue;
     }
 
-    removeEntity(world, eid);
+    destroyEntity(world, eid);
   }
 
   return world;

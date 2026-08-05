@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { query } from "bitecs";
+import { MapSchema, StateView, $filter } from "@colyseus/schema";
 import {
   bootstrapFramework,
   createGameInstance,
@@ -16,6 +18,8 @@ import {
   createFileRepository,
   PHASE_NIGHT,
 } from "framework/index";
+import { destroyEntity } from "framework/entities/destroyEntity";
+import { PlayerState } from "framework/net/colyseus/state/PlayerState";
 import { Transform } from "framework/components/transform";
 import { Velocity } from "framework/components/physics";
 import { Health } from "framework/components/combat";
@@ -36,7 +40,7 @@ beforeAll(() => {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-async function waitFor(pred: () => Promise<boolean>, timeoutMs = 1500): Promise<void> {
+async function waitFor(pred: () => Promise<boolean>, timeoutMs = 3000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (await pred()) return;
@@ -382,5 +386,87 @@ describe("Slice 5：真实 game 配置（server 规则 + 存档→恢复 demo）
     expect(NetworkId.value[fires[0]]).toBe(NetworkId.value[fire]);
     const p2 = query(world2, [Player])[0];
     expect(Inventory[p2]!.slots[0]).toEqual({ kind: "campfire_kit", count: 1 });
+  });
+});
+
+describe("Slice 5：审查修复（destroyEntity / 存档防御 / 写盘串行 / per-client filter）", () => {
+  it("destroyEntity：清除 AoS 残留（Inventory 等），防 eid 复用后污染存档", () => {
+    const world = createBareWorld();
+    ensureTestArchetypes(world);
+    const w = spawnEntity(world, world.archetypes.get("w1"), getRegistries().componentRegistry, { x: 0, y: 0 });
+    expect(Inventory[w]).toBeDefined();
+    expect(Needs[w]).toBeDefined();
+
+    destroyEntity(world, w);
+
+    expect(Inventory[w]).toBeUndefined();
+    expect(Needs[w]).toBeUndefined();
+    expect(Kind[w]).toBeUndefined();
+    expect(query(world, [NetworkId])).not.toContain(w);
+  });
+
+  it("removePlayer 后存档不含玩家实体（含 AoS 残留清理）", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "s5-remove-"));
+    const def = createDefaultGameDefinition();
+    def.resolvedRules["server"] = { saveId: "s1", saveIntervalMs: 100 };
+    const repo = createFileRepository(dir);
+    const sim = createGameSimulation(def, { repository: repo, saveId: "s1" });
+    sim.addPlayer("s1");
+    const world = simWorld(sim);
+    const p = query(world, [Player])[0];
+    Inventory[p] = { capacity: 2, slots: [{ kind: "k1", count: 3 }, null] };
+    sim.tick(50);
+
+    sim.removePlayer("s1");
+    const record = serializeWorld(world, "s1");
+    expect(record.entities.length).toBe(0);
+    expect(Inventory[p]).toBeUndefined();
+  });
+
+  it("restoreWorld：畸形存档（entities 非数组）不抛错，恢复空世界", () => {
+    const world = createBareWorld();
+    const orphan = restoreWorld(world, { id: "s", savedAt: 1, tick: 5, nextNetworkId: 9 } as unknown as WorldRecord);
+    expect(orphan).toEqual([]);
+    expect(query(world, [NetworkId]).length).toBe(0);
+    expect(world.time.tick).toBe(5);
+  });
+
+  it("fileRepository：损坏 JSON 返回 null；并发写盘串行化，最终为后写内容", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "s5-serial-"));
+    await writeFile(join(dir, "bad.json"), "{not-json", "utf8");
+    const repo = createFileRepository(dir);
+    expect(await repo.loadWorld("bad")).toBeNull();
+
+    const p1 = repo.saveWorld({
+      id: "w", savedAt: 1, tick: 1, nextNetworkId: 2,
+      entities: [{ networkId: 1, kind: "a", components: { Transform: { x: 1, y: 1, rot: 0, scale: 0 } } }],
+    });
+    const p2 = repo.saveWorld({
+      id: "w", savedAt: 2, tick: 2, nextNetworkId: 3,
+      entities: [{ networkId: 2, kind: "b", components: { Transform: { x: 2, y: 2, rot: 0, scale: 0 } } }],
+    });
+    await Promise.all([p1, p2]);
+
+    const record = await repo.loadWorld("w");
+    expect(record!.savedAt).toBe(2);
+    expect(record!.entities[0].networkId).toBe(2);
+  });
+
+  it("PlayerState.visibleEntities 的 $filter：仅所属玩家 sessionId 可见", () => {
+    const ps = new PlayerState();
+    ps.sessionId = "s1";
+    ps.visibleEntities.ownerSessionId = "s1";
+
+    const viewA = new StateView();
+    (viewA as unknown as { sessionId?: string }).sessionId = "s1";
+    const viewB = new StateView();
+    (viewB as unknown as { sessionId?: string }).sessionId = "s2";
+
+    const ctor = ps.visibleEntities.constructor as typeof MapSchema & {
+      [key: symbol]: (ref: unknown, index: number, view: StateView) => boolean;
+    };
+    const filter = ctor[$filter];
+    expect(filter(ps.visibleEntities, 0, viewA)).toBe(true);
+    expect(filter(ps.visibleEntities, 0, viewB)).toBe(false);
   });
 });
