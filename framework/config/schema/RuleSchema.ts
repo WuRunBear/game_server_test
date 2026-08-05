@@ -66,3 +66,23 @@ export const DayNightRuleSchema = z.object({
 }).passthrough();
 
 export type DayNightRule = z.infer<typeof DayNightRuleSchema>;
+
+/**
+ * 服务端全局规则（rules/server.json）：作用于仿真层的存档/视野/输入校验。
+ *
+ * 各字段语义游戏无关：
+ * - `saveIntervalMs`：定时存档间隔（毫秒）；缺省不自动存档
+ * - `saveId`：存档标识（文件实现下为存档文件基名）；缺省不接持久化
+ * - `viewRadius`：兴趣管理视野半径（像素）；缺省不裁剪（全量同步，兼容旧协议）
+ * - `maxMoveSpeed`：移动输入合成速度上限（像素/秒）；缺省不校验
+ * - `maxCommandsPerSec`：命令频率上限（每秒条数，按逻辑 tick 窗口）；缺省不校验
+ */
+export const ServerRuleSchema = z.object({
+  saveIntervalMs: z.number().positive().optional(),
+  saveId: z.string().optional(),
+  viewRadius: z.number().positive().optional(),
+  maxMoveSpeed: z.number().positive().optional(),
+  maxCommandsPerSec: z.number().int().positive().optional(),
+}).passthrough();
+
+export type ServerRule = z.infer<typeof ServerRuleSchema>;

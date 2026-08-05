@@ -13,10 +13,16 @@ import { equipSlot } from "framework/systems/gameplay/equipmentSystem";
 import { craftRecipe } from "framework/systems/gameplay/craftingSystem";
 import { placeEntity } from "framework/systems/gameplay/placeableSystem";
 import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
+import { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
+import type { Repository } from "framework/repository";
+import type { ServerRule } from "framework/config/schema/RuleSchema";
+import { computeInterest } from "./interest";
+import { createInputGuard, type InputGuard } from "./inputValidation";
 
 import type { SimulationPort } from "./SimulationPort";
 import type {
   PlayerInput, PlayerJoinResult, TickSnapshot, TickResult, DebugSnapshotOptions, PlayerCommand, EntitySnapshot,
+  SimulationOptions,
 } from "./types";
 
 /**
@@ -96,16 +102,50 @@ export class GameSimulation implements SimulationPort {
    */
   private componentRegistry: ComponentRegistry;
 
+  /** 持久化仓储（可选；缺省不接存档）。 */
+  private repository?: Repository;
+
+  /** 存档标识（配合 repository 用于定时存档）。 */
+  private saveId?: string;
+
+  /** 距上次存档累计毫秒（按 world.time.dtMs 累加）。 */
+  private sinceLastSaveMs = 0;
+
+  /** 自动存档间隔（毫秒，来自 rules/server.json）；缺省不自动存档。 */
+  private saveIntervalMs?: number;
+
+  /** 兴趣管理视野半径（来自 rules/server.json）；缺省不裁剪。 */
+  private viewRadius?: number;
+
+  /** 输入校验器（速度上限 + 命令频率限流；无规则时全放行）。 */
+  private inputGuard: InputGuard;
+
+  /** 读档恢复出的、尚未绑定 session 的玩家实体 eid 队列（addPlayer 时复用）。 */
+  private orphanPlayerEids: number[] = [];
+
   /**
    * 创建仿真实例。
    *
    * @param gameDef 游戏配置（已通过 loadGameDefinition 加载 + 校验）
+   * @param options 可选注入（持久化仓储/存档标识/启动恢复快照）
    */
-  constructor(gameDef: LoadedGameDefinition) {
+  constructor(gameDef: LoadedGameDefinition, options?: SimulationOptions) {
     this.instance = createGameInstance(gameDef);
     this.world = this.instance.world;
     this.netSyncFields = gameDef.netSync?.fields ?? [];
     this.componentRegistry = this.world.components_registry as ComponentRegistry;
+
+    this.repository = options?.repository;
+    this.saveId = options?.saveId;
+    if (options?.initialRecord) {
+      this.orphanPlayerEids = restoreWorld(this.world, options.initialRecord);
+    }
+
+    const serverRules = this.world.gameDef.resolvedRules["server"] as ServerRule | undefined;
+    this.saveIntervalMs = serverRules?.saveIntervalMs;
+    this.viewRadius = serverRules?.viewRadius;
+    const tickRate = this.world.time.fixedDtMs > 0 ? Math.max(1, Math.round(1000 / this.world.time.fixedDtMs)) : 20;
+    this.inputGuard = createInputGuard(serverRules, tickRate);
   }
 
   /**
@@ -157,11 +197,19 @@ export class GameSimulation implements SimulationPort {
       });
     }
 
+    this.maybeAutosave(dtMs);
+
+    let interest: Map<string, number[]> | undefined;
+    if (this.viewRadius !== undefined && this.playerEidBySessionId.size > 0) {
+      interest = computeInterest(this.world, this.playerEidBySessionId, snapshot, this.viewRadius);
+    }
+
     return {
       snapshot,
       tickMs,
       tick: this.world.time.tick,
       avgTickMs: this.world.metrics.avgTickMs,
+      interest,
     };
   }
 
@@ -177,13 +225,21 @@ export class GameSimulation implements SimulationPort {
    * @returns { networkId } 新实体的网络标识
    */
   addPlayer(sessionId: string): PlayerJoinResult {
-    // 读取出生点，没有配置则默认 (0, 0)
-    const playerSpawn = this.world.map?.spawns.player ?? { x: 0, y: 0 };
-    const archetype = (this.world.archetypes as ArchetypeRegistry).get("player");
-    const eid = spawnEntity(this.world, archetype, this.componentRegistry, {
-      x: playerSpawn.x,
-      y: playerSpawn.y,
-    });
+    let eid: number;
+
+    // 读档恢复的玩家实体优先复用绑定（networkId 保持存档值，进度不丢）；
+    // 队列空时按现有逻辑新建玩家实体。
+    if (this.orphanPlayerEids.length > 0) {
+      eid = this.orphanPlayerEids.shift()!;
+    } else {
+      // 读取出生点，没有配置则默认 (0, 0)
+      const playerSpawn = this.world.map?.spawns.player ?? { x: 0, y: 0 };
+      const archetype = (this.world.archetypes as ArchetypeRegistry).get("player");
+      eid = spawnEntity(this.world, archetype, this.componentRegistry, {
+        x: playerSpawn.x,
+        y: playerSpawn.y,
+      });
+    }
 
     // 建立 sessionId → eid 映射，后续输入可以通过 sessionId 找到玩家实体
     this.playerEidBySessionId.set(sessionId, eid);
@@ -211,6 +267,7 @@ export class GameSimulation implements SimulationPort {
     this.playerEidBySessionId.delete(sessionId);
     this.lastSeqBySessionId.delete(sessionId);
     this.latestInputBySessionId.delete(sessionId);
+    this.inputGuard.removeSession(sessionId);
   }
 
   /**
@@ -232,6 +289,15 @@ export class GameSimulation implements SimulationPort {
     const lastSeq = this.lastSeqBySessionId.get(sessionId) ?? 0;
     if (input.seq <= lastSeq) return;
 
+    // 输入校验（anti-cheat）：超速输入被拒且不推进 seq，客户端无法靠重发绕过
+    if (!this.inputGuard.validateMove(input)) {
+      this.world.logger.warn("输入被拒：超出移动速度上限", {
+        sessionId,
+        speed: Math.hypot(input.moveX, input.moveY),
+      });
+      return;
+    }
+
     this.lastSeqBySessionId.set(sessionId, input.seq);
     this.latestInputBySessionId.set(sessionId, input);
   }
@@ -250,6 +316,16 @@ export class GameSimulation implements SimulationPort {
     // 死亡/重生窗口内（原地重置语义，实体未移除）不执行背包命令——
     // 与 applyInputs / interactionSystem 的死亡守卫语义一致，防幽灵操作
     if ((Health.current[eid] ?? 0) <= 0) return false;
+
+    // 输入校验（anti-cheat）：命令频率超限被拒并日志
+    if (!this.inputGuard.submitCommandAllowed(sessionId, this.world.time.tick)) {
+      this.world.logger.warn("命令被拒：超出频率上限", {
+        sessionId,
+        type: command.type,
+        tick: this.world.time.tick,
+      });
+      return false;
+    }
 
     switch (command.type) {
       case "consume":
@@ -286,6 +362,30 @@ export class GameSimulation implements SimulationPort {
    */
   getDebugSnapshot(options?: DebugSnapshotOptions): unknown {
     return getCollisionDebugSnapshot(this.world, options);
+  }
+
+  /**
+   * 定时存档：按累计 dtMs 达到 saveIntervalMs 时序列化并写盘。
+   *
+   * 序列化同步完成（快照一致性），写盘 fire-and-forget（异步 I/O 不入 ECS 系统）；
+   * 未注入 repository / 未配置间隔时 no-op。
+   *
+   * @param dtMs 本帧步长
+   */
+  private maybeAutosave(dtMs: number): void {
+    if (!this.repository || !this.saveId || this.saveIntervalMs === undefined) return;
+
+    this.sinceLastSaveMs += dtMs;
+    if (this.sinceLastSaveMs < this.saveIntervalMs) return;
+    this.sinceLastSaveMs = 0;
+
+    const record = serializeWorld(this.world, this.saveId);
+    void this.repository.saveWorld(record).catch((err) => {
+      this.world.logger.error("存档写入失败", {
+        saveId: this.saveId,
+        error: err instanceof Error ? err.stack : String(err),
+      });
+    });
   }
 
   /**
@@ -423,8 +523,12 @@ export class GameSimulation implements SimulationPort {
  * 返回 SimulationPort 接口类型而非具体类，外部代码只依赖接口。
  *
  * @param gameDef 已加载和校验的游戏配置
+ * @param options 可选注入（持久化仓储/存档标识/启动恢复快照）
  * @returns 仿真端口实例
  */
-export function createGameSimulation(gameDef: LoadedGameDefinition): SimulationPort {
-  return new GameSimulation(gameDef);
+export function createGameSimulation(
+  gameDef: LoadedGameDefinition,
+  options?: SimulationOptions,
+): SimulationPort {
+  return new GameSimulation(gameDef, options);
 }

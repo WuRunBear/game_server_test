@@ -108,8 +108,10 @@ game/         ← 游戏配置 — 纯 JSON：实体、行为、地图、规则�
 易踩、且看代码未必能发现：
 
 - **AoS 组件家族**：`Inventory` / `Kind` / `Needs` / `ResourceNode` / `ItemMeta` / `Intent` 都是普通 JS 数组（`[] as T[]`，按 eid 索引），与其余 SoA（bitecs 数值数组）不一致。它们**不是 bitecs 组件**——不能 `addComponent`、不能进 `query`。spawn 经组件注册表的 **AoS 初始化钩子**（`registerAosInitializer`）按 archetype 配置写入；netSync 经 **AoS 同步适配器**（`registerAosSyncAdapter`，按 `tags` 限定查询）展平为 numbers/strings。扩展此类组件时注意访问方式与查询方式。
+- **S5 持久化陷阱**：`repository.ts` 接口已是**世界快照**（`Repository.saveWorld/loadWorld(WorldRecord)`，旧 PlayerRecord/MapInstanceRecord 已删除，无消费方）；默认后端是 `createFileRepository`（`data/saves/`，`SAVE_DIR` 覆盖），**postgres/redis 仍为 stub**（无驱动依赖，不要假设可用）。存档序列化**跳过瞬态组件**（Velocity/Target/AIState/BlackboardRef/Cooldown/Duration/Intent/LastSynced/Kind），恢复后由系统与输入自然重建；恢复出的玩家实体由 `addPlayer` 复用绑定（networkId 保留），`removePlayer` 仍删除实体（断线后进度以最近存档为准）。`createGameSimulation(gameDef, options?)` 的 `options` 含 `repository/saveId/initialRecord`。
+- **S5 联机陷阱**：`game/rules/server.json`（`ServerRuleSchema`）同时驱动三件事——`saveId/saveIntervalMs`（存档）、`viewRadius`（兴趣裁剪，无此配置则全量广播 `RoomState.entities`，**旧协议兼容**）、`maxMoveSpeed/maxCommandsPerSec`（输入校验）。persistence 与输入校验**不是 ECS tick 系统**（异步 I/O 与入口校验不入 tick，实为 GameSimulation 层能力）。兴趣裁剪后实体数据在 `PlayerState.visibleEntities`（per-client），客户端项目注意协议适配点。
 - **`vitest.config.ts` 缺 `simulation` 路径别名**：测试中直接 `import from "simulation"` 会失败，须经 `framework` barrel 间接引入。
-- **持久化层全为 stub**：`repository.ts` / `postgres.ts` / `redis.ts` 方法体基本为空，不要假设存档/读档已可用。
+- **持久化后端**：默认为 `createFileRepository`（JSON 文件，`data/saves/`，`SAVE_DIR` 覆盖）；`postgres.ts` / `redis.ts` 仍为 stub（无驱动依赖），不要假设外部数据库可用。
 - **当前缺陷与覆盖进度见 `docs/ROADMAP.md`**，不在本文件枚举（随修复实时变化）。
 
 ## 常用命令
@@ -133,3 +135,4 @@ pnpm tools export-map [mapId] --out <dir>       # 导出 MapRuntime
 | `PORT` | 3000 | 服务监听端口（见 `framework/config/server.ts`） |
 | `CORS_ORIGINS` | — | 跨域白名单（逗号分隔，空则允许 *） |
 | `GAME_CONFIG_PATH` | `game/game.json` | 游戏配置路径 |
+| `SAVE_DIR` | `data/saves` | 存档目录（文件仓储后端，见 `framework/persistence/fileRepository.ts`） |

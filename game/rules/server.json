@@ -1,0 +1,7 @@
+{
+  "saveIntervalMs": 60000,
+  "saveId": "main",
+  "viewRadius": 300,
+  "maxMoveSpeed": 200,
+  "maxCommandsPerSec": 20
+}

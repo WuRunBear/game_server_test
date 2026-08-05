@@ -8,6 +8,8 @@
  * 简单来说，这些就是"仿真出了什么数据、传输层需要什么数据"的合同。
  */
 
+import type { Repository, WorldRecord } from "framework/repository";
+
 /**
  * 客户端发给服务端的输入命令。
  *
@@ -124,6 +126,25 @@ export interface TickResult {
   tick: number;
   /** EMA 滑动平均帧耗时（毫秒），用于性能监控趋势判断 */
   avgTickMs: number;
+  /**
+   * 兴趣集合（可选）：sessionId → 该玩家本帧可见的 networkId 列表。
+   *
+   * 由仿真层按视野半径裁剪（own entity 恒可见）；传输层据此做 per-client 同步。
+   * 未配置视野半径时缺省——传输层回退全量广播（兼容旧协议）。
+   */
+  interest?: Map<string, number[]>;
+}
+
+/**
+ * 创建仿真实例的注入选项（可选，全缺省时行为与历史版本一致）。
+ */
+export interface SimulationOptions {
+  /** 持久化仓储；缺省不接存档。 */
+  repository?: Repository;
+  /** 存档标识；配合 repository 用于定时存档与读档。 */
+  saveId?: string;
+  /** 启动时恢复的世界快照（读档结果）；恢复出的玩家实体供 addPlayer 复用绑定。 */
+  initialRecord?: WorldRecord;
 }
 
 /**

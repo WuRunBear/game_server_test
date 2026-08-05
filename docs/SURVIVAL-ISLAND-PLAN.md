@@ -331,7 +331,27 @@
 
 ---
 
-## Slice 5 — 联机完整度（"能存档开服"）
+## Slice 5 — 联机完整度（"能存档开服"）✅ 已完成
+
+> **实施修正**（相对计划的偏差，均保持框架通用）：
+> - **GameRoom.onCreate 为 async 已获源码验证**：@colyseus/core MatchMaker.createOne 在创建房间时
+>   `await room.onCreate(...)`（build/MatchMaker.mjs），首个客户端 join 前读档恢复必然完成，无需降级方案
+> - **persistenceSystem 不做成 ECS tick 系统**：AGENTS 硬边界禁止"系统里做异步 I/O"——
+>   实现为 GameSimulation 层能力：tick 末尾按 `rules/server.json.saveIntervalMs` 累积 dtMs，
+>   同步 serialize + fire-and-forget 写盘；读档经 `createGameSimulation(gameDef, {initialRecord})` 同步恢复
+> - **antiCheatSystem 不做成 tick 系统**：输入校验必须在入口（submitInput/submitCommand，tick 前）
+>   ——实现为 `inputValidation` 模块：`maxMoveSpeed` 超速拒（不推进 seq）+ `maxCommandsPerSec`
+>   命令频率按 tick 滑动窗口限流（确定性，与真实时钟解耦）
+> - **interestManagementSystem 分两段**：仿真层 `computeInterest`（viewRadius 裁剪，own 恒可见）
+>   → TickResult.interest；传输层双路径——有规则写 per-client `PlayerState.visibleEntities`
+>   （Colyseus 按连接分别增量同步），无规则保留 `RoomState.entities` 全量广播（兼容旧协议/旧客户端）
+> - **Repository 接口替换**：旧 PlayerRecord/MapInstanceRecord（无消费方）→ WorldRecord（世界快照，
+>   id/tick/nextNetworkId/timeOfDay/entities）；postgres/redis 因无驱动依赖留 stub 适配新接口，
+>   `createFileRepository`（JSON 文件，原子写）为默认真实现（记录不修：外部 DB 等真实部署需求）
+> - **玩家实体恢复语义**：读档恢复的玩家实体进复用队列，`addPlayer` 优先绑定（networkId 保留、
+>   背包保留）；`removePlayer` 仍删除实体——断线后进度以最近一次存档为准
+> - **serialize 瞬态组件跳过**：Velocity/Target/AIState/BlackboardRef/Cooldown/Duration/Intent/
+>   LastSynced/Kind（恢复后由系统与输入自然重建，eid 跨存档不保真）
 
 ### 新增/落地框架系统
 

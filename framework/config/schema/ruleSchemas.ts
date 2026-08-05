@@ -4,6 +4,7 @@ import {
   NeedsRuleSchema,
   CraftingRuleSchema,
   DayNightRuleSchema,
+  ServerRuleSchema,
 } from "framework/config/schema/RuleSchema";
 
 /**
@@ -36,4 +37,5 @@ export function registerBuiltinRuleSchemas(): void {
   registerRuleSchema("needs", NeedsRuleSchema);
   registerRuleSchema("crafting", CraftingRuleSchema);
   registerRuleSchema("daynight", DayNightRuleSchema);
+  registerRuleSchema("server", ServerRuleSchema);
 }

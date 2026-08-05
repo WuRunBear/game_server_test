@@ -50,9 +50,14 @@ framework/
     loadGameDefinition.ts   # 加载 game.json + zod 校验 + 引用完整性检查
   simulation/               # 仿真抽象层 — 传输层与 ECS 的解耦接口
     SimulationPort.ts      # 接口: tick / addPlayer / removePlayer / submitInput / getDebugSnapshot
-    GameSimulation.ts       # 实现: 内部聚合 GameInstance + ECS
-    types.ts                # 纯数据 DTO: PlayerInput, TickSnapshot, TickResult
+    GameSimulation.ts       # 实现: 内部聚合 GameInstance + ECS（含定时存档/读档恢复/输入校验接线）
+    types.ts                # 纯数据 DTO: PlayerInput, TickSnapshot, TickResult, SimulationOptions
+    interest.ts             # computeInterest — 视野半径裁剪（own 恒可见）
+    inputValidation.ts      # 输入校验（anti-cheat）：移动速度上限 + 命令频率 tick 窗口限流
     index.ts                # 模块 barrel 导出
+  persistence/              # 世界快照持久化
+    worldSerializer.ts      # serializeWorld / restoreWorld（SoA+AoS 全量，瞬态组件跳过，networkId 保真）
+    fileRepository.ts       # createFileRepository — JSON 文件仓储（默认后端，原子写）
   components/               # ECS 组件 + componentRegistry
     componentRegistry.ts    # 组件注册表: 名 → defineComponent
     registerBuiltin.ts      # 注册 33 个内置组件
@@ -111,8 +116,8 @@ framework/
       HeadlessHost.ts       # runHeadless(sim, opts) — 无传输驱动 tick，返回 TickResult[]
   utils/                    # logger.ts (winston), timer.ts (clampMs)
   metrics.ts                # tick 性能指标 (EMA avg)
-  repository.ts             # Repository 接口 (持久化抽象)
-  postgres.ts, redis.ts     # 占位 stub
+  repository.ts             # Repository 接口 (持久化抽象，WorldRecord 世界快照)
+  postgres.ts, redis.ts     # 占位 stub（接口已对齐，等真实部署需求）
   bitecs-legacy.d.ts         # bitecs legacy API 手工类型声明
   __tests__/framework.test.ts   # 43 个测试，20 个 describe 块
 
@@ -125,7 +130,7 @@ game/
   game.json                 # GameDefinition 主入口：tickRate=20, 15 个系统, netSync 配置
   entities/                 # player, villager, boar, rabbit, berry_bush, tree, water_pool, item, rock, campfire, wolf
   behaviors/                # wander-default, boar-hostile, rabbit-flee, wolf-night
-  rules/                    # combat.json, needs.json, respawn.json, crafting.json, daynight.json, place.json
+  rules/                    # combat.json, needs.json, respawn.json, crafting.json, daynight.json, place.json, server.json
   spawns/                   # populations.json（wolf 规则带 condition: "isNight"）
   items/                    # berry, wood, water, raw_meat, stone, axe, stone_axe, spear, berry_pie, cooked_meat, campfire_kit (item kind 数据)
   maps/                     # registry.json
@@ -152,6 +157,14 @@ tools/
 ### 网络同步
 
 Colyseus Schema 每 tick 同步。`EntityState` 的字段通过 `game.json` 的 `netSync.fields` 配置，选择性同步组件字段（无硬编码）。服务端权威，客户端仅发送输入。仿真与传输解耦：`GameRoom`（联机）与 `HeadlessHost`（测试/单机）共用同一 `SimulationPort.tick(dtMs)`，`GameRoom` 不导入任何 bitecs / ECS 符号。
+
+### 持久化与联机完整度
+
+由 `game/rules/server.json`（`ServerRuleSchema` 校验）驱动，全部经 `createGameSimulation(gameDef, options)` 注入：
+
+- **持久化**：`saveIntervalMs` + `saveId` 开启定时存档（`worldSerializer` 全量快照 → `createFileRepository` 写 `data/saves/`，可用 `SAVE_DIR` 覆盖目录）；`GameRoom.onCreate` 启动时读档恢复，玩家实体由 `addPlayer` 复用绑定（networkId/进度保留）。
+- **兴趣管理**：`viewRadius` 开启视野裁剪——每客户端只见视野内实体（`PlayerState.visibleEntities`，own 恒可见）；未配置时全量广播 `RoomState.entities`（兼容旧客户端协议）。
+- **输入校验**：`maxMoveSpeed` 超速输入被拒（记日志）、`maxCommandsPerSec` 命令频率限流；未配置时不校验。
 
 ## 扩展指南
 

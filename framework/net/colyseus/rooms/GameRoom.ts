@@ -1,8 +1,11 @@
 import { Room, type Client } from "@colyseus/core";
 
 import { createGameSimulation, type SimulationPort } from "simulation";
-import type { PlayerInput, PlayerCommand, TickSnapshot } from "simulation/types";
+import type { PlayerInput, PlayerCommand, TickSnapshot, TickResult, EntitySnapshot } from "simulation/types";
 import { loadGameDefinition } from "framework/bootstrap/loadGameDefinition";
+import { createFileRepository } from "framework/persistence/fileRepository";
+import type { Repository, WorldRecord } from "framework/repository";
+import type { ServerRule } from "framework/config/schema/RuleSchema";
 import { EntityState } from "network/colyseus/state/EntityState";
 import { RoomState } from "network/colyseus/state/RoomState";
 import { PlayerState } from "network/colyseus/state/PlayerState";
@@ -119,12 +122,16 @@ export class GameRoom extends Room<{ state: RoomState }> {
    *
    * 执行顺序：
    * 1. 加载游戏配置（game.json + 子配置文件）
-   * 2. 创建仿真实例（GameSimulation → GameInstance → ECS World）
-   * 3. 初始化 Colyseus RoomState
-   * 4. 注册消息处理器（input / debug 订阅等）
-   * 5. 启动 Colyseus tick 循环（setSimulationInterval）
+   * 2. 读档（若 rules/server.json 配置了 saveId）：从默认文件仓储加载世界快照
+   * 3. 创建仿真实例（GameSimulation → GameInstance → ECS World），传入恢复快照
+   * 4. 初始化 Colyseus RoomState
+   * 5. 注册消息处理器（input / debug 订阅等）
+   * 6. 启动 Colyseus tick 循环（setSimulationInterval）
+   *
+   * async：Colyseus 会等待 onCreate 完成后再接受客户端加入，
+   * 保证首个玩家连接前世界已恢复到存档状态。
    */
-  onCreate(options?: Record<string, unknown>): void {
+  async onCreate(options?: Record<string, unknown>): Promise<void> {
     // Colyseus 默认在 onLeave 最后一个客户端时自动 dispose 房间，
     // 这里禁用它——因为单房间模式下房间应常驻
     this.autoDispose = false;
@@ -136,8 +143,21 @@ export class GameRoom extends Room<{ state: RoomState }> {
     // 计算固定步长（如 tickRate=20 → fixedDtMs=50）
     const fixedDtMs = Math.max(1, Math.floor(1000 / gameDef.tickRate));
 
+    // 读档恢复：server 规则配置 saveId 时接文件仓储，加载世界快照作为初始状态
+    const serverRules = gameDef.resolvedRules["server"] as ServerRule | undefined;
+    let repository: Repository | undefined;
+    let initialRecord: WorldRecord | null = null;
+    if (serverRules?.saveId) {
+      repository = createFileRepository(process.env.SAVE_DIR ?? "data/saves");
+      initialRecord = await repository.loadWorld(serverRules.saveId);
+    }
+
     // 创建仿真实例——从这里开始，所有 ECS 操作都走 sim 接口
-    this.sim = createGameSimulation(gameDef);
+    this.sim = createGameSimulation(gameDef, {
+      repository,
+      saveId: serverRules?.saveId,
+      initialRecord: initialRecord ?? undefined,
+    });
 
     // RoomState 是 Colyseus Schema——客户端通过 WebSocket 增量同步
     this.state = new RoomState();
@@ -242,72 +262,103 @@ export class GameRoom extends Room<{ state: RoomState }> {
   private onTick(deltaTimeMs: number, fixedDtMs: number): void {
     const dtMs = deltaTimeMs > 0 ? deltaTimeMs : fixedDtMs;
     const result = this.sim.tick(dtMs);
-    this.applySnapshot(result.snapshot);
+    this.applySnapshot(result);
     this.pushCollisionDebugSnapshots(dtMs);
   }
 
   /**
-   * 把仿真快照写入 Colyseus RoomState。
+   * 把仿真快照写入 Colyseus RoomState（双路径）。
    *
-   * 这一步是"最终扩散点"——所有客户端的同步数据最终都通过这里写入。
+   * - **兴趣路径**（result.interest 存在，启用了视野裁剪）：
+   *   按各客户端可见集合写入其 PlayerState.visibleEntities（per-client diff，
+   *   Colyseus 按连接分别增量同步）——每个客户端只见视野内实体。
+   * - **全量路径**（无 interest，未配置视野半径）：
+   *   写入共享 RoomState.entities 广播给所有客户端（兼容旧协议/旧客户端）。
    *
-   * **与旧实现的区别**：
-   * 旧实现（syncState）直接读 ECS world→query→SoA 数组→写 EntityState，
-   * 新实现只遍历纯数据 TickSnapshot，不 import 任何 ECS 符号。
-   *
-   * **diff 策略**（找出新增/存续/删除的实体）：
-   * 1. 快照中有的 entity → 新增或更新 EntityState
-   * 2. RoomState 中有的但快照中没有 → 实体已死亡，从 RoomState 删除
-   *
-   * @param snapshot 仿真产出的纯数据快照
+   * @param result 仿真产出的本帧结果
    */
-  private applySnapshot(snapshot: TickSnapshot): void {
+  private applySnapshot(result: TickResult): void {
+    const snapshot = result.snapshot;
     this.state.tick = snapshot.tick;
     if (snapshot.timeOfDay) {
       this.state.hour = snapshot.timeOfDay.hour;
       this.state.phase = snapshot.timeOfDay.phase;
     }
 
-    // alive 集合记录快照中出现的所有实体 networkId
-    const alive = new Set<number>();
+    if (result.interest) {
+      this.applyInterest(result);
+      return;
+    }
+    this.applyFullSnapshot(snapshot);
+  }
 
+  /** 全量路径：把快照写入共享 RoomState.entities。 */
+  private applyFullSnapshot(snapshot: TickSnapshot): void {
+    const alive = new Set<number>();
     for (const [networkId, snap] of snapshot.entities) {
       alive.add(networkId);
       const key = String(networkId);
-
-      // 获取或创建 EntityState——复用实例减少 GC
       let entityState = this.state.entities.get(key);
       if (!entityState) {
         entityState = new EntityState();
-        entityState.id = networkId;
-        this.state.entities.set(key, entityState);
       }
-
-      // 数值字段：按 key diff 更新 + 清理本帧已消失的字段
-      // （如实体某 AoS 索引缩短后，旧 key 不应残留）
-      const nextNumberKeys = new Set<string>();
-      for (const [fieldKey, value] of Object.entries(snap.values)) {
-        nextNumberKeys.add(fieldKey);
-        entityState.values.set(fieldKey, value);
-      }
-      entityState.values.forEach((_v: number, k: string) => {
-        if (!nextNumberKeys.has(k)) entityState.values.delete(k);
-      });
-
-      // 字符串字段：同样的 diff 清理
-      const nextStringKeys = new Set<string>();
-      for (const [fieldKey, value] of Object.entries(snap.strings)) {
-        nextStringKeys.add(fieldKey);
-        entityState.stringValues.set(fieldKey, value);
-      }
-      entityState.stringValues.forEach((_v: string, k: string) => {
-        if (!nextStringKeys.has(k)) entityState.stringValues.delete(k);
-      });
+      this.writeEntityState(entityState, networkId, snap);
+      this.state.entities.set(key, entityState);
     }
-
-    // 清理已死亡的实体：RoomState 中有但 alive 集合中没有的
     this.state.entities.forEach((_value: EntityState, key: string) => {
       if (!alive.has(Number(key))) this.state.entities.delete(key);
+    });
+  }
+
+  /** 兴趣路径：按各客户端可见集合写入其 PlayerState.visibleEntities。 */
+  private applyInterest(result: TickResult): void {
+    const snapshot = result.snapshot;
+    for (const client of this.clients) {
+      const playerState = this.state.players.get(client.sessionId);
+      if (!playerState) continue;
+
+      const visible = result.interest!.get(client.sessionId) ?? [];
+      const alive = new Set(visible);
+      for (const networkId of visible) {
+        const snap = snapshot.entities.get(networkId);
+        if (!snap) continue;
+        const key = String(networkId);
+        let entityState = playerState.visibleEntities.get(key);
+        if (!entityState) {
+          entityState = new EntityState();
+        }
+        this.writeEntityState(entityState, networkId, snap);
+        playerState.visibleEntities.set(key, entityState);
+      }
+      playerState.visibleEntities.forEach((_value: EntityState, key: string) => {
+        if (!alive.has(Number(key))) playerState.visibleEntities.delete(key);
+      });
+    }
+  }
+
+  /**
+   * 把单实体快照写入 EntityState（数值/字符串字段按 key diff 更新，
+   * 并清理本帧已消失的字段，如 AoS 索引缩短后的旧 key 残留）。
+   */
+  private writeEntityState(entityState: EntityState, networkId: number, snap: EntitySnapshot): void {
+    entityState.id = networkId;
+
+    const nextNumberKeys = new Set<string>();
+    for (const [fieldKey, value] of Object.entries(snap.values)) {
+      nextNumberKeys.add(fieldKey);
+      entityState.values.set(fieldKey, value);
+    }
+    entityState.values.forEach((_v: number, k: string) => {
+      if (!nextNumberKeys.has(k)) entityState.values.delete(k);
+    });
+
+    const nextStringKeys = new Set<string>();
+    for (const [fieldKey, value] of Object.entries(snap.strings)) {
+      nextStringKeys.add(fieldKey);
+      entityState.stringValues.set(fieldKey, value);
+    }
+    entityState.stringValues.forEach((_v: string, k: string) => {
+      if (!nextStringKeys.has(k)) entityState.stringValues.delete(k);
     });
   }
 

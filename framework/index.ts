@@ -21,8 +21,15 @@ export { createGameSimulation, GameSimulation } from "framework/simulation/GameS
 export type { SimulationPort } from "framework/simulation/SimulationPort";
 export type {
   PlayerInput, PlayerJoinResult, TickSnapshot, TickResult, DebugSnapshotOptions, PlayerCommand, EntitySnapshot,
+  SimulationOptions,
 } from "framework/simulation/types";
 export { registerAosSyncAdapter, getAosSyncAdapter, type AosSyncAdapter, type AosSyncOutput } from "framework/simulation/aosSyncAdapters";
+export { computeInterest } from "framework/simulation/interest";
+export { createInputGuard, type InputGuard } from "framework/simulation/inputValidation";
+
+export { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
+export { createFileRepository } from "framework/persistence/fileRepository";
+export type { Repository, WorldRecord, SerializedEntity } from "framework/repository";
 
 export { dayNightCycleSystem } from "framework/systems/gameplay/dayNightCycleSystem";
 export { registerSpawnCondition, getSpawnCondition, hasSpawnCondition, registerBuiltinSpawnConditions, type SpawnCondition } from "framework/systems/gameplay/spawnConditions";
@@ -32,7 +39,7 @@ export { overlapsAnyEntity, overlapsMapBlocked } from "framework/utils/placement
 export { GameDefinitionSchema, type GameDefinition, type LoadedGameDefinition, type BehaviorDefinition, type SpawnRule, type SystemEnableEntry, type NetSyncField } from "framework/config/schema/GameDefinitionSchema";
 export { ItemKindSchema, type ItemKindSpec, type ConsumeEffect, type EquipEffect, type PlaceEffect } from "framework/config/schema/ItemKindSchema";
 export { registerRuleSchema, getRuleSchema, hasRuleSchema, registerBuiltinRuleSchemas } from "framework/config/schema/ruleSchemas";
-export { CombatRuleSchema, NeedsRuleSchema, CraftingRuleSchema, DayNightRuleSchema, type CombatRule, type NeedsRule, type CraftingRule, type CraftingRecipe, type DayNightRule } from "framework/config/schema/RuleSchema";
+export { CombatRuleSchema, NeedsRuleSchema, CraftingRuleSchema, DayNightRuleSchema, ServerRuleSchema, type CombatRule, type NeedsRule, type CraftingRule, type CraftingRecipe, type DayNightRule, type ServerRule } from "framework/config/schema/RuleSchema";
 
 export {
   registerSystem,

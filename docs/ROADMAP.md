@@ -1,8 +1,8 @@
 # 通用 2D 游戏框架系统路线图
 
 > 目标：将当前框架演进为通用 2D 游戏框架。
-> Phase 0（切片前止血）已完成 5 个框架级缺陷修复；Slice 1（生存循环）、Slice 2（战斗闭环）、Slice 3（合成与装备）与 Slice 4（世界氛围）已完成。
-> 现状：8 个内置核心系统 + Slice 1 新增 2 个生存系统（needDecay / gathering）+ Slice 2 新增 3 个系统（perception / death / respawn）+ Slice 3 新增 1 个系统（equipment）+ Slice 4 新增 1 个系统（dayNight），共 15 个内置系统；crafting / placeable 为命令驱动的原子模块（无 tick 体，inventoryOps 先例）。
+> Phase 0（切片前止血）已完成 5 个框架级缺陷修复；Slice 1（生存循环）、Slice 2（战斗闭环）、Slice 3（合成与装备）、Slice 4（世界氛围）与 Slice 5（联机完整度）已完成。
+> 现状：8 个内置核心系统 + Slice 1 新增 2 个生存系统（needDecay / gathering）+ Slice 2 新增 3 个系统（perception / death / respawn）+ Slice 3 新增 1 个系统（equipment）+ Slice 4 新增 1 个系统（dayNight），共 15 个内置系统；crafting / placeable 为命令驱动的原子模块（无 tick 体，inventoryOps 先例）；persistence / interest / 输入校验为仿真层能力（定时存档 / 视野裁剪 / 输入拦截——异步 I/O 与输入校验不入 ECS tick 系统）。
 > 详见下文「已有系统状态」。
 
 ## 一、核心仿真
@@ -98,13 +98,17 @@
 - AoS 组件家族（Inventory / Kind / Needs / ResourceNode / ItemMeta / Intent / LootTable）+ spawn AoS 初始化钩子（Inventory/Needs/ResourceNode/LootTable 注册了钩子；ItemMeta/Intent/Kind 由运行时写入）
 - SoA 组件补充（Slice 3/4）：Equipment（weapon/tool/armor 三槽引用 inventory 槽 idx，-1=空）、CraftingStation（stationType: ui32，0=通用手搓）、LightSource、Placeable
 - BT 通用节点（Slice 2/4）：conditions IsTargetInVision/InAttackRange/IsNight/IsInLight + actions Chase/Flee/Attack/Sleep（Sleep 为 SUCCEEDED 语义——树每 tick 重置，条件变化即时改判；ActionFactory 放宽为 `State | boolean`；btFactory/validateIntegrity 支持 mistreevous while/until guard 条件收集（单对象形态））
-- items 加载段（game/items/*.json + ItemKindSchema，Slice 3 加 equip 穿戴效果，Slice 4 加 place 放置声明）+ 通用规则 schema 注册表（combat/needs/crafting/daynight）
+- items 加载段（game/items/*.json + ItemKindSchema，Slice 3 加 equip 穿戴效果，Slice 4 加 place 放置声明）+ 通用规则 schema 注册表（combat/needs/crafting/daynight/server）
 - sync：netSync OR 语义 + AoS 适配器（numbers/strings 分流，修旧 AND-query 缺陷）
+- persistence（Slice 5）：worldSerializer（serializeWorld/restoreWorld——SoA+AoS 全量 + world 级状态，瞬态组件跳过，networkId 保真）+ Repository 接口（WorldRecord）+ createFileRepository 真实现（postgres/redis 适配接口留 stub 等真实需求）；GameSimulation 定时存档（rules/server.json saveIntervalMs）+ 读档恢复（玩家实体 addPlayer 复用绑定）
+- interest management（Slice 5）：computeInterest 仿真层裁剪（viewRadius，own 恒可见）→ TickResult.interest → GameRoom 双路径（有裁剪写 per-client PlayerState.visibleEntities 增量同步；无裁剪走 RoomState.entities 全量广播，兼容旧协议）
+- anti-cheat（Slice 5）：inputValidation 输入校验——maxMoveSpeed 超速输入被拒不推进 seq + maxCommandsPerSec 命令频率按 tick 滑动窗口限流，被拒记日志；无规则全放行
+- server 规则（Slice 5）：game/rules/server.json + ServerRuleSchema（saveIntervalMs / saveId / viewRadius / maxMoveSpeed / maxCommandsPerSec）
 - logger
 
 ### ❌ 缺口最大三类
 1. **AI 高级决策** — UtilityAI、StateMachine、GOAP（Perception 已落地 S2）
-2. **网络服务端** — InterestMgmt、LagComp、Persistence、AntiCheat
+2. **网络服务端** — Persistence / InterestMgmt / AntiCheat 已落地 S5；LagComp 未做
 3. **社交进度** — Relationship、Dialogue、Quest、Achievement、Progression
 
 ### 🔧 已有系统状态
@@ -115,9 +119,11 @@
 >
 > **Slice 2（战斗闭环）已完成**：boar 感知→追击→攻击，玩家 attack 意图近战反击，击杀掉肉，玩家死亡自动重生。验收 `pnpm test`（102 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空。下一切片为 Slice 3 合成与装备。
 >
-> **Slice 3（合成与装备）已完成**：采集石头/木头 → 合成工具（gatherMult×2）/武器（attackBonus）→ 装备生效；cooked_meat 需火堆站点；缺料/满包/站点校验零副作用。验收 `pnpm test`（126 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空。下一切片为 Slice 4 世界氛围。
+> **Slice 3（合成与装备）已完成**：采集石头/木头 → 合成工具（gatherMult×2）/武器（attackBonus）→ 装备生效；cooked_meat 需火堆站点；缺料/满包/站点校验零副作用。验收 `pnpm test`（128 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空。下一切片为 Slice 4 世界氛围。
 >
 > **Slice 4（世界氛围）已完成**：昼夜循环（dayNightCycleSystem + world.time.timeOfDay 同步到 RoomState）；夜间条件刷怪（SpawnSchema.condition + isNight）；火光回避（感知侧：光内目标不可感知 + 光内入睡 BT）；玩家放置火堆（campfire_kit → place 命令 → Placeable/campfire 实体 + 站点合成）。审查修复：Sleep 改 SUCCEEDED（RUNNING 记忆导致的睡死/追击残留根治）、wolf-night 追击分支 while IsNight guard（天亮停手）、validateIntegrity 行为树校验修复（原空转）、guard 单对象清理。验收 `pnpm test`（155 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空（blackboard 技术词除外）。下一切片为 Slice 5 联机完整度。
+>
+> **Slice 5（联机完整度）已完成**：持久化（worldSerializer 世界快照 + Repository/WorldRecord 接口 + createFileRepository 真实现，postgres/redis 适配接口留 stub；GameSimulation 定时存档 saveIntervalMs + 读档恢复 + 玩家 addPlayer 复用绑定，networkId 保留）；兴趣管理（computeInterest 按 viewRadius 裁剪、own 恒可见；GameRoom 双路径——有规则写 per-client PlayerState.visibleEntities，无规则保留 RoomState.entities 全量广播兼容旧协议）；输入校验（maxMoveSpeed 超速拒 + maxCommandsPerSec 命令频率 tick 窗口限流，被拒记日志）。server 规则经 ServerRuleSchema 校验。验收 `pnpm test`（168 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空（blackboard 技术词除外）。核心 Demo 至此贯通，下一切片（Slice 6+）按需开启。
 
 **切片内待补全（非框架缺陷）**：
 - （已补全）inventorySystem：堆叠/丢弃/使用已落地（Slice 1）
