@@ -50,3 +50,19 @@ export const CraftingRuleSchema = z.object({
 
 export type CraftingRecipe = z.infer<typeof RecipeSchema>;
 export type CraftingRule = z.infer<typeof CraftingRuleSchema>;
+
+/**
+ * 昼夜循环全局规则：作用于 dayNightCycleSystem。
+ *
+ * - `cycleLengthSec`：一个昼夜完整周期（小时 0→24）的时长（秒）
+ * - `nightStartHour` / `nightEndHour`：夜晚区间（缺省 19 / 5，支持跨午夜）
+ *
+ * 相位相位编号（PHASE_DAY/PHASE_NIGHT）与小时推进均游戏无关。
+ */
+export const DayNightRuleSchema = z.object({
+  cycleLengthSec: z.number().positive(),
+  nightStartHour: z.number().min(0).max(24).optional(),
+  nightEndHour: z.number().min(0).max(24).optional(),
+}).passthrough();
+
+export type DayNightRule = z.infer<typeof DayNightRuleSchema>;

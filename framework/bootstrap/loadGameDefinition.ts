@@ -12,6 +12,7 @@ import { SpawnRuleSchema, SpawnRegistrySchema } from "framework/config/schema/Sp
 import { ItemKindSchema, type ItemKindSpec } from "framework/config/schema/ItemKindSchema";
 import { MapRegistrySchema, type GeneratedMapEntryJson, type TiledMapEntryJson } from "framework/config/schema/MapRegistrySchema";
 import { getRuleSchema } from "framework/config/schema/ruleSchemas";
+import { hasSpawnCondition } from "framework/systems/gameplay/spawnConditions";
 import { getRegistries } from "framework/bootstrap";
 import type { MapSource } from "framework/map/types";
 import type { ArchetypeSpec } from "framework/entities/archetypeRegistry";
@@ -189,6 +190,11 @@ function validateIntegrity(data: LoadedGameDefinition): void {
       if (!entityExists) {
         throw new Error(`Entity kind "${spawn.kind}" referenced in spawns is not defined`);
       }
+      if (spawn.condition && !hasSpawnCondition(spawn.condition)) {
+        throw new Error(
+          `Spawn rule for "${spawn.kind}" references unknown condition "${spawn.condition}"`,
+        );
+      }
     }
 
     for (const field of data.netSync?.fields ?? []) {
@@ -215,6 +221,15 @@ function validateIntegrity(data: LoadedGameDefinition): void {
         }
       }
     }
+
+    for (const item of data.resolvedItems) {
+      if (!item.place) continue;
+      const archetypeExists = data.resolvedEntities.some((e) => e.kind === item.place!.archetype) ||
+        archetypeRegistry.has(item.place!.archetype);
+      if (!archetypeExists) {
+        throw new Error(`Item "${item.kind}" places unknown archetype "${item.place!.archetype}"`);
+      }
+    }
   } catch (err) {
     if (err instanceof Error && err.message.includes("not bootstrapped")) {
       return;
@@ -234,6 +249,16 @@ function collectActionNames(node: unknown, names: Set<string>): void {
   const obj = node as Record<string, unknown>;
   if (typeof obj.name === "string" && obj.type === "action") {
     names.add(obj.name);
+  }
+  // mistreevous while/until guard 条件是 `{call}` 形态（无 type 字段），按条件名收集
+  for (const key of ["while", "until"]) {
+    const guard = obj[key];
+    const guards = Array.isArray(guard) ? guard : guard ? [guard] : [];
+    for (const g of guards) {
+      if (g && typeof g === "object" && typeof (g as Record<string, unknown>).call === "string") {
+        names.add((g as Record<string, unknown>).call as string);
+      }
+    }
   }
   if (Array.isArray(obj.children)) {
     for (const child of obj.children) {

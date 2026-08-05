@@ -1,0 +1,34 @@
+{
+  "id": "wolf-night",
+  "definition": {
+    "type": "root",
+    "child": {
+      "type": "selector",
+      "children": [
+        {
+          "type": "sequence",
+          "children": [
+            { "type": "condition", "call": "IsNight" },
+            { "type": "condition", "call": "IsInLight" },
+            { "type": "action", "call": "Sleep" }
+          ]
+        },
+        {
+          "type": "sequence",
+          "children": [
+            { "type": "condition", "call": "IsNight" },
+            { "type": "condition", "call": "IsTargetInVision" },
+            { "type": "action", "call": "Chase", "args": { "speed": 70 } },
+            { "type": "condition", "call": "InAttackRange" },
+            { "type": "action", "call": "Attack" }
+          ]
+        },
+        {
+          "type": "action",
+          "call": "Sleep",
+          "while": { "call": "IsTargetNotInVision" }
+        }
+      ]
+    }
+  }
+}

@@ -11,6 +11,7 @@ import type { EntityId, GameWorld } from "world";
 import { consumeSlot, dropSlot, transferSlot } from "framework/systems/gameplay/inventoryOps";
 import { equipSlot } from "framework/systems/gameplay/equipmentSystem";
 import { craftRecipe } from "framework/systems/gameplay/craftingSystem";
+import { placeEntity } from "framework/systems/gameplay/placeableSystem";
 import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
 
 import type { SimulationPort } from "./SimulationPort";
@@ -266,6 +267,8 @@ export class GameSimulation implements SimulationPort {
         return equipSlot(this.world, eid, command.slot ?? -1);
       case "craft":
         return craftRecipe(this.world, eid, command.recipe ?? "");
+      case "place":
+        return placeEntity(this.world, eid, command.slot ?? -1, command.x ?? 0, command.y ?? 0);
       default:
         return false;
     }
@@ -343,8 +346,9 @@ export class GameSimulation implements SimulationPort {
     const entities = new Map<number, EntitySnapshot>();
 
     // 无同步配置 → 空快照（客户端看不到实体）
-    if (this.netSyncFields.length === 0) return { tick, entities };
-
+    if (this.netSyncFields.length === 0) {
+      return { tick, entities, timeOfDay: { ...this.world.time.timeOfDay } };
+    }
     for (const field of this.netSyncFields) {
       const comp = this.componentRegistry.get(field.component) as
         | Record<string, unknown>
@@ -387,7 +391,11 @@ export class GameSimulation implements SimulationPort {
       }
     }
 
-    return { tick, entities };
+    return {
+      tick,
+      entities,
+      timeOfDay: { ...this.world.time.timeOfDay },
+    };
   }
 
   /**

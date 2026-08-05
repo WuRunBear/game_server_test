@@ -20,6 +20,17 @@ function getChildNodes(obj: Record<string, unknown>): unknown[] {
   return nodes;
 }
 
+/** mistreevous guard 属性（while/until）里的条件名——guard 是 `{call}` 或 `{call}[]` 形态。 */
+function getGuardConditions(obj: Record<string, unknown>): unknown[] {
+  const nodes: unknown[] = [];
+  for (const key of ["while", "until"]) {
+    const guard = obj[key];
+    if (Array.isArray(guard)) nodes.push(...guard);
+    else if (guard && typeof guard === "object") nodes.push(guard);
+  }
+  return nodes;
+}
+
 function collectByType(node: unknown, actions: Set<string>, conditions: Set<string>): void {
   if (typeof node === "string") {
     for (const match of node.matchAll(/action\s*\[([^\]]+)\]/g)) {
@@ -37,6 +48,14 @@ function collectByType(node: unknown, actions: Set<string>, conditions: Set<stri
   if (typeof name === "string") {
     if (type === "action") actions.add(name);
     else if (type === "condition") conditions.add(name);
+  }
+  for (const guard of getGuardConditions(obj)) {
+    // guard 定义是 `{call, args?, succeedOnAbort?}` 形态（无 type 字段）——按条件名收集
+    if (guard && typeof guard === "object" && typeof (guard as Record<string, unknown>).call === "string") {
+      conditions.add((guard as Record<string, unknown>).call as string);
+    } else {
+      collectByType(guard, actions, conditions);
+    }
   }
   for (const child of getChildNodes(obj)) {
     collectByType(child, actions, conditions);

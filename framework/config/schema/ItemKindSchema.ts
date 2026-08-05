@@ -27,22 +27,35 @@ const EquipEffectSchema = z.object({
 });
 
 /**
+ * 放置效果：把物品放置成指定 archetype 实体（玩家 place 命令用）。
+ *
+ * `archetype` 是实体原型 kind 字符串引用（placeableSystem 经原型注册表查找）；
+ * 该 archetype 的 Placeable 组件配置决定占位尺寸与放置校验。
+ */
+const PlaceEffectSchema = z.object({
+  archetype: z.string(),
+});
+
+/**
  * item kind 定义——item 是数据（由 game/items/*.json 声明），不是实体原型。
  *
  * - `kind`：item 种类字符串（全局唯一），被 ResourceNode.yieldsKind / Inventory 槽位引用
  * - `maxStack`：单槽最大堆叠数，缺省 1
  * - `consume`：被 consume 时对持有者 Needs 的恢复效果列表；缺省表示不可食用
  * - `equip`：穿戴效果（槽位 + 加成）；缺省表示不可穿戴
+ * - `place`：可放置声明（目标 archetype）；缺省表示不可放置
  *
- * 字段名与语义保持游戏无关（need/maxStack/amount/slot 皆为通用机制词）。
+ * 字段名与语义保持游戏无关（need/maxStack/amount/slot/archetype 皆为通用机制词）。
  */
 export const ItemKindSchema = z.object({
   kind: z.string(),
   maxStack: z.number().int().positive().optional(),
   consume: z.array(ConsumeEffectSchema).optional(),
   equip: EquipEffectSchema.optional(),
+  place: PlaceEffectSchema.optional(),
 });
 
 export type ConsumeEffect = z.infer<typeof ConsumeEffectSchema>;
 export type EquipEffect = z.infer<typeof EquipEffectSchema>;
+export type PlaceEffect = z.infer<typeof PlaceEffectSchema>;
 export type ItemKindSpec = z.infer<typeof ItemKindSchema>;

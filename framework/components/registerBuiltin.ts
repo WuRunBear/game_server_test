@@ -12,6 +12,8 @@ import { LootTable, initLootTable } from "framework/components/loot";
 import { Perception } from "framework/components/perception";
 import { Equipment } from "framework/components/equipment";
 import { CraftingStation } from "framework/components/craftingStation";
+import { LightSource } from "framework/components/lightSource";
+import { Placeable } from "framework/components/placeable";
 import { Intent } from "framework/components/intent";
 import { NetworkId, LastSynced } from "framework/components/network";
 import { Cooldown, Duration } from "framework/components/timer";
@@ -39,6 +41,8 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("Perception", Perception);
   registry.register("Equipment", Equipment);
   registry.register("CraftingStation", CraftingStation);
+  registry.register("LightSource", LightSource);
+  registry.register("Placeable", Placeable);
   registry.register("Intent", Intent);
   registry.register("NetworkId", NetworkId);
   registry.register("LastSynced", LastSynced);

@@ -36,20 +36,24 @@ export interface PlayerInput {
 }
 
 /**
- * 玩家命令——非逐帧的离散操作（背包原子：食用/丢弃/移动槽/合成/穿戴）。
+ * 玩家命令——非逐帧的离散操作（背包原子：食用/丢弃/移动槽/合成/穿戴/放置）。
  *
  * 与 PlayerInput（脉冲式逐帧移动）区别：命令是即刻执行的服务端权威动作，
  * 不进入 seq 去重 / 帧缓存。type 保持框架通用机制词（consume/drop/transfer/
- * craft/equip），不含游戏语义。
+ * craft/equip/place），不含游戏语义。
  */
 export interface PlayerCommand {
-  type: "consume" | "drop" | "transfer" | "craft" | "equip";
-  /** 目标槽索引（consume/drop/equip 用）；transfer 的源槽。 */
+  type: "consume" | "drop" | "transfer" | "craft" | "equip" | "place";
+  /** 目标槽索引（consume/drop/equip/place 用）；transfer 的源槽。 */
   slot?: number;
   /** transfer 目标槽。 */
   toSlot?: number;
   /** 合成配方 id（craft 用，引用 rules/crafting.json 的 recipes[].id）。 */
   recipe?: string;
+  /** 放置目标坐标（place 用，世界坐标，服务端校验距离/重叠/阻挡）。 */
+  x?: number;
+  /** 放置目标坐标（place 用，世界坐标）。 */
+  y?: number;
 }
 
 /**
@@ -97,6 +101,11 @@ export interface TickSnapshot {
    * - value: 实体快照（数值字段 + 字符串字段）
    */
   entities: Map<number, EntitySnapshot>;
+  /**
+   * world 级昼夜状态（dayNightCycleSystem 推进）。
+   * 传输层可选消费（RoomState 的 hour/phase 字段）；无配置时为 undefined。
+   */
+  timeOfDay?: { hour: number; phase: number };
 }
 
 /**

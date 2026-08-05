@@ -21,5 +21,7 @@ export { LootTable, initLootTable, type LootEntry } from "components/loot";
 export { Perception } from "components/perception";
 export { Equipment } from "components/equipment";
 export { CraftingStation } from "components/craftingStation";
+export { LightSource } from "components/lightSource";
+export { Placeable } from "components/placeable";
 export { Intent } from "components/intent";
 export { Kind } from "components/kind";

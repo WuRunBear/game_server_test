@@ -5,6 +5,7 @@ import { spawnEntity } from "framework/entities/spawn";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { SpawnRule } from "framework/config/schema/GameDefinitionSchema";
+import { hasSpawnCondition, getSpawnCondition } from "framework/systems/gameplay/spawnConditions";
 import { pointInPolygon } from "framework/utils/geometry";
 
 interface SpawnTimer {
@@ -87,6 +88,15 @@ export function spawningSystem(world: GameWorld): GameWorld {
     }
 
     if (now - timer.lastSpawnTime < rule.respawnMs) continue;
+
+    // 条件刷怪（如夜刷狼）：condition 不满足则本计时周期不刷，
+    // 但不重置 timer——满足条件后的下一个计时窗口自动生效
+    if (rule.condition) {
+      if (!hasSpawnCondition(rule.condition)) {
+        throw new Error(`Spawn rule for "${rule.kind}" references unknown condition "${rule.condition}"`);
+      }
+      if (!getSpawnCondition(rule.condition)(world)) continue;
+    }
 
     const currentCount = countInZone(world, rule.kind, rule.zoneId);
     if (currentCount >= rule.max) continue;

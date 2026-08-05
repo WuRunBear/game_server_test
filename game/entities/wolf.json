@@ -1,0 +1,16 @@
+{
+  "kind": "wolf",
+  "tags": ["NPC", "Enemy"],
+  "components": {
+    "Size": { "w": 22, "h": 14 },
+    "Velocity": {},
+    "Collider": { "shape": 1, "halfW": 11, "halfH": 7 },
+    "Health": { "current": 80, "max": 80 },
+    "Attack": { "value": 10, "range": 32 },
+    "Cooldown": {},
+    "Perception": { "visionRadius": 180, "hostilityRange": 100 },
+    "LootTable": [{ "kind": "raw_meat", "qty": 1, "chance": 1.0 }]
+  },
+  "behavior": "wolf-night",
+  "team": 2
+}

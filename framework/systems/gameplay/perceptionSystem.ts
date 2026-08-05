@@ -2,6 +2,7 @@ import { hasComponent, query } from "bitecs";
 import { Perception, Transform, Team, Health, NPC } from "components";
 import { bbSet, BB_PERCEPTION_TARGET, type PerceivedTarget } from "ai/blackboard";
 import { getOrCreateBlackboard } from "framework/systems/gameplay/aiSystem";
+import { isPointInLight } from "framework/utils/light";
 import type { GameWorld } from "world";
 
 /**
@@ -14,6 +15,8 @@ import type { GameWorld } from "world";
  * 可感知判定（通用约定）：
  * - 非本队（Team.id 不同）且非中立（Team.id = 0 视为中立，不构成感知目标）
  * - 必须是活物：有 Health 组件且当前 Health > 0（尸体/重生窗口内的玩家不追猎）
+ * - 不在任一有效光源（LightSource）半径内：光源是"安全区"通用机制，
+ *   光内的实体不可被敌对感知（火光回避的感知侧实现）
  *
  * 游戏无关——只按 Team 分组与半径通用字段，不识别具体阵营语义。
  */
@@ -30,6 +33,8 @@ export function perceptionSystem(world: GameWorld): GameWorld {
         const otherTeam = Team.id[other];
         if (otherTeam === 0 || otherTeam === myTeam) continue;
         if (!hasComponent(world, other, Health) || (Health.current[other] ?? 0) <= 0) continue;
+        // 火光回避：光内目标不可感知
+        if (isPointInLight(world, Transform.x[other], Transform.y[other])) continue;
         const dist = Math.hypot(
           Transform.x[eid] - Transform.x[other],
           Transform.y[eid] - Transform.y[other],

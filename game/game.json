@@ -8,6 +8,7 @@
     "default": "generated-map"
   },
   "systems": [
+    { "id": "dayNight" },
     { "id": "perception" },
     { "id": "ai" },
     { "id": "physics" },
@@ -39,7 +40,9 @@
       { "component": "ItemMeta", "tags": ["Item"], "fields": ["kind", "count"] },
       { "component": "ResourceNode", "tags": ["Resource"], "fields": ["remaining"] },
       { "component": "Equipment", "fields": ["weaponSlot", "toolSlot", "armorSlot"] },
-      { "component": "CraftingStation", "fields": ["stationType"] }
+      { "component": "CraftingStation", "fields": ["stationType"] },
+      { "component": "LightSource", "fields": ["radius", "fuelRemainingMs"] },
+      { "component": "Placeable", "fields": ["footprintW", "footprintH", "canCollide"] }
     ]
   }
 }

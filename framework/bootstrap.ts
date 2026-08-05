@@ -8,6 +8,7 @@ import { registerBuiltinArchetypes } from "framework/entities/registerBuiltinArc
 import { createGeneratorRegistry } from "framework/map/generatorRegistry";
 import { registerBuiltinGenerators } from "framework/map/registerBuiltinGenerators";
 import { registerBuiltinRuleSchemas } from "framework/config/schema/ruleSchemas";
+import { registerBuiltinSpawnConditions } from "framework/systems/gameplay/spawnConditions";
 
 export interface FrameworkRegistries {
   componentRegistry: ReturnType<typeof createComponentRegistry>;
@@ -37,6 +38,7 @@ export function bootstrapFramework(): FrameworkRegistries {
   registerBuiltinGenerators(generatorRegistry);
 
   registerBuiltinRuleSchemas();
+  registerBuiltinSpawnConditions();
 
   registries = { componentRegistry, systemRegistry, actionRegistry, archetypeRegistry, generatorRegistry };
   return registries;

@@ -16,6 +16,7 @@ import { spawningSystem } from "framework/systems/gameplay/spawningSystem";
 import { needDecaySystem } from "framework/systems/gameplay/needDecaySystem";
 import { gatheringSystem } from "framework/systems/gameplay/gatheringSystem";
 import { equipmentSystem } from "framework/systems/gameplay/equipmentSystem";
+import { dayNightCycleSystem } from "framework/systems/gameplay/dayNightCycleSystem";
 
 import { setDefaultActionRegistry } from "framework/ai/btFactory";
 import { registerBuiltinActions } from "framework/ai/registerBuiltinActions";
@@ -67,6 +68,12 @@ export function registerBuiltinSystems(
     id: "spawning",
     factory: (_world: GameWorld) => spawningSystem,
     after: ["combat"],
+  });
+
+  systemRegistry.register({
+    id: "dayNight",
+    factory: (_world: GameWorld) => dayNightCycleSystem,
+    before: ["spawning"],
   });
 
   systemRegistry.register({

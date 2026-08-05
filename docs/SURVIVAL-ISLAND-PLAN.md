@@ -35,7 +35,7 @@
 | **AoS archetype 初始化** | spawn 只认 SoA，AoS 组件声明静默无效 | S1 | `componentRegistry` 加 `registerAosInitializer`，`spawn.ts` 按 `Array.isArray` 分支调钩子写入 `CompAoS[eid]` |
 | **items 加载段** | 无 item kind 概念与目录 | S1 | `GameDefinitionSchema` 加 `items` 键 + `ItemKindSchema` + `loadItemsFile` + `itemsByKind` 索引（`game/items/*.json`） |
 | **netSync** | `组件.标量字段` 清单；AND-query 排除缺组件的实体；线路仅 number | S1 | 三层改造：① OR 语义（逐条目独立查询合并）② AoS 适配器（`registerAosSyncAdapter` 按 tags 限定，展平 numbers/strings）③ `EntityState.stringValues` 字符串线路 |
-| **SpawnSchema** | `{kind,zoneId,max,respawnMs}` | S4 | 加可选 `condition` 字段引用通用 condition 模块（夜刷狼用） |
+| **SpawnSchema** | `{kind,zoneId,max,respawnMs}` | S4 ✅ | 加可选 `condition` 字段引用通用 condition 模块（spawnConditions 注册表，isNight 内建，夜刷狼用） |
 | **RuleSchema** | 仅有 CombatRule（`.passthrough()`） | S1/S3/S4 | 加 `NeedsRuleSchema`（S1 已落地）/`CraftingRuleSchema`/`DayNightRuleSchema`；`ruleSchemas` 注册表已建（S1） |
 | **BT 通用节点** | 已支持 action+condition | S2 | 在 `framework/ai/nodes/` 加通用 condition/action（IsTargetInVision/InAttackRange/Chase/Flee/Attack ✅ S2；IsNight/Sleep 属 S4）注册到 actionRegistry |
 | **Persistence 接口** | stub | S5 | 补 `repository.ts` 实现 |
@@ -252,7 +252,26 @@
 
 ---
 
-## Slice 4 — 世界氛围（"世界活了"）
+## Slice 4 — 世界氛围（"世界活了"）✅ 已完成
+
+> **S4 实施修正（来自落地探查，写回此计划）**：
+> - `TimeOfDay` 按计划挂 `world.time.timeOfDay`（非 bitecs 组件），`{hour, phase}`；
+>   相位用二进制编号（PHASE_DAY=0 / PHASE_NIGHT=1 常量），无需晨昏渐变（无消费方）
+> - **火光回避落地在 perceptionSystem 感知侧**（通用约定：目标处于任一有效
+>   LightSource 半径内 → 不可感知，"光=安全区"机制）。原计划的 wolf BT 条件方案
+>   不可行：mistreevous selector 对 RUNNING 子节点有状态记忆（FAILED 分支在
+>   RUNNING 期间不被重评估），入睡后无法醒、追击中无法改判；guard（每 tick 重求值）
+>   是唯一可靠的切换机制，故同时落地 `IsTargetNotInVision` 条件 + btFactory/
+>   validateIntegrity 支持 mistreevous `while/until` guard 条件收集
+> - `Placeable` 落地为完整放置链路（demo 里程碑真实需求）：组件 + `ItemKindSchema.place`
+>   （物品声明放置成哪个 archetype）+ PlayerCommand `place(x,y)` + placeableSystem 原子
+>   模块（范围/实体重叠/地图阻挡校验零副作用 → 消耗 1 → spawn）
+> - `SpawnSchema.condition` 落地为 spawnConditions 注册表（名 → 条件函数，isNight 内建），
+>   spawningSystem 计时/上限检查后判定；validateIntegrity 校验 condition 已注册
+> - 传输层：TickSnapshot.timeOfDay + RoomState hour/phase（world 级同步，不经 netSync 字段）
+> - **未做（即需即补，记录不修）**：Weather（无消费方）、SeekLight（无行为树引用）、
+>   zone 分区（simple 生成器硬编码单 zone，装饰性；wolf 用整图 zone + isNight 即可）
+> - LightSource.fuelRemainingMs 无消耗系统（静态/放置火堆常亮大值；燃料消耗留待真实需求）
 
 ### 新增框架组件
 
@@ -268,24 +287,28 @@
 | 系统 | 职责 |
 |------|------|
 | `dayNightCycleSystem` | 推进 world.time，phase 切换触发生成规则（夜刷 wolf） |
-| `weatherSystem`（可选） | 影响 Needs 衰减/采集速率 |
+| `weatherSystem`（可选） | 影响 Needs 衰减/采集速率（**未做**：无消费方，记录不修） |
 
 ### 扩展点
 
-- `SpawnSchema` 加 `condition` 字段（引用通用 condition）→ 夜刷狼用
-- 通用 BT：condition `IsNight`，action `Sleep`、`SeekLight`
+- `SpawnSchema` 加 `condition` 字段（引用 spawnConditions 注册表，isNight 内建）→ 夜刷狼用
+- 通用 BT：condition `IsNight`/`IsInLight`/`IsTargetNotInVision`（guard 用），action `Sleep`；
+  btFactory/validateIntegrity 支持 mistreevous `while/until` guard 条件收集
+- **火光回避**：perceptionSystem 感知侧——目标在有效光源半径内不可感知（通用"光=安全区"机制）
 
 ### game/ 配置
 
-- `game/rules/daynight.json`：dayLengthSec=600
+- `game/rules/daynight.json`：`{cycleLengthSec:600, nightStartHour:19, nightEndHour:5}`（计划原 dayLengthSec 更名）
+- `game/rules/place.json`：`{placeRange:64}`
 - `game/entities/wolf.json`：夜间敌对，回避 LightSource
-- `game/behaviors/wolf-night.json`：`seq[cond[IsNight],cond[IsTargetInVision],act[Chase],act[Attack]] else Sleep`
-- `game/entities/campfire.json`：LightSource + CraftingStation(cook)
-- `game/maps/registry.json`：补 zone 划分（采集区/夜行区/出生点）
+- `game/behaviors/wolf-night.json`：`selector[ seq[IsNight,IsInLight,Sleep], seq[IsNight,IsTargetInVision,Chase,InAttackRange,Attack], Sleep(while IsTargetNotInVision) ]`
+- `game/entities/campfire.json`：LightSource{radius:80} + CraftingStation(cook) + Placeable
+- `game/items/campfire_kit.json`：place→campfire + 配方（3 木 + 2 石）
+- `game/maps/registry.json`：zone 划分**未做**（记录不修：simple 生成器硬编码单 zone）
 
 ### 测试点
 
-- 时间快进覆盖夜间刷怪、火光回避
+- 时间快进覆盖夜间刷怪、火光回避（感知侧 + guard 唤醒）、放置校验、timeOfDay 同步
 
 ### demo 里程碑
 

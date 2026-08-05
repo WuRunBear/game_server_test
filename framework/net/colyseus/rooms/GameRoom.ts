@@ -41,10 +41,13 @@ function isPlayerCommand(message: unknown): message is PlayerCommand {
       obj.type === "drop" ||
       obj.type === "transfer" ||
       obj.type === "craft" ||
-      obj.type === "equip") &&
+      obj.type === "equip" ||
+      obj.type === "place") &&
     (obj.slot === undefined || typeof obj.slot === "number") &&
     (obj.toSlot === undefined || typeof obj.toSlot === "number") &&
-    (obj.recipe === undefined || typeof obj.recipe === "string")
+    (obj.recipe === undefined || typeof obj.recipe === "string") &&
+    (obj.x === undefined || typeof obj.x === "number") &&
+    (obj.y === undefined || typeof obj.y === "number")
   );
 }
 
@@ -260,6 +263,10 @@ export class GameRoom extends Room<{ state: RoomState }> {
    */
   private applySnapshot(snapshot: TickSnapshot): void {
     this.state.tick = snapshot.tick;
+    if (snapshot.timeOfDay) {
+      this.state.hour = snapshot.timeOfDay.hour;
+      this.state.phase = snapshot.timeOfDay.phase;
+    }
 
     // alive 集合记录快照中出现的所有实体 networkId
     const alive = new Set<number>();

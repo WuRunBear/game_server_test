@@ -3,6 +3,7 @@ import {
   CombatRuleSchema,
   NeedsRuleSchema,
   CraftingRuleSchema,
+  DayNightRuleSchema,
 } from "framework/config/schema/RuleSchema";
 
 /**
@@ -34,4 +35,5 @@ export function registerBuiltinRuleSchemas(): void {
   registerRuleSchema("combat", CombatRuleSchema);
   registerRuleSchema("needs", NeedsRuleSchema);
   registerRuleSchema("crafting", CraftingRuleSchema);
+  registerRuleSchema("daynight", DayNightRuleSchema);
 }

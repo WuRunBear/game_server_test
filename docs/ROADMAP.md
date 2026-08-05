@@ -1,8 +1,8 @@
 # 通用 2D 游戏框架系统路线图
 
 > 目标：将当前框架演进为通用 2D 游戏框架。
-> Phase 0（切片前止血）已完成 5 个框架级缺陷修复；Slice 1（生存循环）、Slice 2（战斗闭环）与 Slice 3（合成与装备）已完成。
-> 现状：8 个内置核心系统 + Slice 1 新增 2 个生存系统（needDecay / gathering）+ Slice 2 新增 3 个系统（perception / death / respawn）+ Slice 3 新增 1 个系统（equipment），共 14 个内置系统；crafting 为命令驱动的原子模块（无 tick 体，inventoryOps 先例）。
+> Phase 0（切片前止血）已完成 5 个框架级缺陷修复；Slice 1（生存循环）、Slice 2（战斗闭环）、Slice 3（合成与装备）与 Slice 4（世界氛围）已完成。
+> 现状：8 个内置核心系统 + Slice 1 新增 2 个生存系统（needDecay / gathering）+ Slice 2 新增 3 个系统（perception / death / respawn）+ Slice 3 新增 1 个系统（equipment）+ Slice 4 新增 1 个系统（dayNight），共 15 个内置系统；crafting / placeable 为命令驱动的原子模块（无 tick 体，inventoryOps 先例）。
 > 详见下文「已有系统状态」。
 
 ## 一、核心仿真
@@ -91,10 +91,14 @@
 - inventory（Slice 1：堆叠拾取 + 服务端原子 transfer/drop/consume + pickupAfterMs 防瞬回）
 - equipment（Slice 3：equipSlot 穿戴原子 + getEquipModifiers 加成读取（on-read，组件值不变）+ tick 体槽位引用卫生；加成经 ItemKindSchema.equip 声明）
 - crafting（Slice 3：craftRecipe 原子模块，PlayerCommand `craft` 驱动；站类型/距离校验、缺料/满包拒零副作用、dry-run 防满包丢产出；recipes 经 CraftingRuleSchema 校验 + validateIntegrity 引用检查）
+- dayNight（Slice 4：dayNightCycleSystem 推进 world.time.timeOfDay（hour/phase 二进制）；DayNightRuleSchema 校验；RoomState hour/phase 同步）
+- spawning condition（Slice 4：SpawnRuleJson 可选 `condition` 字段 → spawnConditions 注册表（isNight 内建）；condition 不满足不刷但不重置计时器；validateIntegrity 校验）
+- placeable（Slice 4：placeEntity 原子模块，PlayerCommand `place` 驱动；ItemKindSchema.place 声明目标 archetype；距离（rules/place.json）/实体重叠/地图阻挡校验零副作用 → 消耗 1 → spawn）
+- 光源机制（Slice 4）：LightSource（radius/fuelRemainingMs，≤0 熄灭）+ Placeable（footprintW/H/canCollide）；火光回避 = 感知侧通用约定（目标在有效光源半径内不可感知）
 - AoS 组件家族（Inventory / Kind / Needs / ResourceNode / ItemMeta / Intent / LootTable）+ spawn AoS 初始化钩子（Inventory/Needs/ResourceNode/LootTable 注册了钩子；ItemMeta/Intent/Kind 由运行时写入）
-- SoA 组件补充（Slice 3）：Equipment（weapon/tool/armor 三槽引用 inventory 槽 idx，-1=空）、CraftingStation（stationType: ui32，0=通用手搓）
-- BT 通用节点（Slice 2）：conditions IsTargetInVision/InAttackRange + actions Chase/Flee/Attack（ActionFactory 放宽为 `State | boolean`）
-- items 加载段（game/items/*.json + ItemKindSchema，Slice 3 加 equip 穿戴效果）+ 通用规则 schema 注册表（combat/needs/crafting）
+- SoA 组件补充（Slice 3/4）：Equipment（weapon/tool/armor 三槽引用 inventory 槽 idx，-1=空）、CraftingStation（stationType: ui32，0=通用手搓）、LightSource、Placeable
+- BT 通用节点（Slice 2/4）：conditions IsTargetInVision/IsTargetNotInVision/InAttackRange/IsNight/IsInLight + actions Chase/Flee/Attack/Sleep（ActionFactory 放宽为 `State | boolean`；btFactory/validateIntegrity 支持 mistreevous while/until guard 条件收集）
+- items 加载段（game/items/*.json + ItemKindSchema，Slice 3 加 equip 穿戴效果，Slice 4 加 place 放置声明）+ 通用规则 schema 注册表（combat/needs/crafting/daynight）
 - sync：netSync OR 语义 + AoS 适配器（numbers/strings 分流，修旧 AND-query 缺陷）
 - logger
 
@@ -112,6 +116,8 @@
 > **Slice 2（战斗闭环）已完成**：boar 感知→追击→攻击，玩家 attack 意图近战反击，击杀掉肉，玩家死亡自动重生。验收 `pnpm test`（102 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空。下一切片为 Slice 3 合成与装备。
 >
 > **Slice 3（合成与装备）已完成**：采集石头/木头 → 合成工具（gatherMult×2）/武器（attackBonus）→ 装备生效；cooked_meat 需火堆站点；缺料/满包/站点校验零副作用。验收 `pnpm test`（126 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空。下一切片为 Slice 4 世界氛围。
+>
+> **Slice 4（世界氛围）已完成**：昼夜循环（dayNightCycleSystem + world.time.timeOfDay 同步到 RoomState）；夜间条件刷怪（SpawnSchema.condition + isNight）；火光回避（感知侧：光内目标不可感知 + 光内入睡 BT）；玩家放置火堆（campfire_kit → place 命令 → Placeable/campfire 实体 + 站点合成）。验收 `pnpm test`（155 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空（blackboard 技术词除外）。下一切片为 Slice 5 联机完整度。
 
 **切片内待补全（非框架缺陷）**：
 - （已补全）inventorySystem：堆叠/丢弃/使用已落地（Slice 1）

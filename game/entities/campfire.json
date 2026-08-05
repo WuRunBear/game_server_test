@@ -3,6 +3,8 @@
   "components": {
     "Size": { "w": 24, "h": 24 },
     "Collider": { "shape": 1, "halfW": 12, "halfH": 12 },
-    "CraftingStation": { "stationType": 1 }
+    "CraftingStation": { "stationType": 1 },
+    "LightSource": { "radius": 80, "fuelRemainingMs": 1000000000 },
+    "Placeable": { "footprintW": 24, "footprintH": 24, "canCollide": 1 }
   }
 }

@@ -49,6 +49,8 @@ export interface SpawnRule {
   zoneId: number;
   max: number;
   respawnMs: number;
+  /** 可选刷怪条件（引用 spawnConditions 注册表，如 "isNight"）。 */
+  condition?: string;
 }
 
 export interface BehaviorDefinition {

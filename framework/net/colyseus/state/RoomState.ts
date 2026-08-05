@@ -19,6 +19,18 @@ export class RoomState extends Schema {
   tick: number = 0;
 
   /**
+   * world 级昼夜小时（0-24，来自仿真快照的 timeOfDay.hour）。
+   */
+  @type("float64")
+  hour: number = 8;
+
+  /**
+   * world 级昼夜相位（0=白天，1=夜晚，来自仿真快照的 timeOfDay.phase）。
+   */
+  @type("uint8")
+  phase: number = 0;
+
+  /**
    * 房间内玩家列表（key=sessionId）。
    */
   @type({ map: PlayerState })
