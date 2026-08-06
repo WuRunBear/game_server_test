@@ -16,6 +16,12 @@
 | **Inventory 模型** | slot 存 `{itemId, count}` + 容量走 archetype 配置 + 独立 `Equipment` 组件（weapon/tool/armor 三槽引用 inventory 槽） | 够支撑堆叠/容量/穿戴，不造格子拖拽引擎。客户端拖拽自便（**S1 落地**：slot `{kind,count}`，capacity 进 archetype，经 AoS 钩子初始化） |
 | **服务端操作原子** | `equip/transfer/drop/consume/use` 作为 Inventory/Equipment 系统的对外接口 | 客户端 UI 调这些 RPC，服务端权威做数据变更与校验 |
 
+> **后续对账注记（追加补充，不覆盖原文）**：`use` 原子**未落地**——按"即需即补"
+> 无真实需求静默裁剪（equip 有 S3 明确记录推迟，use 遗漏了记录）。截至 S7，
+> 实际命令原子为：consume / drop / transfer / craft(S3) / equip(S3) / place(S4) /
+> deconstruct(S6) / dialogue(S7)。若未来出现"使用物品触发世界效果"（如点火、
+> 开门）再补 use。
+
 ## 总原则（来自 AGENTS.md §AI 协作铁律，强制）
 
 1. **铁律**：游戏逻辑永远不写进 `framework/`。每特性按序决策：① 先尝试纯 `game/*.json` 表达 → ② 缺能力在 `framework/` 加通用机制（类型名/参数游戏无关）→ ③ 扩展点表达不了时**先修扩展点**再写特性。
@@ -39,6 +45,16 @@
 | **RuleSchema** | 仅有 CombatRule（`.passthrough()`） | S1/S3/S4 | 加 `NeedsRuleSchema`（S1 已落地）/`CraftingRuleSchema`/`DayNightRuleSchema`；`ruleSchemas` 注册表已建（S1） |
 | **BT 通用节点** | 已支持 action+condition | S2 | 在 `framework/ai/nodes/` 加通用 condition/action（IsTargetInVision/InAttackRange/Chase/Flee/Attack ✅ S2；IsNight/Sleep 属 S4）注册到 actionRegistry |
 | **Persistence 接口** | stub | S5 | 补 `repository.ts` 实现 |
+
+> **后续对账注记（追加补充，不覆盖原文）**：本表「现状」列为**写计划时的快照**，
+> 修法侧的 ✅ 标记回填不完整。截至 S7 完成，表内 8 项扩展点**全部落地**：
+> - Inventory 数据模型 / AoS archetype 初始化 / items 加载段 / netSync 三层改造 —— S1 完成
+> - SpawnSchema.condition（spawnConditions 注册表 + isNight 内建）—— S4 完成（行内已标 ✅）
+> - RuleSchema 族 —— **5 个注册 schema 已落地**：combat / needs / crafting / daynight /
+>   server（ruleSchemas 注册表，S1 建表）；place 规则经 raw 透传
+> - BT 通用节点 —— S2（IsTargetInVision/InAttackRange/Chase/Flee/Attack）+ S4
+>   （IsNight/IsInLight/Sleep）完成
+> - Persistence 接口 —— S5 完成（Repository/WorldRecord + createFileRepository 真实现）
 
 ---
 
@@ -361,6 +377,12 @@
 | `interestManagementSystem` | 仅同步玩家视野内实体 |
 | `antiCheatSystem` | 输入校验：速度上限、动作频率上限 |
 
+> **后续对账注记（追加补充，不覆盖原文）**：上表三系统按计划形态书写，**落地形态
+> 均为 GameSimulation 层能力而非 ECS tick 系统**（AGENTS 硬边界禁止"系统里做异步
+> I/O"、输入校验须在入口）：定时存档=GameSimulation.maybeAutosave（tick 末尾）、
+> 兴趣管理=computeInterest + GameRoom 双路径、输入校验=inputValidation 模块
+> （submitInput/submitCommand 前置拦截）。详见本节实施修正。
+
 ### 扩展点
 
 - `repository.ts` / `postgres.ts` / `redis.ts`：补真实现
@@ -409,6 +431,21 @@
 >   per-player 分图状态不在本切片范围（记录不修）
 > - **记录不修**：门为静态阻挡（可开关门需交互切换碰撞机制，无真实需求）；拆除不返还材料
 >
+> **S6 审查 P2 记录不修（追加补充，写回此计划）**——审查报告其余 P2 项（本轮未修，
+> 随文档对账补充记录）：
+> - P2-1：slice5 测试 `fileRepository` 并发写偶发失败（mkdir 微任务序竞态，非 S6 引入，
+>   修 fileRepository 的 mkdir 幂等或测试等待）
+> - P2-2：enterMap 保留物（玩家建筑/掉落）不检查新图边界——cave 32×32 下可能落图外
+>   成虚空实体，切图后钳制玩家内容坐标到图内
+> - P2-3：floor/furniture 与 wall 不可同格叠放（GridOccupancy 全局互斥）——"地板承托墙"
+>   需层概念，当前无文档记录取舍
+> - P2-4：portal/portal_back 由刷怪规则随机点生成——位置不稳定且可能刷进阻挡格，
+>   需地图固定位置机制
+> - P2-5：campfire 被动纳入 gridSnap（24px 占位对齐 2×2 格=32px）——全局开关连带结果，
+>   行为一致可接受
+> - P2-6：`Placeable.ownerNetworkId` 未进 netSync——客户端无法显示"自己的墙"，
+>   deconstruct 权限仅服务端判定（客户端 UI 未牵引）
+>
 > **S6 审查修复（第一轮，写回此计划）**：
 > - **portal 触发死锁（P0，审查发现）**：portal 原型带阻挡 Collider → 玩家每 tick 被
 >   collisionSystem（SAT 分离）推到恰接触距离（= Size 半宽和）→ 触发判定用严格 `<` 时
@@ -421,6 +458,9 @@
 >   aiSystem 黑名单；改为只删地图相关缓存（collision/spawning），死亡/ai 缓存保留
 > - **读档地图无效告警（P2）**：存档 mapId 不存在（配置删图）时 logger.warn 而非静默
 > - 测试补 2 例（完整 tick 链触发、缓存选择性重建），**187 全绿**
+> - **对账注记（追加补充，不覆盖原文）**：本节上方实施修正正文中
+>   `world.systemRuntimes.clear()` 为**修复前实现**（当时按全量清空落地）；
+>   选择性重建（只删 collision/spawning）以本节 P1 修复描述为准。
 
 - 框架：`buildingSystem`（`placeEntity` 扩展——网格对齐/格组占用/所有权）、`deconstructSystem`
   （拆除原子）、`portalSystem`（场景切换 tick）、`switchMap`（setWorldMap/enterMap）、
@@ -480,6 +520,22 @@
   dialogues/quests 段 + netSync 4 条）
 - demo 里程碑：按新交互键与 villager 对话 → 接任务 → 收集/猎杀 → 提交 → 奖励与好感；
   任务/好感入档（重启不丢），对话会话瞬态（重连重开）
+
+### 后续候选（按需开启，追加补充）
+
+> 核心七切片（S1-S7）全部完成后的候选方向聚合，按真实需求取舍（即需即补，
+> 不在当前 demo 执行范围内）。来源：S6/S7 记录不修项 + ROADMAP 缺口 + 既有潜伏项。
+
+| 候选 | 内容 | 出处 |
+|------|------|------|
+| 成就/等级/阵营 | achievementSystem / progressionSystem / factionSystem（事件总线已就绪，killed 事件可驱动统计） | S7 记录不修 |
+| 对话好感解锁条件 | 对话选项按 Relation 值解锁 | S7 记录不修 |
+| NPC 寻路 | Pathfinding（A* 网格绕障），当前 Wander/Chase 直行 | ROADMAP 缺口 |
+| 可开关门 / 天气 / 燃料消耗 | door 交互切换碰撞 / weatherSystem / LightSource.fuelRemainingMs 消耗系统 | S4/S6 记录不修 |
+| 保留物越界钳制 / 同格叠放层 | enterMap 后玩家内容坐标钳制到图内；"地板承托墙"层概念 | S6 审查 P2-2/P2-3 |
+| portal 固定位置 / slice5 flaky 测试 | portal 刷怪随机点改地图固定位置；fileRepository mkdir 竞态 | S6 审查 P2-4/P2-1 |
+| use 原子 / ownerNetworkId 同步 | "使用物品触发世界效果"命令；客户端显示自己放置物 | 选型表对账 / S6 审查 P2-6 |
+| LagComp | 延迟补偿与客户端预测回滚 | ROADMAP 缺口 |
 
 ---
 

@@ -8,6 +8,7 @@
 - **当前分支**：`slice-7-social`（基于 `e0d2b50`），**工作区有 S7 全部改动未提交**（按协作流程交付停在未提交状态；含 S6 收尾的 HANDOFF 小更新）
 - **历史提交**（slice-1~6，未推送，供你了解历史，不要动）：`de84e65` / `bc65473` / `e190ea5` / `c2bc223` / `2b80722` / `e67bb46` / `fbf724e` / `e48820e`（slice-1~5）+ `e0d2b50` feat(slice-6)（49 文件）
 - **S7 未提交改动范围**（git status 可见）：framework 事件总线/组件/系统/协议/持久化/加载 + slice7.test.ts + game/*.json（dialogues/quests/villager/game.json）+ 文档四件（PLAN/ROADMAP/HANDOFF/README）
+- **最新状态（提交后追加更新）**：S7 已提交——`a01e0bd` feat(slice-7)（34 文件）+ `81d11a1` fix(slice-7) 审查修复（9 文件），**HEAD = `81d11a1`，工作区干净**（上方"未提交"描述为提交前快照，保留备查）
 
 ## 2. 工作树环境与分支创建（新 AI 必读，否则报错）
 > 本仓库用 **opencode worktree** 开发：主仓库在 `~/data/code/game/game_server_test`，
@@ -19,6 +20,8 @@
 
 **开始新切片时的分支创建**（在**当前 worktree 目录内**执行，基于当前 HEAD）：
 > 注意：当前工作区有未提交改动——先与用户确认（提交 S7 或另存）再切分支，勿直接 checkout。
+> **最新状态（提交后追加更新）**：S7 已提交（`a01e0bd` + `81d11a1`），工作区已干净，
+> 可直接 `git checkout -b` 新分支。
 
 ```bash
 pwd                              # 确认在 ~/.local/share/opencode/worktree/*/ 下
@@ -54,6 +57,10 @@ git branch --show-current        # 确认已是新分支
 | `AGENTS.md` | 铁律 + AoS 陷阱 + S5 陷阱（持久化/联机）+ SAVE_DIR env；S6/S7 陷阱记在 HANDOFF §7（AGENTS 不膨胀） |
 | `docs/SURVIVAL-ISLAND-PLAN.md` | S1-S7 全 ✅；S7 含实施修正（范围取舍/任务双形态/事件总线/talk 交互键/AoS 组件/效果驱动/提交结算） |
 | `docs/ROADMAP.md` | 17 系统覆盖表 + S7 完成声明（**验收 198**）；缺口：faction/achievement/progression 记录不修、LagComp 未做 |
+
+> **对账注记（追加补充，不覆盖原文）**：上表 ROADMAP 行验收数为撰写时快照——
+> ROADMAP 实际已更新为 **199**（审查修复后）；PLAN 已补 S6 审查 P2 记录不修六项
+> 与「后续候选」聚合章节，见 §8 与 PLAN 末尾。
 | `README.md` | 目录结构（dialogues/quests 段、events/、AoS 四组件）+ 对话与任务章节 + 组件 39 / 系统 17 已同步 |
 
 ## 5. Slice 7 交付内容（代码现状）
@@ -91,6 +98,7 @@ git branch --show-current        # 确认已是新分支
 
 ## 8. 已知待办（未修，不要擅自处理）
 - **待办已清零**（本切片无遗留缺陷）；记录不修：factionSystem / achievementSystem / progressionSystem（无真实需求牵引）、对话选项好感解锁条件（无消费方）、postgres/redis 真实现（等真实部署需求）、`schema:gen` 空文件（工具链问题）、LagComp（ROADMAP 缺口）
+- **S6 审查 P2 记录不修（追加补充，与 PLAN 对账对齐）**：slice5 fileRepository 并发写 flaky（mkdir 微任务竞态）、enterMap 保留物越界（cave 小图虚空实体）、floor/furniture 与 wall 同格叠放被拒（无层概念）、portal 刷怪随机点位置不稳、campfire 被动 gridSnap（24px→2×2 格）、Placeable.ownerNetworkId 未进 netSync——详见 PLAN「S6 审查 P2 记录不修」与「后续候选」表
 - 基线三命令：`pnpm test`（199 全绿）+ `npx tsc --noEmit`（0）+ `pnpm tools validate`（✓）+ framework 游戏词 grep 空（blackboard 技术词豁免，rg 未安装时用 grep 工具核对）
 
 ## 9. 下一步：Slice 8+（按需开启）

@@ -120,6 +120,10 @@
 2. **网络服务端** — Persistence / InterestMgmt / AntiCheat 已落地 S5；LagComp 未做
 3. **社交进度** — Relationship、Dialogue、Quest、Achievement、Progression
 
+> **对账注记（追加补充，不覆盖原文）**：第 3 类为撰写时快照——S7 已完成
+> **Dialogue（对话树）/ Quest（collect+kill 双形态）/ Relation（好感）**；
+> 剩余缺口为 **Achievement / Progression / Faction**（见 PLAN「后续候选」表）。
+
 ### 🔧 已有系统状态
 
 > Phase 0（切片前止血）已完成 5 个框架级缺陷修复：combat 射程判定、spawning 按 kind/多边形过滤、inventory 满包吞物品、systemRegistry before 语义、btFactory condition 收集。
