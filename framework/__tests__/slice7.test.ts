@@ -123,6 +123,13 @@ function setupDialogueWorld(world: GameWorld): void {
           { label: "thanks", effect: { type: "relation_delta", npcKind: "npc1", delta: 5 }, to: "__end__" },
         ],
       },
+      n2: {
+        text: "node2",
+        options: [
+          // 无效跳转目标：效果不应执行、会话不应关闭（配置笔误防御）
+          { label: "bad-to", effect: { type: "relation_delta", npcKind: "npc1", delta: 9 }, to: "nope" },
+        ],
+      },
     },
   };
   world.gameDef.resolvedDialogues = [tree];
@@ -210,7 +217,7 @@ describe("Slice 7：dialogueSystem", () => {
     expect(startDialogue(world, player, npc)).toBe(false);
   });
 
-  it("advanceDialogue：普通跳转 / __end__ 结束 / 无效选项拒 / 效果失败停留", () => {
+  it("advanceDialogue：普通跳转 / __end__ 结束 / 无效选项拒 / 效果失败停留 / 无效 to 停留", () => {
     const world = createBareWorld();
     setupDialogueWorld(world);
     const player = spawnTestPlayer(world, { x: 0, y: 0 });
@@ -228,6 +235,13 @@ describe("Slice 7：dialogueSystem", () => {
     // 效果失败停留：未接任务直接提交 → quest_submit 失败 → 停留 n1
     expect(advanceDialogue(world, player, 1)).toBe(false);
     expect(Dialogue[player]!.nodeId).toBe("n1");
+
+    // 无效跳转目标：效果不执行、会话不关闭、停留原节点
+    Dialogue[player]!.nodeId = "n2";
+    Dialogue[player]!.options = ["bad-to"];
+    expect(advanceDialogue(world, player, 0)).toBe(false);
+    expect(Dialogue[player]!.nodeId).toBe("n2");
+    expect(getRelation(world, player, "npc1")).toBe(0);
 
     // 无效果选项结束对话
     Dialogue[player]!.nodeId = "start";
@@ -375,6 +389,10 @@ describe("Slice 7：持久化（Quest/Relation 入档，Dialogue 不入档）", 
     expect(Relation[restored]).toEqual([{ npcKind: "npc1", value: 7 }]);
     expect(Dialogue[restored]).toBeUndefined();
   });
+  it("validateIntegrity：对话选项 to 引用不存在节点抛错（配置笔误拦截）", () => {
+    expect(() => loadGameDefinition({ gameJsonPath: "tests/shim/invalid-dialogue.json" }))
+      .toThrow(/references unknown node/);
+  });
 });
 
 describe("Slice 7：真实 game 配置集成（对话任务线全链路）", () => {
@@ -389,9 +407,13 @@ describe("Slice 7：真实 game 配置集成（对话任务线全链路）", () 
     Transform.x[playerEid] = 544;
     Transform.y[playerEid] = 512;
 
-    // talk 意图 → 打开 villager 对话（起始节点）
+    // talk 意图 → 打开 villager 对话（起始节点）；快照同步 Dialogue 展平字段
     sim.submitInput("s1", { seq: 1, moveX: 0, moveY: 0, talk: true });
-    sim.tick(50);
+    const talkResult = sim.tick(50);
+    const talkSnap = talkResult.snapshot.entities.get(NetworkId.value[playerEid]);
+    expect(talkSnap?.strings["Dialogue.treeId"]).toBe("villager-main");
+    expect(talkSnap?.strings["Dialogue.nodeId"]).toBe("start");
+    expect(talkSnap?.strings["Dialogue.0.option"]).toBe("你好，我想帮忙。");
     const dlg = Dialogue[playerEid]!;
     expect(dlg.treeId).toBe("villager-main");
     expect(dlg.nodeId).toBe("start");
@@ -401,6 +423,12 @@ describe("Slice 7：真实 game 配置集成（对话任务线全链路）", () 
     expect(Dialogue[playerEid]!.nodeId).toBe("tasks");
     expect(sim.submitCommand("s1", { type: "dialogue", option: 0 })).toBe(true);
     expect(Quest[playerEid]).toEqual([{ questId: "collect_axe", state: QUEST_ACTIVE, count: 0 }]);
+
+    // 接任务后快照同步 Quest 展平字段
+    const questResult = sim.tick(50);
+    const questSnap = questResult.snapshot.entities.get(NetworkId.value[playerEid]);
+    expect(questSnap?.strings["Quest.0.questId"]).toBe("collect_axe");
+    expect(questSnap?.values["Quest.0.state"]).toBe(QUEST_ACTIVE);
 
     // 玩家背包放入任务物品 → 下一 tick questSystem 推进 READY
     Inventory[playerEid]!.slots[0] = { kind: "axe", count: 1 };

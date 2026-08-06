@@ -1,0 +1,6 @@
+{
+  "id": "shim-invalid-dialogue",
+  "tickRate": 20,
+  "dialogues": "./invalid-dialogues.json",
+  "quests": "./invalid-quests.json"
+}

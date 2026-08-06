@@ -1,0 +1,14 @@
+{
+  "trees": [
+    {
+      "id": "bad-tree",
+      "start": "start",
+      "nodes": {
+        "start": {
+          "text": "hi",
+          "options": [{ "label": "bad", "to": "nope" }]
+        }
+      }
+    }
+  ]
+}

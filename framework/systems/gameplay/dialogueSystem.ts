@@ -16,7 +16,7 @@ import { Dialogue, DialogueSource, Kind, NetworkId, Transform, Player, Health } 
 import type { EntityId, GameWorld } from "world";
 import { acceptQuest, submitQuest } from "framework/systems/gameplay/questSystem";
 import { addRelation } from "framework/systems/gameplay/relation";
-import type { DialogueTreeJson, DialogueEffectJson } from "framework/config/schema/DialogueSchema";
+import type { DialogueTreeJson, DialogueNodeJson, DialogueEffectJson } from "framework/config/schema/DialogueSchema";
 
 /** 对话结束标记：to 为缺省或该值时结束对话。 */
 export const END_DIALOGUE = "__end__";
@@ -93,8 +93,9 @@ export function applyDialogueEffect(
 /**
  * 推进对话：玩家选择当前节点第 optionIndex 个选项。
  *
- * 流程：取当前节点与选项 → 执行选项效果（失败则停留）→ 跳转目标节点
- * （缺省/__end__ = 结束对话）并刷新选项文本。
+ * 流程：取当前节点与选项 → **先解析跳转目标**（无效 to 直接停留，效果不执行、
+ * 会话不关闭——防"效果已生效却对话被关"的不一致）→ 执行选项效果（失败停留）
+ * → 跳转目标节点（缺省/__end__ = 结束对话）并刷新选项文本。
  *
  * @returns 是否推进成功
  */
@@ -108,6 +109,17 @@ export function advanceDialogue(world: GameWorld, playerEid: EntityId, optionInd
   const option = node?.options[optionIndex];
   if (!node || !option) return false;
 
+  // 先解析跳转目标：无效 to 停留（配置笔误防御，validateIntegrity 已前置校验）
+  const to = option.to;
+  let ends = false;
+  let nextNode: DialogueNodeJson | undefined;
+  if (!to || to === END_DIALOGUE) {
+    ends = true;
+  } else {
+    nextNode = tree.nodes[to];
+    if (!nextNode) return false;
+  }
+
   // 效果失败不推进（停留在当前节点，可重试）
   if (option.effect) {
     const npcEid = findNpcByNetworkId(world, dlg.npcId);
@@ -115,20 +127,13 @@ export function advanceDialogue(world: GameWorld, playerEid: EntityId, optionInd
     if (!applyDialogueEffect(world, playerEid, npcEid, option.effect)) return false;
   }
 
-  const to = option.to;
-  if (!to || to === END_DIALOGUE) {
+  if (ends) {
     Dialogue[playerEid] = undefined;
     return true;
   }
 
-  const nextNode = tree.nodes[to];
-  if (!nextNode) {
-    Dialogue[playerEid] = undefined;
-    return false;
-  }
-
-  dlg.nodeId = to;
-  dlg.options = nextNode.options.map((o) => o.label);
+  dlg.nodeId = to!;
+  dlg.options = nextNode!.options.map((o) => o.label);
   return true;
 }
 

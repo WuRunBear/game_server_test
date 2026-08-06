@@ -299,14 +299,24 @@ function validateIntegrity(data: LoadedGameDefinition): void {
     }
     const questIds = new Set(data.resolvedQuests.map((q) => q.id));
     for (const tree of data.resolvedDialogues) {
-      for (const node of Object.values(tree.nodes)) {
+      if (!tree.nodes[tree.start]) {
+        throw new Error(`Dialogue tree "${tree.id}" start node "${tree.start}" not found`);
+      }
+      for (const [nodeId, node] of Object.entries(tree.nodes)) {
         for (const option of node.options) {
+          // 跳转目标引用校验：缺省/__end__（结束标记，dialogueSystem.END_DIALOGUE）或必须指向树内节点
+          const to = option.to;
+          if (to && to !== "__end__" && !tree.nodes[to]) {
+            throw new Error(
+              `Dialogue "${tree.id}" node "${nodeId}" option "${option.label}" references unknown node "${to}"`,
+            );
+          }
           const effect = option.effect;
           if (!effect) continue;
           const questEffect = effect.type === "quest_accept" || effect.type === "quest_submit";
           if (questEffect && !questIds.has(effect.questId)) {
             throw new Error(
-              `Dialogue "${tree.id}" node "${node.text}" effect references unknown quest "${effect.questId}"`,
+              `Dialogue "${tree.id}" node "${nodeId}" option "${option.label}" effect references unknown quest "${effect.questId}"`,
             );
           }
         }

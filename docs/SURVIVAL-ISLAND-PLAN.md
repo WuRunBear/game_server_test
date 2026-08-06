@@ -460,6 +460,15 @@
 >   效果失败停留可重试
 > - **记录不修**：faction/achievement/progression 系统（无真实需求牵引）、
 >   对话选项好感解锁条件（无消费方）
+>
+> **S7 审查修复（第一轮，写回此计划）**：
+> - **对话选项 `to` 引用校验 + 运行时一致性（P2，审查发现）**：配置笔误（to 指向
+>   不存在节点）静默通过校验，且运行时行为不一致——效果已执行却结束对话并返回
+>   false。修复：validateIntegrity 校验每个 option 的 to（缺省/`__end__`/树内节点，
+>   含 start 节点存在性）+ advanceDialogue **先解析跳转目标再执行效果**（无效 to
+>   停留、效果不执行、会话不关闭）；补 shim 校验测试
+> - **AoS 适配器快照断言补强（P2-4）**：真实配置用例补 TickSnapshot 展平 key 断言
+>   （Dialogue.treeId/nodeId/options 与 Quest.questId/state），199 全绿
 
 - 框架：`dialogueSystem`（startDialogue/advanceDialogue + 效果执行）、`questSystem`
   （accept/submit + tick 进度）、`relation` 原子（addRelation/getRelation）、

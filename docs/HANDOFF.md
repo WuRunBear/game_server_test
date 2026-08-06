@@ -65,7 +65,8 @@ git branch --show-current        # 确认已是新分支
 - **协议**：PlayerInput 加 `talk`（GameRoom isPlayerInput 校验）→ applyInputs 写 Intent "talk" → interactionSystem talk 路由最近 [NPC]（range 内）→ startDialogue；PlayerCommand 加 `dialogue` + `option`（GameRoom 白名单）
 - **netSync**：AoS 适配器 4 个（Dialogue 展平 npcId/treeId/nodeId/options.索引、DialogueSource treeId、Quest questId/state/count、Relation npcKind/value）；game.json 加 4 条
 - **game/**：game/dialogues/villager.json（start → tasks 节点：接/交两任务 + 离开）、game/quests/quests.json（collect_axe：交 axe×1 → spear×1+好感10 / hunt_task：击杀 wolf×2 → cooked_meat×1+好感15）、villager 挂 DialogueSource
-- **测试**：`slice7.test.ts` +11 用例（事件总线、killed 事件、start/advance 全路径、效果三型、accept/collect/kill 进度、submit 结算零副作用、talk 路由、Quest/Relation 入档 + Dialogue 跳过、真实配置任务线全链路），**198 全绿**
+- **测试**：`slice7.test.ts` +12 用例（事件总线、killed 事件、start/advance 全路径、效果三型、accept/collect/kill 进度、submit 结算零副作用、talk 路由、Quest/Relation 入档 + Dialogue 跳过、坏 to 校验抛错、真实配置任务线全链路 + AoS 快照断言），**199 全绿**
+- **审查修复**：对话选项 `to` 目标引用未校验 + 运行时无效 to 行为不一致（效果已执行却结束对话并返回 false）——validateIntegrity 补 to 引用校验（缺省/`__end__`/树内节点，含 start 节点存在性）+ advanceDialogue 改为**先解析跳转目标再执行效果**（无效 to 停留、效果不执行、会话不关闭）；补 shim 校验测试 + 真实配置用例 AoS 适配器快照断言（Dialogue/Quest 展平 key）
 
 ## 6. 关键设计决策（"为什么"）
 1. **范围取舍：对话+任务+好感，faction/achievement/progression 不做**：PLAN 原列 6 系统按即需即补收敛——故事闭环只需对话树承载剧情、任务驱动目标、好感回馈关系；成就/等级是离线统计与第三成长维，无 demo 需求牵引
@@ -90,7 +91,7 @@ git branch --show-current        # 确认已是新分支
 
 ## 8. 已知待办（未修，不要擅自处理）
 - **待办已清零**（本切片无遗留缺陷）；记录不修：factionSystem / achievementSystem / progressionSystem（无真实需求牵引）、对话选项好感解锁条件（无消费方）、postgres/redis 真实现（等真实部署需求）、`schema:gen` 空文件（工具链问题）、LagComp（ROADMAP 缺口）
-- 基线三命令：`pnpm test`（198 全绿）+ `npx tsc --noEmit`（0）+ `pnpm tools validate`（✓）+ framework 游戏词 grep 空（blackboard 技术词豁免，rg 未安装时用 grep 工具核对）
+- 基线三命令：`pnpm test`（199 全绿）+ `npx tsc --noEmit`（0）+ `pnpm tools validate`（✓）+ framework 游戏词 grep 空（blackboard 技术词豁免，rg 未安装时用 grep 工具核对）
 
 ## 9. 下一步：Slice 8+（按需开启）
 - **核心七切片全部完成**：S1 生存循环 → S2 战斗闭环 → S3 合成装备 → S4 世界氛围 → S5 联机完整度 → S6 建造与场景切换 → S7 社交进度（对话/任务/好感）。Demo 覆盖：能活/能打/有成长/世界活/服务端重启不丢进度/多玩家各自视野/超速被拒/建造庇护所挡狼/进洞穴来回/与岛民对话接任务交任务
