@@ -1,8 +1,8 @@
 # 通用 2D 游戏框架系统路线图
 
 > 目标：将当前框架演进为通用 2D 游戏框架。
-> Phase 0（切片前止血）已完成 5 个框架级缺陷修复；Slice 1（生存循环）、Slice 2（战斗闭环）、Slice 3（合成与装备）、Slice 4（世界氛围）、Slice 5（联机完整度）与 Slice 6（建造与场景切换）已完成。
-> 现状：8 个内置核心系统 + Slice 1 新增 2 个生存系统（needDecay / gathering）+ Slice 2 新增 3 个系统（perception / death / respawn）+ Slice 3 新增 1 个系统（equipment）+ Slice 4 新增 1 个系统（dayNight）+ Slice 6 新增 1 个系统（portal），共 16 个内置系统；crafting / placeable / deconstruct 为命令驱动的原子模块（无 tick 体，inventoryOps 先例）；persistence / interest / 输入校验为仿真层能力（定时存档 / 视野裁剪 / 输入拦截——异步 I/O 与输入校验不入 ECS tick 系统）。
+> Phase 0（切片前止血）已完成 5 个框架级缺陷修复；Slice 1（生存循环）、Slice 2（战斗闭环）、Slice 3（合成与装备）、Slice 4（世界氛围）、Slice 5（联机完整度）、Slice 6（建造与场景切换）与 Slice 7（社交进度）已完成。
+> 现状：8 个内置核心系统 + Slice 1 新增 2 个生存系统（needDecay / gathering）+ Slice 2 新增 3 个系统（perception / death / respawn）+ Slice 3 新增 1 个系统（equipment）+ Slice 4 新增 1 个系统（dayNight）+ Slice 6 新增 1 个系统（portal）+ Slice 7 新增 1 个系统（quest），共 17 个内置系统；crafting / placeable / deconstruct / dialogue 为命令驱动的原子模块（无 tick 体，inventoryOps 先例）；persistence / interest / 输入校验为仿真层能力（定时存档 / 视野裁剪 / 输入拦截——异步 I/O 与输入校验不入 ECS tick 系统）。
 > 详见下文「已有系统状态」。
 
 ## 一、核心仿真
@@ -108,6 +108,11 @@
 - building（Slice 6）：placeEntity 扩展——rules/place.json gridSnap（配置开关，缺省 false）网格对齐（占位矩形四角落格线）+ GridOccupancy 格组写入与占用冲突校验（同格重放拒、无缝拼接）+ Placeable.ownerNetworkId 所有权写入；deconstructEntity 拆除原子（仅放置者可拆、范围校验、不返还材料），PlayerCommand `deconstruct` + target
 - GridOccupancy / Portal 组件（Slice 6）：GridOccupancy SoA（cellX/cellY/cellW/cellH）；Portal AoS（targetMap/x/y + 初始化钩子 + netSync 适配器）
 - portal（Slice 6）：portalSystem tick（玩家 AABB 相交触发）+ switchMap 原子——setWorldMap（换图 + systemRuntimes 缓存重建）/ enterMap（清场保留玩家内容 Player/Placeable/ItemMeta + 按新图布置 + 传送）；loadGameDefinition 解析全部地图（resolvedMapSources）；WorldRecord.mapId + 读档切回；TickSnapshot/RoomState.mapId；SpawnRule.mapId 限定生效地图；房间级切图语义（全员换图）
+- 帧内事件总线（Slice 7）：world.runtimeEvents + emitEvent/consumeEvents（step 帧首清空）；combatSystem 致命一击 emit `killed`（killer/victim/kind）
+- dialogue（Slice 7）：dialogueSystem 原子模块——startDialogue（talk 意图路由 NPC）/ advanceDialogue（PlayerCommand `dialogue`）+ 选项效果（quest_accept/quest_submit/relation_delta，失败不推进）；Dialogue AoS 组件挂玩家（瞬态会话，netSync 同步选项文本）；DialogueSource AoS 挂 NPC（treeId）
+- quest（Slice 7）：questSystem tick 体（collect 背包计数 / kill 击杀事件计数，ACTIVE→READY）+ accept/submit 原子（collect 消耗 + 奖励 dry-run + 好感 + DONE）；Quest AoS 组件挂玩家（持久入档）；game/dialogues/*.json + game/quests/*.json 配置段 + validateIntegrity 引用校验
+- relation（Slice 7）：Relation AoS 组件挂玩家（npcKind/value，持久入档）+ addRelation/getRelation 原子；任务提交/对话效果写入
+- PlayerInput.talk（Slice 7）：新对话意图（talk）→ interactionSystem 路由最近 NPC；GameRoom isPlayerInput/isPlayerCommand 白名单扩展
 - logger
 
 ### ❌ 缺口最大三类
@@ -129,7 +134,9 @@
 >
 > **Slice 5（联机完整度）已完成**：持久化（worldSerializer 世界快照 + Repository/WorldRecord 接口 + createFileRepository 真实现，postgres/redis 适配接口留 stub；GameSimulation 定时存档 saveIntervalMs + 读档恢复 + 玩家 addPlayer 复用绑定，networkId 保留）；兴趣管理（computeInterest 按 viewRadius 裁剪、own 恒可见；GameRoom 双路径——有规则写 per-client PlayerState.visibleEntities，无规则保留 RoomState.entities 全量广播兼容旧协议）；输入校验（maxMoveSpeed 超速拒 + maxCommandsPerSec 命令频率 tick 窗口限流，被拒记日志）。server 规则经 ServerRuleSchema 校验。审查修复：兴趣裁剪 per-client 用 schema 4 `$filter` 实例级过滤（VisibleEntities 子类 + client.view 挂 sessionId）、destroyEntity 统一实体销毁（AoS 残留清理防存档污染）、存档畸形防御与写盘串行化、频率窗口 off-by-one、NetworkId 入瞬态名单。验收 `pnpm test`（173 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空（blackboard 技术词除外）。核心 Demo 至此贯通。
 >
-> **Slice 6（建造与场景切换）已完成**：静态碰撞修复（无 Velocity 实体注册静态碰撞体——墙不被玩家顶走，建造前置）；建造闭环（placeEntity 扩展：gridSnap 网格对齐 + GridOccupancy 格组占用校验/写入 + Placeable.ownerNetworkId 所有权；deconstruct 拆除原子——仅放置者可拆，PlayerCommand `deconstruct` + target）；场景切换（Portal AoS 组件 + portalSystem tick + switchMap 原子 setWorldMap/enterMap——清场保留玩家内容 Player/Placeable/ItemMeta、按新图布置、传送玩家、地图相关缓存选择性重建；loadGameDefinition 多地图解析 resolvedMapSources；WorldRecord.mapId 存档 + 读档切回；TickSnapshot/RoomState.mapId + GameRoom 换图强制重拉碰撞体；SpawnRule.mapId 限定生效地图）。game：wall/floor/door/fence/furniture/portal/portal_back + 5 个 kit 物品与配方 + place.json gridSnap + cave 地图 + 分图 populations。审查修复：portal 触发死锁（严格小于触发判定与 SAT 分离互斥——portal 去 Collider + 接触判定 <= + 完整 tick 链集成用例）、换图缓存改选择性重建（保留 death 重生标记）、读档地图无效告警。验收 `pnpm test`（187 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空（blackboard 技术词除外）。下一切片（Slice 7+）按需开启。
+> **Slice 6（建造与场景切换）已完成**：静态碰撞修复（无 Velocity 实体注册静态碰撞体——墙不被玩家顶走，建造前置）；建造闭环（placeEntity 扩展：gridSnap 网格对齐 + GridOccupancy 格组占用校验/写入 + Placeable.ownerNetworkId 所有权；deconstruct 拆除原子——仅放置者可拆，PlayerCommand `deconstruct` + target）；场景切换（Portal AoS 组件 + portalSystem tick + switchMap 原子 setWorldMap/enterMap——清场保留玩家内容 Player/Placeable/ItemMeta、按新图布置、传送玩家、地图相关缓存选择性重建；loadGameDefinition 多地图解析 resolvedMapSources；WorldRecord.mapId 存档 + 读档切回；TickSnapshot/RoomState.mapId + GameRoom 换图强制重拉碰撞体；SpawnRule.mapId 限定生效地图）。game：wall/floor/door/fence/furniture/portal/portal_back + 5 个 kit 物品与配方 + place.json gridSnap + cave 地图 + 分图 populations。审查修复：portal 触发死锁（严格小于触发判定与 SAT 分离互斥——portal 去 Collider + 接触判定 <= + 完整 tick 链集成用例）、换图缓存改选择性重建（保留 death 重生标记）、读档地图无效告警。验收 `pnpm test`（187 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空（blackboard 技术词除外）。
+>
+> **Slice 7（社交进度）已完成**：对话（dialogueSystem 原子模块——startDialogue/advanceDialogue + 选项效果 quest_accept/quest_submit/relation_delta，失败不推进；Dialogue AoS 瞬态会话组件挂玩家 + DialogueSource AoS 挂 NPC；PlayerInput.talk 新交互键 + interactionSystem talk 路由 + PlayerCommand `dialogue`）；任务（questSystem——collect 背包计数/kill 击杀事件计数两种目标形态，accept/submit 原子：collect 消耗 + 奖励 dry-run + 好感 + DONE；Quest AoS 持久组件挂玩家；game/dialogues + game/quests 配置段 + validateIntegrity 引用校验）；好感（Relation AoS 持久组件 + addRelation/getRelation）；帧内事件总线（world.runtimeEvents + emitEvent/consumeEvents，combatSystem 致命一击 emit killed 事件）。game：villager 对话树（接/交任务）+ quests.json（collect_axe/hunt_task）+ netSync 4 条。faction/achievement/progression 记录不修（无真实需求牵引）。验收 `pnpm test`（198 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空（blackboard 技术词除外）。下一切片按需开启。
 
 **切片内待补全（非框架缺陷）**：
 - （已补全）inventorySystem：堆叠/丢弃/使用已落地（Slice 1）

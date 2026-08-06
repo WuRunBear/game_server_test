@@ -1,9 +1,10 @@
 import { hasComponent, query } from "bitecs";
-import { Health, Attack, Defense, Team } from "components";
+import { Health, Attack, Defense, Team, Kind } from "components";
 import { Cooldown, Transform } from "components";
 import type { GameWorld } from "world";
 import { getRuleModule } from "framework/api";
 import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
+import { emitEvent } from "framework/events/gameEvents";
 
 export const DEFAULT_COOLDOWN_MS = 1000;
 export const DEFAULT_ATTACK_RANGE = 32;
@@ -94,6 +95,15 @@ export function attackTarget(world: GameWorld, attackerEid: number, targetEid: n
   }
 
   Health.current[targetEid] = (Health.current[targetEid] ?? 0) - damage;
+
+  // 致命一击：发射击杀事件（同帧 questSystem 等系统消费；饿死等非攻击致死无事件）
+  if ((Health.current[targetEid] ?? 0) <= 0) {
+    emitEvent(world, "killed", {
+      killer: attackerEid,
+      victim: targetEid,
+      kind: Kind[targetEid] ?? "",
+    });
+  }
 
   if (hasComponent(world, attackerEid, Cooldown)) {
     Cooldown.remainingMs[attackerEid] = cooldownMs;

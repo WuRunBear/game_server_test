@@ -31,7 +31,10 @@ function isPlayerInput(message: unknown): message is PlayerInput {
   return (
     typeof obj.seq === "number" &&
     typeof obj.moveX === "number" &&
-    typeof obj.moveY === "number"
+    typeof obj.moveY === "number" &&
+    (obj.interact === undefined || typeof obj.interact === "boolean") &&
+    (obj.attack === undefined || typeof obj.attack === "boolean") &&
+    (obj.talk === undefined || typeof obj.talk === "boolean")
   );
 }
 
@@ -47,13 +50,15 @@ function isPlayerCommand(message: unknown): message is PlayerCommand {
       obj.type === "craft" ||
       obj.type === "equip" ||
       obj.type === "place" ||
-      obj.type === "deconstruct") &&
+      obj.type === "deconstruct" ||
+      obj.type === "dialogue") &&
     (obj.slot === undefined || typeof obj.slot === "number") &&
     (obj.toSlot === undefined || typeof obj.toSlot === "number") &&
     (obj.recipe === undefined || typeof obj.recipe === "string") &&
     (obj.x === undefined || typeof obj.x === "number") &&
     (obj.y === undefined || typeof obj.y === "number") &&
-    (obj.target === undefined || typeof obj.target === "number")
+    (obj.target === undefined || typeof obj.target === "number") &&
+    (obj.option === undefined || typeof obj.option === "number")
   );
 }
 

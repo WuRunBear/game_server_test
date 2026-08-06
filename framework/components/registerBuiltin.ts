@@ -16,6 +16,10 @@ import { LightSource } from "framework/components/lightSource";
 import { Placeable } from "framework/components/placeable";
 import { GridOccupancy } from "framework/components/gridOccupancy";
 import { Portal, initPortal } from "framework/components/portal";
+import { Dialogue } from "framework/components/dialogue";
+import { DialogueSource, initDialogueSource } from "framework/components/dialogueSource";
+import { Quest } from "framework/components/quest";
+import { Relation } from "framework/components/relation";
 import { Intent } from "framework/components/intent";
 import { NetworkId, LastSynced } from "framework/components/network";
 import { Cooldown, Duration } from "framework/components/timer";
@@ -47,6 +51,10 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("Placeable", Placeable);
   registry.register("GridOccupancy", GridOccupancy);
   registry.register("Portal", Portal);
+  registry.register("Dialogue", Dialogue);
+  registry.register("DialogueSource", DialogueSource);
+  registry.register("Quest", Quest);
+  registry.register("Relation", Relation);
   registry.register("Intent", Intent);
   registry.register("NetworkId", NetworkId);
   registry.register("LastSynced", LastSynced);
@@ -65,4 +73,5 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.registerAosInitializer("ResourceNode", initResourceNode);
   registry.registerAosInitializer("LootTable", initLootTable);
   registry.registerAosInitializer("Portal", initPortal);
+  registry.registerAosInitializer("DialogueSource", initDialogueSource);
 }

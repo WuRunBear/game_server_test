@@ -18,6 +18,7 @@ import { gatheringSystem } from "framework/systems/gameplay/gatheringSystem";
 import { equipmentSystem } from "framework/systems/gameplay/equipmentSystem";
 import { dayNightCycleSystem } from "framework/systems/gameplay/dayNightCycleSystem";
 import { portalSystem } from "framework/systems/gameplay/portalSystem";
+import { createQuestSystem } from "framework/systems/gameplay/questSystem";
 
 import { setDefaultActionRegistry } from "framework/ai/btFactory";
 import { registerBuiltinActions } from "framework/ai/registerBuiltinActions";
@@ -122,6 +123,12 @@ export function registerBuiltinSystems(
   systemRegistry.register({
     id: "portal",
     factory: (_world: GameWorld) => portalSystem,
+    after: ["respawn"],
+  });
+
+  systemRegistry.register({
+    id: "quest",
+    factory: (_world: GameWorld) => createQuestSystem(),
     after: ["respawn"],
   });
 }

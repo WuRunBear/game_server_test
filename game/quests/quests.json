@@ -1,0 +1,24 @@
+{
+  "quests": [
+    {
+      "id": "collect_axe",
+      "type": "collect",
+      "itemKind": "axe",
+      "goal": 1,
+      "submit": {
+        "rewards": [{ "kind": "spear", "count": 1 }],
+        "relationDelta": 10
+      }
+    },
+    {
+      "id": "hunt_task",
+      "type": "kill",
+      "victimKind": "wolf",
+      "goal": 2,
+      "submit": {
+        "rewards": [{ "kind": "cooked_meat", "count": 1 }],
+        "relationDelta": 15
+      }
+    }
+  ]
+}

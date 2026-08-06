@@ -48,6 +48,7 @@ const RUNTIME_ONLY_COMPONENTS = new Set([
   "LastSynced",
   "Kind",
   "NetworkId",
+  "Dialogue",
 ]);
 
 /** 序列化单实体：遍历组件注册表，按 SoA/AoS 读当前值。 */

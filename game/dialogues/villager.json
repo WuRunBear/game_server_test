@@ -1,0 +1,27 @@
+{
+  "trees": [
+    {
+      "id": "villager-main",
+      "start": "start",
+      "nodes": {
+        "start": {
+          "text": "你好，旅行者。",
+          "options": [
+            { "label": "你好，我想帮忙。", "to": "tasks" },
+            { "label": "再见。", "to": "__end__" }
+          ]
+        },
+        "tasks": {
+          "text": "有什么能帮忙的吗？",
+          "options": [
+            { "label": "接任务：带来一把斧头", "effect": { "type": "quest_accept", "questId": "collect_axe" }, "to": "tasks" },
+            { "label": "交任务：带来斧头", "effect": { "type": "quest_submit", "questId": "collect_axe" }, "to": "tasks" },
+            { "label": "接任务：猎杀恶兽 ×2", "effect": { "type": "quest_accept", "questId": "hunt_task" }, "to": "tasks" },
+            { "label": "交任务：猎杀恶兽", "effect": { "type": "quest_submit", "questId": "hunt_task" }, "to": "tasks" },
+            { "label": "再见。", "to": "__end__" }
+          ]
+        }
+      }
+    }
+  ]
+}

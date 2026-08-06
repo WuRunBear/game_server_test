@@ -3,6 +3,7 @@ import { createWorld } from "bitecs";
 import { createMetrics, type Metrics } from "framework/metrics";
 import { createLogger, type Logger } from "framework/utils/logger";
 import type { MapRuntime } from "framework/map";
+import type { GameEvent } from "framework/events/gameEvents";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { SystemRegistry } from "framework/systems/systemRegistry";
 import type { ActionRegistry } from "framework/ai/actionRegistry";
@@ -48,6 +49,8 @@ export type GameWorld = ReturnType<typeof createWorld> & {
 
   systemRuntimes: Map<string, unknown>;
   nextNetworkId: number;
+  /** 本帧事件队列（帧内事件总线，见 framework/events/gameEvents.ts）。 */
+  runtimeEvents: GameEvent[];
 };
 
 export type System = (world: GameWorld) => GameWorld;
@@ -64,6 +67,7 @@ export function createGameWorld(fixedDtMs: number): GameWorld {
     logger: createLogger("world"),
     systemRuntimes: new Map(),
     nextNetworkId: 1,
+    runtimeEvents: [],
   }) as GameWorld;
 
   return world;

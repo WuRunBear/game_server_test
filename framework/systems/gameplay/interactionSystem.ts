@@ -1,8 +1,9 @@
 import { query } from "bitecs";
-import { Player, Transform, Resource, Enemy, Health, Intent } from "components";
+import { Player, NPC, Transform, Resource, Enemy, Health, Intent } from "components";
 import type { GameWorld } from "world";
 import { harvest } from "framework/systems/gameplay/gatheringSystem";
 import { attackTarget } from "framework/systems/gameplay/combatSystem";
+import { startDialogue } from "framework/systems/gameplay/dialogueSystem";
 
 interface SystemConfig {
   range?: number;
@@ -13,13 +14,14 @@ const DEFAULT_RANGE = 24;
 /**
  * interactionSystem：交互意图路由器。
  *
- * 输入信号（interact / attack）由 GameSimulation.applyInputs 写入 Intent[player]；
+ * 输入信号（interact / attack / talk）由 GameSimulation.applyInputs 写入 Intent[player]；
  * 本系统消费意图——无论成败清空 Intent（consume-or-discard 语义，不让意图跨帧堆积）：
  * - "interact"：在 range 内找最近资源节点调 harvest
  * - "attack"：找最近 [Enemy] 实体调 attackTarget（射程/冷却由 attackTarget 校验）
+ * - "talk"：在 range 内找最近 [NPC] 实体调 startDialogue（对话树经 DialogueSource 查）
  *
- * 游戏无关——只识别通用意图与 Resource/Enemy 标签；具体产出由
- * gatheringSystem 按 yieldsKind、combatSystem 按规则决定。
+ * 游戏无关——只识别通用意图与 Resource/Enemy/NPC 标签；具体产出由
+ * gatheringSystem 按 yieldsKind、combatSystem 按规则、dialogueSystem 按树决定。
  */
 export function createInteractionSystem(config?: Record<string, unknown>) {
   const cfg: SystemConfig = {
@@ -68,6 +70,20 @@ export function createInteractionSystem(config?: Record<string, unknown>) {
 
         if (nearestEid >= 0) {
           attackTarget(world, playerEid, nearestEid);
+        }
+      } else if (intent === "talk") {
+        let nearestEid = -1;
+        let nearestDist = Infinity;
+        for (const npcEid of query(world, [NPC, Transform])) {
+          const d = Math.hypot(px - Transform.x[npcEid], py - Transform.y[npcEid]);
+          if (d <= range && d < nearestDist) {
+            nearestEid = npcEid;
+            nearestDist = d;
+          }
+        }
+
+        if (nearestEid >= 0) {
+          startDialogue(world, playerEid, nearestEid);
         }
       }
     }

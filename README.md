@@ -60,18 +60,19 @@ framework/
     fileRepository.ts       # createFileRepository — JSON 文件仓储（默认后端，原子写）
   components/               # ECS 组件 + componentRegistry
     componentRegistry.ts    # 组件注册表: 名 → defineComponent
-    registerBuiltin.ts      # 注册 35 个内置组件
+    registerBuiltin.ts      # 注册 39 个内置组件
     index.ts                # barrel 导出
     transform.ts, size.ts, physics.ts (Velocity/Acceleration/Collider/ColliderShape),
     combat.ts (Health/Attack/Defense/Team), ai.ts (AIState/Target/BlackboardRef),
     perception.ts (SoA 感知), equipment.ts / craftingStation.ts (SoA 装备/站点),
     lightSource.ts / placeable.ts (SoA 光源/可放置), gridOccupancy.ts / portal.ts (SoA 网格占用 / AoS 传送门),
+    dialogue.ts / dialogueSource.ts / quest.ts / relation.ts (AoS 对话会话/对话源/任务/好感),
     inventory.ts (AoS 例外), network.ts (NetworkId/LastSynced),
     timer.ts (Cooldown/Duration), tags.ts (Player/Enemy/NPC/Item/Resource),
     needs.ts / resourceNode.ts / loot.ts / intent.ts / kind.ts / itemMeta.ts (AoS 家族)
   systems/
     systemRegistry.ts       # 系统注册表 + buildSystems (拓扑排序, Kahn 算法)
-    registerBuiltinSystems.ts   # 注册 16 个内置系统
+    registerBuiltinSystems.ts   # 注册 17 个内置系统
     index.ts                # barrel 导出
     core/                   # physicsSystem, movementSystem, collisionSystem
     gameplay/               # perceptionSystem, aiSystem, combatSystem, spawningSystem,
@@ -127,13 +128,15 @@ src/
   register.ts               # 扩展注册入口（当前仅调用 bootstrapFramework()，无自定义扩展）
 
 game/
-  game.json                 # GameDefinition 主入口：tickRate=20, 16 个系统, netSync 配置
+  game.json                 # GameDefinition 主入口：tickRate=20, 17 个系统, netSync 配置
   entities/                 # player, villager, boar, rabbit, berry_bush, tree, water_pool, item, rock, campfire, wolf, wall, floor, door, fence, furniture, portal, portal_back
   behaviors/                # wander-default, boar-hostile, rabbit-flee, wolf-night
   rules/                    # combat.json, needs.json, respawn.json, crafting.json, daynight.json, place.json (gridSnap), server.json
   maps/                     # registry.json（generated-map + cave 双地图）
   spawns/                   # populations.json（wolf 规则带 condition: "isNight"；cave 规则带 mapId）
   items/                    # berry, wood, water, raw_meat, stone, axe, stone_axe, spear, berry_pie, cooked_meat, campfire_kit, wall_kit, floor_kit, door_kit, fence_kit, furniture_kit (item kind 数据)
+  dialogues/                # villager.json（对话树：接任务/交任务/好感选项）
+  quests/                   # quests.json（collect_axe 收集型 / hunt_task 击杀型）
   maps/                     # registry.json
 
 tools/
@@ -171,6 +174,13 @@ Colyseus Schema 每 tick 同步。`EntityState` 的字段通过 `game.json` 的 
 
 - **建造**：`place` 命令（`ItemKindSchema.place` → `placeableSystem.placeEntity`）放置 Placeable 实体——`rules/place.json` 的 `gridSnap` 开启时占位矩形对齐地图网格（`GridOccupancy` 格组写入 + 同格重放被拒，墙/地板可无缝拼接）；`deconstruct` 命令（`deconstructSystem`）拆除，仅放置者可拆（`Placeable.ownerNetworkId`，0=世界物不可拆，不返还材料）。静态碰撞：无 `Velocity` 的实体（建筑/资源）注册为静态碰撞体，不会被推开。
 - **场景切换**：`Portal` 组件（AoS，声明 targetMap + 传送坐标）+ `portalSystem` tick 检测玩家 AABB 相交 → `enterMap`（`framework/map/switchMap.ts`）：换 `world.map` + 重建系统缓存 + 清场（保留玩家/放置物/地面掉落，场景生态随图重置）+ 按新图出生点布置 + 传送玩家。房间级语义：所有玩家共享当前地图。存档记录 `mapId`，读档恢复自动切回存档地图。刷怪规则可带 `mapId` 限定生效地图。`RoomState.mapId` 同步给客户端。
+
+### 对话与任务（社交进度）
+
+- **对话**：`talk` 输入意图（新交互键）→ `interactionSystem` 路由最近 NPC → `dialogueSystem.startDialogue` 打开对话树（`game/dialogues/*.json`：节点文本 + 选项 + 效果）；`dialogue` 命令（`PlayerCommand`）推进节点——效果失败停留可重试，`__end__` 结束。玩家会话状态在 `Dialogue` AoS 组件（瞬态，netSync 同步选项文本给客户端渲染 UI）。
+- **任务**：`game/quests/*.json` 定义（collect 收集型：背包持有 itemKind ≥ goal；kill 击杀型：玩家击杀 victimKind 计数）+ `questSystem` tick 体推进进度（ACTIVE → READY）+ `dialogueSystem` 效果驱动 accept/submit（`quest_accept`/`quest_submit` 效果）。提交结算：collect 型消耗任务物品（dry-run 防丢产出）+ 奖励物品 + 好感。任务状态在 `Quest` AoS 组件（持久，随玩家入档）。
+- **好感**：`Relation` AoS 组件（玩家↔NPC kind 好感值，持久入档）+ `addRelation/getRelation` 原子；`relation_delta` 对话效果与任务提交奖励写入。
+- **事件总线**：`framework/events/gameEvents.ts` 帧内事件（emit/consume，step 帧首清空）——`combatSystem` 致命一击发 `killed` 事件，`questSystem` 击杀型任务消费。
 
 ## 扩展指南
 

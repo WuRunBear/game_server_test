@@ -35,17 +35,22 @@ export interface PlayerInput {
    * 由 interactionSystem 在该 tick 内消费并清空（与 interact 同槽互斥）。
    */
   attack?: boolean;
+  /**
+   * 对话意图信号：本帧玩家按下对话键（与 NPC 交谈）。
+   * 由 interactionSystem 在该 tick 内消费并清空（talk 意图路由 NPC）。
+   */
+  talk?: boolean;
 }
 
 /**
- * 玩家命令——非逐帧的离散操作（背包原子：食用/丢弃/移动槽/合成/穿戴/放置/拆除）。
+ * 玩家命令——非逐帧的离散操作（背包原子 + 对话选择）。
  *
  * 与 PlayerInput（脉冲式逐帧移动）区别：命令是即刻执行的服务端权威动作，
  * 不进入 seq 去重 / 帧缓存。type 保持框架通用机制词（consume/drop/transfer/
- * craft/equip/place/deconstruct），不含游戏语义。
+ * craft/equip/place/deconstruct/dialogue），不含游戏语义。
  */
 export interface PlayerCommand {
-  type: "consume" | "drop" | "transfer" | "craft" | "equip" | "place" | "deconstruct";
+  type: "consume" | "drop" | "transfer" | "craft" | "equip" | "place" | "deconstruct" | "dialogue";
   /** 目标槽索引（consume/drop/equip/place 用）；transfer 的源槽。 */
   slot?: number;
   /** transfer 目标槽。 */
@@ -58,6 +63,8 @@ export interface PlayerCommand {
   y?: number;
   /** 目标实体 networkId（deconstruct 用，拆除的放置物）。 */
   target?: number;
+  /** 对话选项索引（dialogue 用，推进当前对话节点）。 */
+  option?: number;
 }
 
 /**

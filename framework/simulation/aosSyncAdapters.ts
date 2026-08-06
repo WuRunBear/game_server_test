@@ -1,6 +1,7 @@
 import type { GameWorld } from "world";
 import {
   Needs, Inventory, ItemMeta, ResourceNode, Portal,
+  Dialogue, DialogueSource, Quest, Relation,
 } from "components";
 
 /**
@@ -105,6 +106,66 @@ registerAosSyncAdapter("Portal", (_world, eid, fields) => {
     if (f === "targetMap") out.strings["Portal.targetMap"] = state.targetMap;
     else if (f === "x") out.numbers["Portal.x"] = state.x;
     else if (f === "y") out.numbers["Portal.y"] = state.y;
+  }
+  return out;
+});
+
+/** 内建适配器：Dialogue（玩家对话会话——npcId/树/节点/选项文本）。 */
+registerAosSyncAdapter("Dialogue", (_world, eid, fields) => {
+  const out = empty();
+  const state = Dialogue[eid];
+  if (!state) return out;
+  for (const f of fields) {
+    if (f === "npcId") out.numbers["Dialogue.npcId"] = state.npcId;
+    else if (f === "treeId") out.strings["Dialogue.treeId"] = state.treeId;
+    else if (f === "nodeId") out.strings["Dialogue.nodeId"] = state.nodeId;
+    else if (f === "options") {
+      for (let i = 0; i < state.options.length; i++) {
+        out.strings[`Dialogue.${i}.option`] = state.options[i];
+      }
+    }
+  }
+  return out;
+});
+
+/** 内建适配器：DialogueSource（NPC 对话树引用）。 */
+registerAosSyncAdapter("DialogueSource", (_world, eid, fields) => {
+  const out = empty();
+  const state = DialogueSource[eid];
+  if (!state) return out;
+  for (const f of fields) {
+    if (f === "treeId") out.strings["DialogueSource.treeId"] = state.treeId;
+  }
+  return out;
+});
+
+/** 内建适配器：Quest（任务状态按索引展开 questId/state/count）。 */
+registerAosSyncAdapter("Quest", (_world, eid, fields) => {
+  const out = empty();
+  const quests = Quest[eid];
+  if (!quests) return out;
+  for (let i = 0; i < quests.length; i++) {
+    const q = quests[i];
+    for (const f of fields) {
+      if (f === "questId") out.strings[`Quest.${i}.questId`] = q.questId;
+      else if (f === "state") out.numbers[`Quest.${i}.state`] = q.state;
+      else if (f === "count") out.numbers[`Quest.${i}.count`] = q.count;
+    }
+  }
+  return out;
+});
+
+/** 内建适配器：Relation（好感按索引展开 npcKind/value）。 */
+registerAosSyncAdapter("Relation", (_world, eid, fields) => {
+  const out = empty();
+  const relations = Relation[eid];
+  if (!relations) return out;
+  for (let i = 0; i < relations.length; i++) {
+    const r = relations[i];
+    for (const f of fields) {
+      if (f === "npcKind") out.strings[`Relation.${i}.npcKind`] = r.npcKind;
+      else if (f === "value") out.numbers[`Relation.${i}.value`] = r.value;
+    }
   }
   return out;
 });

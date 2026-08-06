@@ -10,6 +10,8 @@ import { ArchetypeSchema } from "framework/config/schema/ArchetypeSchema";
 import { BehaviorSchema } from "framework/config/schema/BehaviorSchema";
 import { SpawnRuleSchema, SpawnRegistrySchema } from "framework/config/schema/SpawnSchema";
 import { ItemKindSchema, type ItemKindSpec } from "framework/config/schema/ItemKindSchema";
+import { DialogueRegistrySchema, type DialogueTreeJson } from "framework/config/schema/DialogueSchema";
+import { QuestRegistrySchema, type QuestDefinitionJson } from "framework/config/schema/QuestSchema";
 import { MapRegistrySchema, type GeneratedMapEntryJson, type TiledMapEntryJson } from "framework/config/schema/MapRegistrySchema";
 import { getRuleSchema } from "framework/config/schema/ruleSchemas";
 import { hasSpawnCondition } from "framework/systems/gameplay/spawnConditions";
@@ -107,6 +109,44 @@ function loadSpawnsFile(baseDir: string, spawnsPattern?: string): SpawnRule[] {
     const parsed = SpawnRegistrySchema.parse(raw);
     for (const rule of parsed.rules) {
       results.push(SpawnRuleSchema.parse(rule) as SpawnRule);
+    }
+  }
+  return results;
+}
+
+function loadDialoguesFile(baseDir: string, pattern?: string): DialogueTreeJson[] {
+  if (!pattern) return [];
+  const files = loadFilesByGlob(baseDir, pattern);
+  const results: DialogueTreeJson[] = [];
+  const seen = new Set<string>();
+  for (const file of files) {
+    const raw = readJsonFile(file);
+    const parsed = DialogueRegistrySchema.parse(raw);
+    for (const tree of parsed.trees) {
+      if (seen.has(tree.id)) {
+        throw new Error(`Duplicate dialogue tree "${tree.id}" in ${file}`);
+      }
+      seen.add(tree.id);
+      results.push(tree);
+    }
+  }
+  return results;
+}
+
+function loadQuestsFile(baseDir: string, pattern?: string): QuestDefinitionJson[] {
+  if (!pattern) return [];
+  const files = loadFilesByGlob(baseDir, pattern);
+  const results: QuestDefinitionJson[] = [];
+  const seen = new Set<string>();
+  for (const file of files) {
+    const raw = readJsonFile(file);
+    const parsed = QuestRegistrySchema.parse(raw);
+    for (const quest of parsed.quests) {
+      if (seen.has(quest.id)) {
+        throw new Error(`Duplicate quest "${quest.id}" in ${file}`);
+      }
+      seen.add(quest.id);
+      results.push(quest);
     }
   }
   return results;
@@ -248,6 +288,50 @@ function validateIntegrity(data: LoadedGameDefinition): void {
         throw new Error(`Item "${item.kind}" places unknown archetype "${item.place!.archetype}"`);
       }
     }
+
+    // 对话树引用校验：DialogueSource 组件 treeId → 树存在；树效果 questId → 任务存在
+    const dialogueIds = new Set(data.resolvedDialogues.map((t) => t.id));
+    for (const entity of data.resolvedEntities) {
+      const source = entity.components["DialogueSource"] as { treeId?: string } | undefined;
+      if (source?.treeId && !dialogueIds.has(source.treeId)) {
+        throw new Error(`Archetype "${entity.kind}" references unknown dialogue tree "${source.treeId}"`);
+      }
+    }
+    const questIds = new Set(data.resolvedQuests.map((q) => q.id));
+    for (const tree of data.resolvedDialogues) {
+      for (const node of Object.values(tree.nodes)) {
+        for (const option of node.options) {
+          const effect = option.effect;
+          if (!effect) continue;
+          const questEffect = effect.type === "quest_accept" || effect.type === "quest_submit";
+          if (questEffect && !questIds.has(effect.questId)) {
+            throw new Error(
+              `Dialogue "${tree.id}" node "${node.text}" effect references unknown quest "${effect.questId}"`,
+            );
+          }
+        }
+      }
+    }
+
+    // 任务引用校验：itemKind/rewards → item 目录；victimKind → 实体原型
+    const itemKinds = new Set(data.resolvedItems.map((i) => i.kind));
+    for (const quest of data.resolvedQuests) {
+      if (quest.type === "collect" && !itemKinds.has(quest.itemKind ?? "")) {
+        throw new Error(`Quest "${quest.id}" references unknown item kind "${quest.itemKind}"`);
+      }
+      if (quest.type === "kill") {
+        const victimExists = data.resolvedEntities.some((e) => e.kind === quest.victimKind) ||
+          archetypeRegistry.has(quest.victimKind ?? "");
+        if (!victimExists) {
+          throw new Error(`Quest "${quest.id}" references unknown entity kind "${quest.victimKind}"`);
+        }
+      }
+      for (const reward of quest.submit.rewards) {
+        if (!itemKinds.has(reward.kind)) {
+          throw new Error(`Quest "${quest.id}" reward references unknown item kind "${reward.kind}"`);
+        }
+      }
+    }
   } catch (err) {
     if (err instanceof Error && err.message.includes("not bootstrapped")) {
       return;
@@ -316,6 +400,8 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
   const resolvedRules = loadRulesFile(baseDir, gameDef.rules);
   const resolvedSpawns = loadSpawnsFile(baseDir, gameDef.spawns);
   const resolvedItems = loadItemsFile(baseDir, gameDef.items);
+  const resolvedDialogues = loadDialoguesFile(baseDir, gameDef.dialogues);
+  const resolvedQuests = loadQuestsFile(baseDir, gameDef.quests);
   const mapResult = resolveMapSources(baseDir, gameDef.map?.registry);
 
   const loaded: LoadedGameDefinition = {
@@ -325,6 +411,8 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
     resolvedRules,
     resolvedSpawns,
     resolvedItems,
+    resolvedDialogues,
+    resolvedQuests,
     resolvedMapSource: mapResult.defaultSource,
     resolvedMapSources: mapResult.sources,
   };
@@ -362,6 +450,8 @@ export function createDefaultGameDefinition(): LoadedGameDefinition {
     resolvedRules: {},
     resolvedSpawns: [],
     resolvedItems: [],
+    resolvedDialogues: [],
+    resolvedQuests: [],
     resolvedMapSource: undefined,
     resolvedMapSources: {},
   };

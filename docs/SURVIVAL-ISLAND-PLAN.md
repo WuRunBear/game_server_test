@@ -1,7 +1,7 @@
 # Survival-Island 切片实施计划
 
 > 本文件是 survival-island 游戏从"可玩 demo"到"完整游戏"的切片路线。**demo 阶段
-> 落地核心六切片**（Slice 1-6），社交切片（Slice 7+）按需开启。
+> 落地核心七切片**（Slice 1-7），后续切片按需开启。
 >
 > 每个切片是一个垂直玩法切片，收尾三同步：可玩 demo 前进 + 框架增长通用系统 +
 > 测试/文档同步。一个切片未完成不开启下一个（缺陷阻塞除外）。
@@ -10,8 +10,8 @@
 
 | 项 | 选型 | 理由 |
 |----|------|------|
-| **demo 边界** | Slice 1-6 核心循环 | 生存+战斗+合成+昼夜+联机存档+建造场景切换，约 20-30 分钟单局贯通 |
-| **完整目标** | 核心 + 社交(S7+) | demo 跑通后再评估是否继续 |
+| **demo 边界** | Slice 1-7 核心循环 | 生存+战斗+合成+昼夜+联机存档+建造场景切换+对话任务，约 20-30 分钟单局贯通 |
+| **完整目标** | 核心 + 后续按需（成就/阵营/等级等） | demo 跑通后再评估是否继续 |
 | **变长结构建模** | runtime AoS 数组 + spawn 初始化钩子 | Needs/ResourceNode/Inventory/ItemMeta/Intent 统一为 `[] as T[]` AoS，与现有 Kind/Inventory 先例一致；spawn 经组件注册表的 AoS 初始化钩子按 archetype 配置写入。**S1 已替代原 systemRuntimes Map 选型**（探查发现 Kind/Inventory 已是 AoS，统一一套机制更简；netSync 也据此统一适配） |
 | **Inventory 模型** | slot 存 `{itemId, count}` + 容量走 archetype 配置 + 独立 `Equipment` 组件（weapon/tool/armor 三槽引用 inventory 槽） | 够支撑堆叠/容量/穿戴，不造格子拖拽引擎。客户端拖拽自便（**S1 落地**：slot `{kind,count}`，capacity 进 archetype，经 AoS 钩子初始化） |
 | **服务端操作原子** | `equip/transfer/drop/consume/use` 作为 Inventory/Equipment 系统的对外接口 | 客户端 UI 调这些 RPC，服务端权威做数据变更与校验 |
@@ -376,7 +376,7 @@
 
 ---
 
-## 完整目标（核心六切片之后，按需开启）
+## 完整目标（核心七切片之后，按需开启）
 
 ### Slice 6 — 建造（"玩家塑造世界"）✅ 已完成
 
@@ -431,12 +431,46 @@
 - demo 里程碑：合成墙/地板/门/围栏/家具 kit → 网格对齐建造庇护所（墙静态阻挡狼）→
   放置者拆除；进洞穴（资源/夜狼更多）→ 洞内 portal 回岛；服务端重启庇护所与所在图俱在
 
-### Slice 7+ — 社交进度（"世界有故事"）
+### Slice 7 — 社交进度（"世界有故事"）✅ 已完成
 
-- 框架：`relationshipGraph`（N:N 边权）、`dialogueSystem`（对话树）、`questSystem`、`factionSystem`、`achievementSystem`、`progressionSystem`
-- game：NPC 对话/任务线/阵营/成就配置
+> **S7 实施修正（来自落地探查，写回此计划）**：
+> - **范围取舍**：PLAN 原列 6 个系统（dialogue/quest/relationship/faction/achievement/
+>   progression），按即需即补落地 **对话 + 任务 + 好感**；factionSystem（好感可替代）、
+>   achievementSystem、progressionSystem 记录不修（后者 S3 已有装备成长维度）
+> - **任务双形态**：collect（背包持有 itemKind ≥ goal，tick 检查）+ kill（玩家击杀
+>   victimKind 计数）——击杀型需要事件机制：落地**帧内事件总线**
+>   （`world.runtimeEvents` + emitEvent/consumeEvents，GameInstance.step 帧首清空；
+>   combatSystem 致命一击 emit `killed` 事件，questSystem 一次取出全部分发——consume
+>   是清空式消费，多任务共享同一批事件）
+> - **对话入口=新交互键**（用户决策）：PlayerInput 加 `talk` 意图 → interactionSystem
+>   路由最近 NPC → startDialogue；对话推进走 PlayerCommand `dialogue` {option}（命令
+>   频率限流 20/s 兼容连续点击）
+> - **对话/任务/好感均为 AoS 组件挂玩家**：`Dialogue`（瞬态会话：npcId/treeId/nodeId/
+>   options——**入瞬态跳过名单**，恢复后自然重建）、`Quest`（持久 {questId,state,count}，
+>   state 0未接/1进行/2可交/3完成）、`Relation`（持久 {npcKind,value}）；NPC 挂
+>   `DialogueSource` {treeId}。netSync 经 AoS 适配器展平（options 按索引 option）
+> - **对话效果驱动任务**：对话节点选项效果 = quest_accept/quest_submit/relation_delta；
+>   效果失败不推进（停留可重试）；submit 好感对象=对话 NPC kind（对话时传入）
+> - **任务配置段**：GameDefinitionSchema 加 `dialogues`/`quests` 段 + validateIntegrity
+>   （treeId/questId/itemKind/rewards/victimKind 引用完整性）
+> - **提交结算**：collect 型消耗任务物品（跨槽贪婪）+ 奖励 dry-run 防满包丢产出
+>   （crafting 先例）→ 奖励入包 → 好感 → DONE；kill 型仅计数，无需消耗
+> - **demo 任务线**（无词表词配置）：villager 对话树——接 collect_axe（交斧头→矛+
+>   好感10）/ 接 hunt_task（猎恶兽×2 → 熟肉+好感15）——交/接同节点选项，
+>   效果失败停留可重试
+> - **记录不修**：faction/achievement/progression 系统（无真实需求牵引）、
+>   对话选项好感解锁条件（无消费方）
 
-> 这两切片在核心五切片跑通后再据实际取舍，不在当前 demo 执行范围内。
+- 框架：`dialogueSystem`（startDialogue/advanceDialogue + 效果执行）、`questSystem`
+  （accept/submit + tick 进度）、`relation` 原子（addRelation/getRelation）、
+  帧内事件总线（gameEvents）、AoS 组件 Dialogue/DialogueSource/Quest/Relation +
+  适配器、PlayerInput.talk 意图、PlayerCommand dialogue、interactionSystem talk 路由、
+  Dialogue 入瞬态名单、dialogues/quests 配置段 + 校验
+- game：game/dialogues/villager.json（对话树）、game/quests/quests.json
+  （collect_axe/hunt_task）、villager 挂 DialogueSource、game.json（quest 系统 +
+  dialogues/quests 段 + netSync 4 条）
+- demo 里程碑：按新交互键与 villager 对话 → 接任务 → 收集/猎杀 → 提交 → 奖励与好感；
+  任务/好感入档（重启不丢），对话会话瞬态（重连重开）
 
 ---
 

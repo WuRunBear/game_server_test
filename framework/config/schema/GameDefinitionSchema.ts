@@ -2,6 +2,8 @@ import { z } from "zod";
 import type { MapSource } from "framework/map/types";
 import type { ArchetypeSpec } from "framework/entities/archetypeRegistry";
 import type { ItemKindSpec } from "framework/config/schema/ItemKindSchema";
+import type { DialogueTreeJson } from "framework/config/schema/DialogueSchema";
+import type { QuestDefinitionJson } from "framework/config/schema/QuestSchema";
 
 export const SystemEnableEntrySchema = z.object({
   id: z.string(),
@@ -35,6 +37,10 @@ export const GameDefinitionSchema = z.object({
   rules: z.string().optional(),
   spawns: z.string().optional(),
   items: z.string().optional(),
+  /** 对话树配置段（game/dialogues/*.json）。 */
+  dialogues: z.string().optional(),
+  /** 任务定义配置段（game/quests/*.json）。 */
+  quests: z.string().optional(),
   netSync: z.object({
     fields: z.array(NetSyncFieldSchema),
   }).optional(),
@@ -70,6 +76,14 @@ export interface LoadedGameDefinition extends GameDefinition {
   resolvedSpawns: SpawnRule[];
   /** item kind 定义表（来自 game/items/*.json）。 */
   resolvedItems: ItemKindSpec[];
+  /** 对话树定义表（来自 game/dialogues/*.json）。 */
+  resolvedDialogues: DialogueTreeJson[];
+  /** 任务定义表（来自 game/quests/*.json）。 */
+  resolvedQuests: QuestDefinitionJson[];
   /** 运行时索引：kind → ItemKindSpec。由 GameInstance 构造时填充。 */
   itemsByKind?: Map<string, ItemKindSpec>;
+  /** 运行时索引：treeId → DialogueTreeJson。由 GameInstance 构造时填充。 */
+  dialoguesByKind?: Map<string, DialogueTreeJson>;
+  /** 运行时索引：questId → QuestDefinitionJson。由 GameInstance 构造时填充。 */
+  questsByKind?: Map<string, QuestDefinitionJson>;
 }

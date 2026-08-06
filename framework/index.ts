@@ -37,6 +37,10 @@ export { setWorldMap, enterMap, spawnInitialNpcs } from "framework/map/switchMap
 export { registerSpawnCondition, getSpawnCondition, hasSpawnCondition, registerBuiltinSpawnConditions, type SpawnCondition } from "framework/systems/gameplay/spawnConditions";
 export { placeEntity } from "framework/systems/gameplay/placeableSystem";
 export { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";
+export { startDialogue, advanceDialogue, applyDialogueEffect, END_DIALOGUE } from "framework/systems/gameplay/dialogueSystem";
+export { acceptQuest, submitQuest, createQuestSystem, questSystem } from "framework/systems/gameplay/questSystem";
+export { addRelation, getRelation } from "framework/systems/gameplay/relation";
+export { emitEvent, consumeEvents, type GameEvent } from "framework/events/gameEvents";
 export { overlapsAnyEntity, overlapsMapBlocked, overlapsOccupiedGrid, snapToGrid } from "framework/utils/placement";
 
 export { GameDefinitionSchema, type GameDefinition, type LoadedGameDefinition, type BehaviorDefinition, type SpawnRule, type SystemEnableEntry, type NetSyncField } from "framework/config/schema/GameDefinitionSchema";

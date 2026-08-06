@@ -14,6 +14,7 @@ import { equipSlot } from "framework/systems/gameplay/equipmentSystem";
 import { craftRecipe } from "framework/systems/gameplay/craftingSystem";
 import { placeEntity } from "framework/systems/gameplay/placeableSystem";
 import { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";
+import { advanceDialogue } from "framework/systems/gameplay/dialogueSystem";
 import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
 import { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
 import { setWorldMap } from "framework/map/switchMap";
@@ -357,6 +358,8 @@ export class GameSimulation implements SimulationPort {
         return placeEntity(this.world, eid, command.slot ?? -1, command.x ?? 0, command.y ?? 0);
       case "deconstruct":
         return deconstructEntity(this.world, eid, command.target ?? -1);
+      case "dialogue":
+        return advanceDialogue(this.world, eid, command.option ?? -1);
       default:
         return false;
     }
@@ -433,6 +436,9 @@ export class GameSimulation implements SimulationPort {
       }
       if (input.attack) {
         Intent[eid] = "attack";
+      }
+      if (input.talk) {
+        Intent[eid] = "talk";
       }
     }
 
