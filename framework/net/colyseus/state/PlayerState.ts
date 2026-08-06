@@ -1,4 +1,4 @@
-import { MapSchema, Schema, StateView, type, $filter } from "@colyseus/schema";
+import { MapSchema, Schema, StateView, type, view, $filter } from "@colyseus/schema";
 
 import { EntityState } from "./EntityState";
 
@@ -6,10 +6,15 @@ import { EntityState } from "./EntityState";
  * 兴趣管理下的 per-client 可见实体表（MapSchema 子类，仅增加服务端过滤逻辑）。
  *
  * Colyseus 的 RoomState 对房间内所有客户端共享广播；要让「每个客户端只见自己
- * 视野内实体」，需在编码层做 per-client 过滤——`$filter`（schema 实例级过滤）：
- * 编码时对每个字段调用 `ctor[$filter](ref, index, view)`，返回 false 则该字段
- * 对该客户端不可见（编码为空）。这里按「所属玩家 sessionId == 客户端 view 上的
- * sessionId」判定，实现：每个客户端只能收到自己 PlayerState.visibleEntities 的内容。
+ * 视野内实体」，需在编码层做 per-client 过滤——本字段声明了 `view: true`（过滤
+ * 字段），配合 `$filter`（schema 实例级过滤）实现：
+ * - 共享编码通路（view === undefined）：字段不进共享缓存（返回 false），
+ *   该字段只走 per-client 编码。
+ * - per-client 编码通路（view 已挂 sessionId）：按「所属玩家 sessionId == 客户端
+ *   view 上的 sessionId」判定——每个客户端只能收到自己 PlayerState.visibleEntities。
+ *
+ * 注意：`view: true` 声明的字段树必须经 `StateView.add()` 加入各客户端 view，
+ * 否则该树对任何客户端都不可见（见 GameRoom.onJoin 的接线）。
  *
  * 客户端侧协议无感：schema-codegen 仍按 `MapSchema<EntityState>` 生成；
  * 服务端运行时用子类实例提供过滤。
@@ -19,7 +24,8 @@ export class VisibleEntities extends MapSchema<EntityState> {
   ownerSessionId = "";
 
   /** 仅对所属玩家可见；其余客户端该字段编码为空。 */
-  static [$filter](ref: VisibleEntities, _index: number, view: StateView): boolean {
+  static [$filter](ref: VisibleEntities, _index: number, view: StateView | undefined): boolean {
+    if (view === undefined) return false;
     return (view as unknown as { sessionId?: string }).sessionId === ref.ownerSessionId;
   }
 }
@@ -49,7 +55,11 @@ export class PlayerState extends Schema {
 
   /**
    * 该玩家视野内可见的实体状态表（key=NetworkId 字符串）。
+   *
+   * `@view()` 声明该字段为过滤字段：只在 per-client 编码中出现
+   * （$filter 判定所属玩家），不进共享缓存。
    */
+  @view()
   @type({ map: EntityState })
   visibleEntities: VisibleEntities = new VisibleEntities();
 }

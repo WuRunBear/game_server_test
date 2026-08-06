@@ -217,8 +217,12 @@ export class GameRoom extends Room<{ state: RoomState }> {
    * Colyseus 在客户端连接并匹配到房间时调用此方法。
    * PlayerState 写入后 Colyseus 自动增量同步给该客户端（其他客户端不影响）。
    *
-   * 兴趣管理接线：为客户端创建独立 StateView 并挂 sessionId，
-   * 供 PlayerState.visibleEntities 的 $filter 判定（各客户端只见自己的视野表）。
+   * 兴趣管理接线（colyseus StateView 模型）：
+   * - `view: true` 过滤字段（PlayerState.visibleEntities）的编码树必须
+   *   `view.add()` 进各客户端 view，否则该树对客户端不可见（编码整体跳过）。
+   * - 加入客户端：`view.add(this.state)` 递归挂整棵当前状态树（根 + 所有玩家 +
+   *   各自可见表），字段级可见性由 VisibleEntities.$filter 按 sessionId 判定。
+   * - 已在线客户端：仅需补挂新玩家的 PlayerState 树（其余树早已在各自 view 中）。
    */
   onJoin(client: Client): void {
     // 让仿真层创建一个玩家实体，拿到稳定网络 ID
@@ -236,6 +240,13 @@ export class GameRoom extends Room<{ state: RoomState }> {
       client.view = new StateView();
     }
     (client.view as unknown as { sessionId?: string }).sessionId = client.sessionId;
+    client.view.add(this.state);
+
+    // 已在线客户端补挂新玩家的状态树（过滤字段树必须进 view 才对其可见）
+    for (const other of this.clients) {
+      if (other.sessionId === client.sessionId) continue;
+      (other.view as StateView | undefined)?.add(playerState);
+    }
   }
 
   /**

@@ -4,6 +4,7 @@ import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { query } from "bitecs";
+import { Encoder, Decoder } from "@colyseus/schema";
 import { MapSchema, StateView, $filter } from "@colyseus/schema";
 import {
   bootstrapFramework,
@@ -20,6 +21,8 @@ import {
 } from "framework/index";
 import { destroyEntity } from "framework/entities/destroyEntity";
 import { PlayerState } from "framework/net/colyseus/state/PlayerState";
+import { RoomState } from "framework/net/colyseus/state/RoomState";
+import { EntityState } from "framework/net/colyseus/state/EntityState";
 import { Transform } from "framework/components/transform";
 import { Velocity } from "framework/components/physics";
 import { Health } from "framework/components/combat";
@@ -463,10 +466,58 @@ describe("Slice 5：审查修复（destroyEntity / 存档防御 / 写盘串行 /
     (viewB as unknown as { sessionId?: string }).sessionId = "s2";
 
     const ctor = ps.visibleEntities.constructor as typeof MapSchema & {
-      [key: symbol]: (ref: unknown, index: number, view: StateView) => boolean;
+      [key: symbol]: (ref: unknown, index: number, view: StateView | undefined) => boolean;
     };
-    const filter = ctor[$filter];
+    const filter = ctor[$filter] as (ref: unknown, index: number, view: StateView | undefined) => boolean;
     expect(filter(ps.visibleEntities, 0, viewA)).toBe(true);
     expect(filter(ps.visibleEntities, 0, viewB)).toBe(false);
+    expect(filter(ps.visibleEntities, 0, undefined)).toBe(false);
+  });
+
+  it("兴趣裁剪编码链路回归：共享通路不崩 + per-client 只见自己的 visibleEntities", () => {
+    const state = new RoomState();
+
+    const playerA = new PlayerState();
+    playerA.sessionId = "sA";
+    playerA.entityId = 1;
+    playerA.visibleEntities.ownerSessionId = "sA";
+    const entA = new EntityState();
+    entA.id = 1;
+    playerA.visibleEntities.set("1", entA);
+    state.players.set("sA", playerA);
+
+    const playerB = new PlayerState();
+    playerB.sessionId = "sB";
+    playerB.entityId = 2;
+    playerB.visibleEntities.ownerSessionId = "sB";
+    const entB = new EntityState();
+    entB.id = 2;
+    playerB.visibleEntities.set("2", entB);
+    state.players.set("sB", playerB);
+
+    const encoder = new Encoder(state);
+    const buffer = new Uint8Array(Encoder.BUFFER_SIZE);
+    const sharedIt = { offset: 1 };
+
+    // 共享编码通路（view=undefined）——回归点：旧实现 $filter 读 view.sessionId 抛 TypeError
+    expect(() => encoder.encodeAll(sharedIt, buffer)).not.toThrow();
+
+    // per-client 通路：view 挂整棵状态树 + sessionId（GameRoom.onJoin 同款接线）
+    const viewA = new StateView();
+    (viewA as unknown as { sessionId?: string }).sessionId = "sA";
+    viewA.add(state);
+
+    const itA = { offset: sharedIt.offset };
+    const bytesA = encoder.encodeAllView(viewA, sharedIt.offset, itA, buffer);
+
+    const decoded = new RoomState();
+    new Decoder(decoded).decode(bytesA);
+
+    const decodedA = decoded.players.get("sA");
+    const decodedB = decoded.players.get("sB");
+    expect(decodedA?.sessionId).toBe("sA");
+    expect(decodedA?.visibleEntities.has("1")).toBe(true);
+    expect(decodedB?.sessionId).toBe("sB");
+    expect(decodedB?.visibleEntities.has("2")).toBe(false);
   });
 });
