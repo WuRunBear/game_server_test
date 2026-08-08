@@ -99,6 +99,7 @@ git branch --show-current        # 确认已是新分支
 ## 8. 已知待办（未修，不要擅自处理）
 - **待办已清零**（本切片无遗留缺陷）；记录不修：factionSystem / achievementSystem / progressionSystem（无真实需求牵引）、对话选项好感解锁条件（无消费方）、postgres/redis 真实现（等真实部署需求）、`schema:gen` 空文件（工具链问题）、LagComp（ROADMAP 缺口）
 - **S6 审查 P2 记录不修（追加补充，与 PLAN 对账对齐）**：slice5 fileRepository 并发写 flaky（mkdir 微任务竞态）、enterMap 保留物越界（cave 小图虚空实体）、floor/furniture 与 wall 同格叠放被拒（无层概念）、portal 刷怪随机点位置不稳、campfire 被动 gridSnap（24px→2×2 格）、Placeable.ownerNetworkId 未进 netSync——详见 PLAN「S6 审查 P2 记录不修」与「后续候选」表
+- **兴趣裁剪晚加入竞态（colyseus/colyseus#935，core 0.17.43 缺陷，记录不修）**：`SchemaSerializer.getFullState` 在 `root.changes` 非空窗口（本部署每 50ms tick 改 tick/hour 必现）重跑 `encodeAll` 时缺结构引入（旧玩家的 players map ADD 已被消费），晚加入客户端全量快照出现 `"refId not found"`/`"field not defined"` 解码告警、可能看不到旧玩家实体。PR#936 关闭未合并（endel 转 schema 侧修复，4.0.22 拓扑序只解决 view.changes 顺序一类）；已装 core 0.17.43/schema 4.0.25 无完整修复。**规避（本次修复已含）**：GameRoom 最小视图接线（只挂自己 PlayerState + 实体进出 view.add/remove）消除了跨玩家 refId 泄漏；残余影响仅"多玩家时晚加入者可能缺旧玩家结构"。处置选项：升级 core 评估（0.17.44+ 无明确修复版，schema 5.x 为破坏性大版本，需前后端同步升级）或维持现状。实证过程：`applyInterest` 实体未 `view.add` → `isVisibilitySharedWithParent=false` → 实体树 invisible → 内容不编码（NPC 冻结根因，已修）
 - 基线三命令：`pnpm test`（199 全绿）+ `npx tsc --noEmit`（0）+ `pnpm tools validate`（✓）+ framework 游戏词 grep 空（blackboard 技术词豁免，rg 未安装时用 grep 工具核对）
 
 ## 9. 下一步：Slice 8+（按需开启）

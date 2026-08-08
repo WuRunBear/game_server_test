@@ -218,11 +218,14 @@ export class GameRoom extends Room<{ state: RoomState }> {
    * PlayerState 写入后 Colyseus 自动增量同步给该客户端（其他客户端不影响）。
    *
    * 兴趣管理接线（colyseus StateView 模型）：
-   * - `view: true` 过滤字段（PlayerState.visibleEntities）的编码树必须
-   *   `view.add()` 进各客户端 view，否则该树对客户端不可见（编码整体跳过）。
-   * - 加入客户端：`view.add(this.state)` 递归挂整棵当前状态树（根 + 所有玩家 +
-   *   各自可见表），字段级可见性由 VisibleEntities.$filter 按 sessionId 判定。
-   * - 已在线客户端：仅需补挂新玩家的 PlayerState 树（其余树早已在各自 view 中）。
+   * - `@view()` 过滤字段（PlayerState.visibleEntities）的编码树必须 `view.add()`
+   *   进客户端 view，否则该树对客户端不可见（编码整体跳过）。
+   * - **最小视图**：只挂自己的 PlayerState 树（递归含自己的可见表）。
+   *   其他玩家的 PlayerState 树经共享通路到达（sessionId/entityId 非过滤字段），
+   *   其 visibleEntities（过滤字段）本就应被隐藏——整树 add 会把他人实体树
+   *   也带入本客户端编码，触发解码端 "refId not found" 告警，故不挂。
+   * - 实体视图（可见表内容）由 applyInterest 每帧维护：进入视野 view.add、
+   *   离开视野 view.remove（@view() 集合的每个元素必须显式 add，否则内容不编码）。
    */
   onJoin(client: Client): void {
     // 让仿真层创建一个玩家实体，拿到稳定网络 ID
@@ -240,13 +243,7 @@ export class GameRoom extends Room<{ state: RoomState }> {
       client.view = new StateView();
     }
     (client.view as unknown as { sessionId?: string }).sessionId = client.sessionId;
-    client.view.add(this.state);
-
-    // 已在线客户端补挂新玩家的状态树（过滤字段树必须进 view 才对其可见）
-    for (const other of this.clients) {
-      if (other.sessionId === client.sessionId) continue;
-      (other.view as StateView | undefined)?.add(playerState);
-    }
+    client.view.add(playerState);
   }
 
   /**
@@ -363,7 +360,17 @@ export class GameRoom extends Room<{ state: RoomState }> {
     });
   }
 
-  /** 兴趣路径：按各客户端可见集合写入其 PlayerState.visibleEntities。 */
+  /**
+   * 兴趣路径：按各客户端可见集合写入其 PlayerState.visibleEntities。
+   *
+   * colyseus StateView 模型：`@view()` 集合的每个元素必须显式 `view.add()` 进
+   * 客户端 view，其内容才会被编码推送（否则客户端只收到 key，收不到字段内容）。
+   * 顺序注意：实体实例必须先挂入 state（visibleEntities.set 分配 refId），再
+   * view.add——未挂 state 的实例会被 StateView 判定为 detached。
+   *
+   * - 进入视野的实体（新建或复用）：set 后 view.add
+   * - 离开视野的实体：view.remove 后从表删除（remove 让重入可重新编码）
+   */
   private applyInterest(result: TickResult): void {
     const snapshot = result.snapshot;
     for (const client of this.clients) {
@@ -379,12 +386,19 @@ export class GameRoom extends Room<{ state: RoomState }> {
         let entityState = playerState.visibleEntities.get(key);
         if (!entityState) {
           entityState = new EntityState();
+          this.writeEntityState(entityState, networkId, snap);
+          playerState.visibleEntities.set(key, entityState);
+          // 先挂 state 再 add 进 view（新实例无 refId，StateView 会拒收 detached）
+          (client.view as StateView | undefined)?.add(entityState);
+        } else {
+          this.writeEntityState(entityState, networkId, snap);
         }
-        this.writeEntityState(entityState, networkId, snap);
-        playerState.visibleEntities.set(key, entityState);
       }
-      playerState.visibleEntities.forEach((_value: EntityState, key: string) => {
-        if (!alive.has(Number(key))) playerState.visibleEntities.delete(key);
+      playerState.visibleEntities.forEach((entityState: EntityState, key: string) => {
+        if (!alive.has(Number(key))) {
+          (client.view as StateView | undefined)?.remove(entityState);
+          playerState.visibleEntities.delete(key);
+        }
       });
     }
   }

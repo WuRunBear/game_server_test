@@ -474,50 +474,94 @@ describe("Slice 5：审查修复（destroyEntity / 存档防御 / 写盘串行 /
     expect(filter(ps.visibleEntities, 0, undefined)).toBe(false);
   });
 
-  it("兴趣裁剪编码链路回归：共享通路不崩 + per-client 只见自己的 visibleEntities", () => {
-    const state = new RoomState();
+  it("兴趣裁剪编码链路回归：共享通路不崩 + 最小视图 + join 后实体进出视野", () => {
+    const libWarnings: string[] = [];
+    const origWarn = console.warn;
+    const origErr = console.error;
+    console.warn = (...a: unknown[]) => libWarnings.push(a.map(String).join(" ").slice(0, 120));
+    console.error = (...a: unknown[]) => libWarnings.push(a.map(String).join(" ").slice(0, 120));
 
-    const playerA = new PlayerState();
-    playerA.sessionId = "sA";
-    playerA.entityId = 1;
-    playerA.visibleEntities.ownerSessionId = "sA";
-    const entA = new EntityState();
-    entA.id = 1;
-    playerA.visibleEntities.set("1", entA);
-    state.players.set("sA", playerA);
+    try {
+      const state = new RoomState();
 
-    const playerB = new PlayerState();
-    playerB.sessionId = "sB";
-    playerB.entityId = 2;
-    playerB.visibleEntities.ownerSessionId = "sB";
-    const entB = new EntityState();
-    entB.id = 2;
-    playerB.visibleEntities.set("2", entB);
-    state.players.set("sB", playerB);
+      const playerA = new PlayerState();
+      playerA.sessionId = "sA";
+      playerA.entityId = 1;
+      playerA.visibleEntities.ownerSessionId = "sA";
+      state.players.set("sA", playerA);
 
-    const encoder = new Encoder(state);
-    const buffer = new Uint8Array(Encoder.BUFFER_SIZE);
-    const sharedIt = { offset: 1 };
+      const playerB = new PlayerState();
+      playerB.sessionId = "sB";
+      playerB.entityId = 2;
+      playerB.visibleEntities.ownerSessionId = "sB";
+      const entB = new EntityState();
+      entB.id = 2;
+      entB.values.set("Transform.x", 200);
+      playerB.visibleEntities.set("2", entB);
+      state.players.set("sB", playerB);
 
-    // 共享编码通路（view=undefined）——回归点：旧实现 $filter 读 view.sessionId 抛 TypeError
-    expect(() => encoder.encodeAll(sharedIt, buffer)).not.toThrow();
+      const encoder = new Encoder(state);
+      const buffer = new Uint8Array(Encoder.BUFFER_SIZE);
+      const sharedIt = { offset: 1 };
 
-    // per-client 通路：view 挂整棵状态树 + sessionId（GameRoom.onJoin 同款接线）
-    const viewA = new StateView();
-    (viewA as unknown as { sessionId?: string }).sessionId = "sA";
-    viewA.add(state);
+      // 共享编码通路（view=undefined）——回归点：旧实现 $filter 读 view.sessionId 抛 TypeError
+      expect(() => encoder.encodeAll(sharedIt, buffer)).not.toThrow();
 
-    const itA = { offset: sharedIt.offset };
-    const bytesA = encoder.encodeAllView(viewA, sharedIt.offset, itA, buffer);
+      // per-client 通路：最小视图 = 只挂自己的 PlayerState 树（GameRoom.onJoin 同款接线）
+      const viewA = new StateView();
+      (viewA as unknown as { sessionId?: string }).sessionId = "sA";
+      viewA.add(playerA);
 
-    const decoded = new RoomState();
-    new Decoder(decoded).decode(bytesA);
+      const itA = { offset: sharedIt.offset };
+      const bytesA = encoder.encodeAllView(viewA, sharedIt.offset, itA, buffer);
 
-    const decodedA = decoded.players.get("sA");
-    const decodedB = decoded.players.get("sB");
-    expect(decodedA?.sessionId).toBe("sA");
-    expect(decodedA?.visibleEntities.has("1")).toBe(true);
-    expect(decodedB?.sessionId).toBe("sB");
-    expect(decodedB?.visibleEntities.has("2")).toBe(false);
+      const decoded = new RoomState();
+      const decoder = new Decoder(decoded);
+      decoder.decode(bytesA);
+
+      const decodedA = decoded.players.get("sA");
+      const decodedB = decoded.players.get("sB");
+      // 自己的 PlayerState 可见、B 的 sessionId 经共享通路可见、B 的 visibleEntities 被过滤
+      expect(decodedA?.sessionId).toBe("sA");
+      expect(decodedB?.sessionId).toBe("sB");
+      expect(decodedB?.visibleEntities.has("2")).toBe(false);
+
+      // —— join 之后实体进入视野：set 挂 state 后必须 view.add（缺此步内容不编码）——
+      const ent1 = new EntityState();
+      ent1.id = 11;
+      ent1.values.set("Transform.x", 150);
+      playerA.visibleEntities.set("11", ent1);
+      viewA.add(ent1);
+
+      const itP1 = { offset: 1 };
+      encoder.encode(itP1);
+      const sharedOffset = itP1.offset;
+      const patch1 = encoder.encodeView(viewA, sharedOffset, itP1);
+      decoder.decode(patch1);
+      expect(decodedA?.visibleEntities.get("11")?.values.get("Transform.x")).toBe(150);
+
+      // —— 实体移动：同实例字段更新经 patch 到达 ——
+      ent1.values.set("Transform.x", 250);
+      const itP2 = { offset: 1 };
+      encoder.encode(itP2);
+      const patch2 = encoder.encodeView(viewA, itP2.offset, itP2);
+      decoder.decode(patch2);
+      expect(decodedA?.visibleEntities.get("11")?.values.get("Transform.x")).toBe(250);
+
+      // —— 实体离开视野：view.remove + 删表项 ——
+      viewA.remove(ent1);
+      playerA.visibleEntities.delete("11");
+      const itP3 = { offset: 1 };
+      encoder.encode(itP3);
+      const patch3 = encoder.encodeView(viewA, itP3.offset, itP3);
+      decoder.decode(patch3);
+      expect(decodedA?.visibleEntities.has("11")).toBe(false);
+
+      // 全程不允许解码器告警（"refId not found" / "field not defined" 类）
+      expect(libWarnings).toEqual([]);
+    } finally {
+      console.warn = origWarn;
+      console.error = origErr;
+    }
   });
 });
