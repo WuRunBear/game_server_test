@@ -1,3 +1,10 @@
+/**
+ * Slice 4 测试：昼夜循环 / 条件刷怪 / 行为树扩展 / 放置 链路。
+ *
+ * 覆盖：dayNightCycleSystem、刷怪条件（isNight）、BT 通用节点
+ * （IsNight/Sleep/IsInLight）、夜间敌对与火光回避集成、placeEntity 放置原子、
+ * GameSimulation place 命令与 timeOfDay 快照，以及真实 game 配置集成。
+ */
 import { describe, it, expect, beforeAll } from "vitest";
 import { addComponent, addEntity, query } from "bitecs";
 import { State } from "mistreevous";
@@ -38,6 +45,7 @@ import type { GameWorld } from "framework/world";
 import type { ItemKindSpec } from "framework/config/schema/ItemKindSchema";
 
 beforeAll(() => {
+  // 全局引导一次：注册表是幂等单例，所有用例共享同一套内置实现
   bootstrapFramework();
 });
 
@@ -199,6 +207,7 @@ function fillInventory(inv: InventoryEntry, entries: { kind: string; count: numb
   }
 }
 
+// 昼夜系统：hour 按 cycleLengthSec 推进，跨 nightStart/nightEnd 边界切换相位（支持跨午夜）；无规则时冻结
 describe("Slice 4：dayNightCycleSystem", () => {
   it("初始状态：世界从 8 时白天开始", () => {
     const world = createBareWorld();
@@ -239,6 +248,7 @@ describe("Slice 4：dayNightCycleSystem", () => {
   });
 });
 
+// 条件刷怪：condition 按 world 状态判定（isNight 等），不满足不刷、满足时刷到 max 为止；未注册的条件抛错
 describe("Slice 4：spawn condition（条件刷怪）", () => {
   it("isNight 条件按相位判定", () => {
     const world = createBareWorld();
@@ -291,6 +301,7 @@ describe("Slice 4：spawn condition（条件刷怪）", () => {
   });
 });
 
+// BT 通用节点：IsNight 判相位、Sleep 清速度、IsInLight 按光源半径与燃料判定（燃料耗尽不发光）
 describe("Slice 4：BT 通用节点 IsNight / Sleep / IsInLight", () => {
   function makeInstance(world: GameWorld, node: unknown) {
     const inst = createNpcTree({ type: "root", child: node }, world.actions);
@@ -350,6 +361,7 @@ describe("Slice 4：BT 通用节点 IsNight / Sleep / IsInLight", () => {
   });
 });
 
+// 集成：夜间敌对实体追击光外玩家、天亮中断追击、光内目标不可感知（回避火光）、目标出入视野即醒/眠
 describe("Slice 4 集成：夜间敌对 + 火光回避（通用光源机制）", () => {
   /** 跑一帧感知+AI+移动（dt=50ms）。 */
   function stepTick(world: GameWorld): void {
@@ -457,6 +469,7 @@ describe("Slice 4 集成：夜间敌对 + 火光回避（通用光源机制）",
   });
 });
 
+// 放置原子：合法则入位（GridOccupancy + 资源产出/消耗 + owner）并返回 eid；超距/非法占位/无资产拒
 describe("Slice 4：placeEntity 放置原子", () => {
   /** 注册可放置原型 plc（Placeable footprint 20×20）+ 放置物品 k1。 */
   function setupPlaceable(world: GameWorld): void {
@@ -559,6 +572,7 @@ describe("Slice 4：placeEntity 放置原子", () => {
   });
 });
 
+// GameSimulation 命令路由：place 命令从传输层进入世界并落位；timeOfDay 进入快照可同步给客户端
 describe("Slice 4：GameSimulation place 命令 + timeOfDay 快照", () => {
   it("submitCommand place 生效；死亡窗口拒绝", () => {
     const gameDef = createDefaultGameDefinition();
@@ -595,6 +609,7 @@ describe("Slice 4：GameSimulation place 命令 + timeOfDay 快照", () => {
   });
 });
 
+// 真实 game 配置集成：昼夜相位、条件刷怪、光源、放置全部走配置数据端到端生效
 describe("Slice 4：真实 game 配置（昼夜 + 条件刷怪 + 光源 + 放置）", () => {
   it("validateIntegrity：条件刷怪 / 夜间行为（含 guard）/ 放置引用全部通过", () => {
     const def = loadGameDefinition({ gameJsonPath: "game/game.json" });

@@ -3,6 +3,17 @@ import fs from "node:fs";
 import type { MapSource } from "map";
 
 /**
+ * 地图来源解析（framework/config/map.ts）。
+ *
+ * 从地图清单（game/maps/registry.json）解析出运行时可用的 MapSource：
+ * - kind = "tiled"：读取外部 Tiled JSON 瓦片地图文件，内容内联进 MapSource.json
+ * - kind = "generated"：声明生成器（generatorId）与种子/尺寸，由地图生成器程序化产出
+ *
+ * 与 schema/MapRegistrySchema.ts（纯配置校验）不同，本文件面向地图运行时
+ * （framework/map），采用手工解析而非 zod；被 bootstrapFramework 用于装配世界地图。
+ */
+
+/**
  * 读取并解析 JSON 文件。
  *
  * @param filePath 文件路径

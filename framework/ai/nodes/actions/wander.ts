@@ -1,3 +1,8 @@
+/**
+ * action：游荡——无目标时在随机方向上漫无目的地移动。
+ * 每 tick 以固定间隔（20~60 tick）随机换向，运行期状态存于黑板，
+ * 跨 tick 保持当前方向；速度默认取 2 倍格宽，可用 args.speed 覆盖。
+ */
 import { State } from "mistreevous";
 
 import { bbGet, bbSet } from "framework/ai/blackboard";
@@ -9,18 +14,27 @@ import {
 } from "framework/ai/nodes/steer";
 import { Transform, Velocity } from "framework/components";
 
+/** 游荡节点的运行期状态（存入黑板，跨 tick 保持方向与换向时机）。 */
 type WanderRuntime = {
-  nextChangeTick: number;
-  dirX: number;
-  dirY: number;
+  nextChangeTick: number; // 下一次随机换向的世界 tick
+  dirX: number;           // 当前移动方向 x
+  dirY: number;           // 当前移动方向 y
 };
 
+/** 黑板 key：游荡运行期状态（随机方向、换向 tick）。 */
 const BB_KEY = "ai.wander.runtime";
 
+/** 生成 [min, maxInclusive] 闭区间的随机整数。 */
 function randInt(min: number, maxInclusive: number): number {
   return Math.floor(Math.random() * (maxInclusive - min + 1)) + min;
 }
 
+/**
+ * 游荡节点工厂：
+ * - 首次执行时在黑板初始化运行期状态，之后复用；
+ * - 到达换向 tick 则随机选一个 360° 方向并排下一次换向时机；
+ * - 靠近地图边缘时把方向钳制回界内（复用 steer 工具），避免走出地图。
+ */
 export function createWanderAction(args?: Record<string, unknown>): () => State {
   const speed = args?.speed as number | undefined;
   return function Wander(this: { ctx: BtContext | null }): State {

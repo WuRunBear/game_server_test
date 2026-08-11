@@ -17,6 +17,7 @@ import type { ItemKindSpec, ConsumeEffect } from "framework/config/schema/ItemKi
 
 const DEFAULT_MAX_STACK = 1;
 
+/** 物品最大堆叠数：itemKinds 查不到该 kind（或未声明 maxStack）时按 1。 */
 function maxStackFor(itemKinds: Map<string, ItemKindSpec> | undefined, kind: string): number {
   return itemKinds?.get(kind)?.maxStack ?? DEFAULT_MAX_STACK;
 }
@@ -167,6 +168,7 @@ export function spawnDroppedItem(
   return eid;
 }
 
+/** 取实体背包（无该组件数据时返回 undefined）。 */
 function inventoryOf(world: GameWorld, eid: number): InventoryEntry | undefined {
   return Inventory[eid];
 }

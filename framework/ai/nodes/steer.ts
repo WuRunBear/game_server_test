@@ -3,12 +3,14 @@
  */
 import type { MapGrid } from "framework/map/types";
 
+/** 向量归一化（单位化）；零向量（长度 ≤ 1e-6）时回退到固定方向 (1,0)，避免除零。 */
 export function normalizeOrFallback(x: number, y: number): { x: number; y: number } {
   const len = Math.hypot(x, y);
   if (len <= 1e-6) return { x: 1, y: 0 };
   return { x: x / len, y: y / len };
 }
 
+/** 地图像素边界：含单格尺寸（tileW/tileH），作为边缘钳制时的余量。 */
 export interface MapBounds {
   tileW: number;
   tileH: number;

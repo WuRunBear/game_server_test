@@ -1,3 +1,12 @@
+/**
+ * 单房间可同步状态视图（Colyseus Schema 定义）。
+ *
+ * RoomState 不是 ECS 世界本身，只是每 tick 从仿真快照派生的只读视图：
+ * GameRoom 每帧把 TickSnapshot 映射到本 Schema，Colyseus 自动 diff 后
+ * 增量推送给房间内客户端（服务端权威，客户端不做逻辑）。
+ * entities / players 均以稳定标识为 key（NetworkId / sessionId），
+ * 与 ECS 内部 eid 无关。
+ */
 import { MapSchema, Schema, type } from "@colyseus/schema";
 
 import { EntityState } from "./EntityState";

@@ -9,6 +9,18 @@ import { Collider, ColliderShape, Transform, Velocity } from "components";
 import type { EntityId, GameWorld } from "world";
 
 /**
+ * 碰撞系统：基于 check2d（SAT 分离）做服务端碰撞。
+ *
+ * 运行位置：每 tick 在 physicsSystem / movementSystem 之后执行——
+ * 先由 movementSystem 把速度积分到位移，本系统再纠正越界/重叠的位置。
+ * 职责：
+ * - 把地图阻挡格与实体（Transform + Collider）同步成 check2d 碰撞体
+ * - 执行分离，把重叠实体推开，并把修正后的坐标写回 ECS
+ * - 若某轴被修正（顶到障碍），清零该轴速度，避免持续顶墙抖动
+ * 运行时缓存在 world.systemRuntimes 中（懒初始化，跨 tick 复用）。
+ */
+
+/**
  * 碰撞系统调试里的地图占位结构。
  */
 export type CollisionDebugMapBody = {
@@ -67,6 +79,7 @@ export type CollisionDebugPair = {
   overlap: number;
 };
 
+/** 碰撞体附加的用户数据：区分地图格与实体，供调试 id 使用。 */
 type CollisionBodyUserData =
   | {
       kind: "map";
@@ -78,8 +91,10 @@ type CollisionBodyUserData =
       id: string;
     };
 
+/** 携带 userData 的 check2d 碰撞体。 */
 type CollisionBody = Body<CollisionBodyUserData>;
 
+/** 碰撞运行时：check2d 系统 + 地图/实体碰撞体缓存 + 本帧调试碰撞对。 */
 type CollisionRuntime = {
   system: Check2dSystem<CollisionBody>;
   mapBodies: CollisionBody[];
@@ -87,8 +102,10 @@ type CollisionRuntime = {
   pairs: CollisionDebugPair[];
 };
 
+/** world.systemRuntimes 中碰撞运行时的缓存键。 */
 const COLLISION_KEY = "collision";
 
+/** 判定"位置被分离修正"的最小阈值，用于避免浮点误差导致的误判。 */
 const POSITION_EPSILON = 0.0001;
 
 /**

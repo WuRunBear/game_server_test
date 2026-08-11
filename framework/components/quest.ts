@@ -17,10 +17,15 @@ export interface QuestState {
   count: number;
 }
 
+/** AoS 存储：普通 JS 数组按 eid 索引（非 bitecs 组件，不能 addComponent/query）。 */
 export const Quest = [] as (QuestState[] | undefined)[];
 
-/** 任务状态常量。 */
+// 任务状态常量（与 QuestState.state 字段对应）
+/** 0=未接（可接取）。 */
 export const QUEST_AVAILABLE = 0;
+/** 1=进行中。 */
 export const QUEST_ACTIVE = 1;
+/** 2=满足条件，可提交。 */
 export const QUEST_READY = 2;
+/** 3=已完成。 */
 export const QUEST_DONE = 3;

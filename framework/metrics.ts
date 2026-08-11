@@ -1,6 +1,14 @@
+/**
+ * 运行指标收集（游戏无关）：统计每帧耗时，供性能观测/调试使用。
+ */
+
+/** 指标集合：挂在 world.metrics 上，由 GameInstance 每 tick 更新。 */
 export interface Metrics {
+  /** 已执行的逻辑帧总数。 */
   tickCount: number;
+  /** 最近一帧耗时（毫秒）。 */
   lastTickMs: number;
+  /** 帧耗时滑动平均值（指数平滑，越近的帧权重越大）。 */
   avgTickMs: number;
 }
 

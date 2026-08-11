@@ -1,3 +1,9 @@
+/**
+ * 放置校验通用工具（游戏无关）。
+ *
+ * 提供「矩形占位（中心 x/y，宽 w 高 h）与实体/地图阻挡的冲突判定」
+ * 以及「网格对齐 / 网格占用判定」，供放置系统做放置合法性校验。
+ */
 import { query } from "bitecs";
 import { Collider, ColliderShape, GridOccupancy, Transform } from "components";
 import type { GameWorld } from "world";

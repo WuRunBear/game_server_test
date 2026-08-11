@@ -1,16 +1,29 @@
+/**
+ * 生成地图导出工具：把 MapRuntime 落盘为 JSON 与 PNG 预览图。
+ *
+ * 用途（tools 命令 gen-map / export-map）：生成完成后保存产物，
+ * 供人工检查与后续复用。PNG 用纯 Node 实现（zlib deflate + 手写 crc32），
+ * 不依赖任何图片库。
+ */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { deflateSync } from "node:zlib";
 import type { MapRuntime } from "map/types";
 
+/** RGBA 颜色值（固定四元组）。 */
 type Rgba = readonly [number, number, number, number];
 
+/** PNG 文件头签名（固定 8 字节魔数）。 */
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
+/** 网格线颜色（浅灰）。 */
 const COLOR_GRID: Rgba = [210, 210, 210, 255];
+/** 可走格子颜色（白）。 */
 const COLOR_WALKABLE: Rgba = [255, 255, 255, 255];
+/** 阻挡格子颜色（黑）。 */
 const COLOR_BLOCKED: Rgba = [0, 0, 0, 255];
 
+/** 计算 PNG chunk 的 CRC32 校验和（标准 0xedb88320 反射多项式）。 */
 function crc32(buf: Uint8Array): number {
   let crc = 0xffffffff;
   for (let i = 0; i < buf.length; i += 1) {
@@ -23,6 +36,7 @@ function crc32(buf: Uint8Array): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
+/** 构造一个 PNG chunk（长度 + 类型 + 数据 + CRC 校验）。 */
 function pngChunk(type: string, data: Uint8Array): Buffer {
   const typeBuf = Buffer.from(type, "ascii");
   const lenBuf = Buffer.alloc(4);
@@ -35,6 +49,7 @@ function pngChunk(type: string, data: Uint8Array): Buffer {
   return Buffer.concat([lenBuf, typeBuf, Buffer.from(data), crcBuf]);
 }
 
+/** 把 RGBA 像素数组编码为 PNG Buffer（8bit RGBA、行首 0 滤波）。 */
 function encodePngRgba(width: number, height: number, rgba: Uint8Array): Buffer {
   const scanlineSize = 1 + width * 4;
   const raw = Buffer.alloc(scanlineSize * height);
@@ -63,6 +78,10 @@ function encodePngRgba(width: number, height: number, rgba: Uint8Array): Buffer 
   ]);
 }
 
+/**
+ * 把阻挡网格渲染为格子预览图（每格 cellSize 像素，叠加浅灰网格线；
+ * 黑 = 阻挡，白 = 可走）。
+ */
 function renderBlockedGridPng(runtime: MapRuntime, cellSize: number): Buffer {
   const gridW = runtime.grid.width;
   const gridH = runtime.grid.height;
@@ -96,6 +115,7 @@ function renderBlockedGridPng(runtime: MapRuntime, cellSize: number): Buffer {
   return encodePngRgba(width, height, rgba);
 }
 
+/** 把 MapRuntime 转为可 JSON 序列化的结构（blocked 由 Uint8Array 转 number[]）。 */
 function mapRuntimeToJsonSerializable(runtime: MapRuntime) {
   return {
     ...runtime,

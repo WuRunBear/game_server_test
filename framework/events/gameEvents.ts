@@ -13,7 +13,9 @@
 import type { GameWorld } from "world";
 
 export interface GameEvent {
+  /** 事件类型标识（如 "killed"），产生方与消费方必须约定一致。 */
   type: string;
+  /** 事件载荷（如击杀者/受害者 eid 等），具体字段由各系统约定。 */
   data: Record<string, unknown>;
 }
 

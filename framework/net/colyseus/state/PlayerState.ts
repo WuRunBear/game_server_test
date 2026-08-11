@@ -1,3 +1,12 @@
+/**
+ * 玩家网络状态视图（Colyseus Schema 定义）。
+ *
+ * 一个连接对应一个 PlayerState（RoomState.players 以 sessionId 为 key）。
+ * 其中的 visibleEntities 是兴趣裁剪（视野管理）的产物：配置了视野半径时，
+ * 服务端只把该玩家视野内的实体写入其可见表，并经 $filter 仅对所属玩家
+ * 编码，实现 per-client 差异化同步；未配置时该表为空，实体数据走
+ * RoomState.entities 全量广播（旧协议兼容）。
+ */
 import { MapSchema, Schema, StateView, type, view, $filter } from "@colyseus/schema";
 
 import { EntityState } from "./EntityState";

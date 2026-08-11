@@ -18,6 +18,7 @@ export interface LootEntry {
   chance: number;
 }
 
+/** AoS 存储：普通 JS 数组按 eid 索引（非 bitecs 组件，不能 addComponent/query）。 */
 export const LootTable = [] as (LootEntry[] | undefined)[];
 
 /** AoS 初始化钩子：深拷贝 archetype 的 LootTable 数组配置。 */

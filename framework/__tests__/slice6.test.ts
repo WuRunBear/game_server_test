@@ -1,3 +1,11 @@
+/**
+ * Slice 6 测试：网格放置 / 静态碰撞 / 拆除 / 多地图（传送门）链路。
+ *
+ * 覆盖：gridSnap 网格对齐与 GridOccupancy 占用、静态体碰撞（墙不被推走）、
+ * deconstruct 拆除（仅放置者可拆）、setWorldMap/enterMap/portalSystem
+ * 切图与清场规则、spawningSystem 按 mapId 过滤、存档记录/恢复 mapId，
+ * 以及真实 game 配置集成（墙放置→拆除全链路）。
+ */
 import { describe, it, expect, beforeAll } from "vitest";
 import { addComponent, addEntity, query } from "bitecs";
 import {
@@ -35,6 +43,7 @@ import type { GameWorld } from "framework/world";
 import type { ItemKindSpec } from "framework/config/schema/ItemKindSchema";
 
 beforeAll(() => {
+  // 全局引导一次：注册表是幂等单例，所有用例共享同一套内置实现
   bootstrapFramework();
 });
 
@@ -152,6 +161,7 @@ function networkIdOf(world: GameWorld, eid: number): number {
   return NetworkId.value[eid];
 }
 
+// 网格放置：gridSnap 开启时占位对齐格线并写入格组（GridOccupancy），同格重放被拒、相邻格允许；未开启保持旧行为
 describe("Slice 6：网格对齐与 GridOccupancy", () => {
   it("gridSnap 缺省（off）：任意坐标放置，不写格组（旧行为）", () => {
     const world = createBareWorld();
@@ -208,6 +218,7 @@ describe("Slice 6：网格对齐与 GridOccupancy", () => {
   });
 });
 
+// 静态碰撞：无 Velocity 的实体注册为静态体，玩家被挡停且墙不被推走；动态体之间仍正常分离
 describe("Slice 6：静态碰撞（墙不被推走）", () => {
   it("无 Velocity 实体注册静态体：玩家被墙阻挡，墙位置不动", () => {
     const world = createBareWorld();
@@ -253,6 +264,7 @@ describe("Slice 6：静态碰撞（墙不被推走）", () => {
   });
 });
 
+// 拆除：仅放置者可拆且需在范围内；超距/非放置者/无效 target/世界物（owner=0）均拒绝
 describe("Slice 6：deconstruct 拆除（仅放置者可拆）", () => {
   function setupWithPlacedWall(world: GameWorld, x = 16, y = 8): { owner: number; wallEid: number } {
     attachTestMap(world);
@@ -292,6 +304,7 @@ describe("Slice 6：deconstruct 拆除（仅放置者可拆）", () => {
   });
 });
 
+// 多地图：setWorldMap 换图并重建地图缓存；enterMap 清场景实体保留玩家内容并传送；portalSystem 触触即切
 describe("Slice 6：portal 场景切换", () => {
   it("enterMap：换图 + 清场（保留玩家内容）+ 布置 + 传送玩家", () => {
     const world = createBareWorld();
@@ -470,6 +483,7 @@ describe("Slice 6：portal 场景切换", () => {
   });
 });
 
+// 真实 game 配置集成：墙放置→占用→拆除全链路走配置数据，验证端到端可用
 describe("Slice 6：真实 game 配置集成", () => {
   it("合成 wall_kit → gridSnap 放置 → 拆除 → 死亡窗口拒绝 全链路", () => {
     const def = loadGameDefinition({ gameJsonPath: "game/game.json" });

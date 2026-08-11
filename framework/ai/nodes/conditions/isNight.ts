@@ -1,3 +1,7 @@
+/**
+ * condition：当前世界时间是否处于夜晚相位。
+ * 供"入夜切换行为"类分支使用，具体分支逻辑由行为树组织决定。
+ */
 import { PHASE_NIGHT } from "framework/world";
 import type { BtContext } from "framework/ai/btRunner";
 

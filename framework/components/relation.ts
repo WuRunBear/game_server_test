@@ -12,4 +12,5 @@ export interface RelationState {
   value: number;
 }
 
+/** AoS 存储：普通 JS 数组按 eid 索引（非 bitecs 组件，不能 addComponent/query）。 */
 export const Relation = [] as (RelationState[] | undefined)[];

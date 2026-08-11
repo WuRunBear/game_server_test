@@ -1,3 +1,13 @@
+/**
+ * 游戏配置加载——把 game/ 目录下的 JSON 配置文件读入内存、逐文件校验并合并。
+ *
+ * 输入：game.json 主配置（含各资源文件的 glob 路径、netSync 字段等）。
+ * 输出：LoadedGameDefinition（主配置 + 解析后的实体原型/行为/规则/刷怪/
+ * 物品/对话/任务/地图来源），最后经 validateIntegrity 做跨文件引用完整性校验。
+ *
+ * 各资源文件按路径 glob 加载，逐文件用 zod schema 校验；规则文件按文件名
+ * 找已注册 schema（getRuleSchema），未注册的保持原样透传（向后兼容）。
+ */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { resolve, dirname, basename } from "node:path";
 import {
@@ -20,18 +30,22 @@ import type { MapSource } from "framework/map/types";
 import type { ArchetypeSpec } from "framework/entities/archetypeRegistry";
 
 export interface LoadGameDefinitionOptions {
+  /** game.json 路径（相对 process.cwd()）；缺省 "game/game.json"。 */
   gameJsonPath?: string;
 }
 
+/** 主配置所在目录（其余资源文件路径相对它解析）。 */
 function resolveConfigDir(gameJsonPath: string): string {
   return resolve(process.cwd(), dirname(gameJsonPath));
 }
 
+/** 读 JSON 文件并解析为 unknown（由调用方的 zod schema 校验）。 */
 function readJsonFile(filePath: string): unknown {
   const text = readFileSync(filePath, "utf8");
   return JSON.parse(text) as unknown;
 }
 
+/** 按 glob 展开 JSON 文件绝对路径列表：含 `*` 时扫描目录下全部 .json，否则按单文件存在性判断。 */
 function loadFilesByGlob(baseDir: string, pattern: string): string[] {
   if (pattern.includes("*")) {
     const dir = dirname(pattern);
@@ -57,6 +71,7 @@ function loadArchetypesFiles(baseDir: string, entityPattern?: string): Archetype
   return results;
 }
 
+/** 加载行为树文件（每个文件一个 BehaviorSchema，逐文件 zod 校验）。 */
 function loadBehaviorFiles(baseDir: string, behaviorPattern?: string): BehaviorDefinition[] {
   if (!behaviorPattern) return [];
   const files = loadFilesByGlob(baseDir, behaviorPattern);
@@ -69,6 +84,7 @@ function loadBehaviorFiles(baseDir: string, behaviorPattern?: string): BehaviorD
   return results;
 }
 
+/** 加载规则文件：文件名（去 .json 后缀）→ 规则内容；已注册 schema 走 zod，否则原样透传。 */
 function loadRulesFile(baseDir: string, rulesPattern?: string): Record<string, unknown> {
   if (!rulesPattern) return {};
   const files = loadFilesByGlob(baseDir, rulesPattern);
@@ -83,6 +99,7 @@ function loadRulesFile(baseDir: string, rulesPattern?: string): Record<string, u
   return allRules;
 }
 
+/** 加载物品类型文件（每个文件一个 ItemKindSchema）；kind 全局唯一，重复抛错。 */
 function loadItemsFile(baseDir: string, itemsPattern?: string): ItemKindSpec[] {
   if (!itemsPattern) return [];
   const files = loadFilesByGlob(baseDir, itemsPattern);
@@ -100,6 +117,7 @@ function loadItemsFile(baseDir: string, itemsPattern?: string): ItemKindSpec[] {
   return results;
 }
 
+/** 加载刷怪规则文件：SpawnRegistrySchema 解包出 rules 数组，逐条再校验。 */
 function loadSpawnsFile(baseDir: string, spawnsPattern?: string): SpawnRule[] {
   if (!spawnsPattern) return [];
   const files = loadFilesByGlob(baseDir, spawnsPattern);
@@ -133,6 +151,7 @@ function loadDialoguesFile(baseDir: string, pattern?: string): DialogueTreeJson[
   return results;
 }
 
+/** 加载任务文件（QuestRegistrySchema）；任务 id 全局唯一，重复抛错。 */
 function loadQuestsFile(baseDir: string, pattern?: string): QuestDefinitionJson[] {
   if (!pattern) return [];
   const files = loadFilesByGlob(baseDir, pattern);
@@ -203,6 +222,15 @@ function resolveMapSources(
   return { sources, defaultSource };
 }
 
+/**
+ * 跨文件引用完整性校验——配置里引用的任何东西都必须真实存在。
+ *
+ * 校验对象：system/action/component/archetype 注册表存在性、behavior 引用、
+ * 刷怪条件的 kind/condition/mapId、netSync 的组件与标签、合成配方的物品 kind、
+ * 放置物品的原型、对话树的 treeId 与跳转目标/任务效果、任务引用的 itemKind/victimKind/奖励。
+ *
+ * 若框架尚未 bootstrap（注册表不可用，如纯类型测试场景）则静默跳过校验。
+ */
 function validateIntegrity(data: LoadedGameDefinition): void {
   try {
     const { systemRegistry, actionRegistry, componentRegistry, archetypeRegistry } = getRegistries();
@@ -405,6 +433,7 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
   }
 
   const gameDef = result.data;
+  // 逐个加载资源文件（路径来自 game.json 的对应字段，均为可选 glob）
   const resolvedEntities = loadArchetypesFiles(baseDir, gameDef.entities);
   const resolvedBehaviors = loadBehaviorFiles(baseDir, gameDef.behaviors);
   const resolvedRules = loadRulesFile(baseDir, gameDef.rules);
@@ -414,6 +443,7 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
   const resolvedQuests = loadQuestsFile(baseDir, gameDef.quests);
   const mapResult = resolveMapSources(baseDir, gameDef.map?.registry);
 
+  // 合并为最终定义：主配置字段 + 各 resolved* 资源数据 + 地图来源（默认/全量）
   const loaded: LoadedGameDefinition = {
     ...gameDef,
     resolvedEntities,

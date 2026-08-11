@@ -1,3 +1,11 @@
+/**
+ * 生存循环（Slice 1/2）与基础设施测试：生存 / 战斗 / 感知 / 行为树 链路。
+ *
+ * 覆盖：背包纯函数（addToInventory/consume/drop/transfer）、Need 衰减与
+ * 食用补给、采集（harvest）、交互意图路由、combat 原子与冷却、perception
+ * 感知、death/respawn、BT 战斗节点（Chase/Attack/Flee 等），以及生存/战斗
+ * 闭环集成与真实 netSync 接线（OR 语义 + AoS 展平）。
+ */
 import { describe, it, expect, beforeAll } from "vitest";
 import { addComponent, addEntity, hasComponent, query, removeEntity } from "bitecs";
 import { State } from "mistreevous";
@@ -54,6 +62,7 @@ import type { GameWorld } from "framework/world";
 import type { ItemKindSpec } from "framework/config/schema/ItemKindSchema";
 
 beforeAll(() => {
+  // 全局引导一次：注册表是幂等单例，所有用例共享同一套内置实现
   bootstrapFramework();
 });
 
@@ -180,6 +189,7 @@ function spawnTestEnemy(world: GameWorld, opts: EnemyOpts = {}): number {
   return eid;
 }
 
+// 背包纯函数：合入同 kind 未满堆叠、受 maxStack 限制、满包返回未入剩余量、未知 kind 视作 maxStack=1
 describe("addToInventory (纯函数)", () => {
   it("合入同 kind 未满堆叠", () => {
     const inv: InventoryEntry = { capacity: 3, slots: [{ kind: "k1", count: 5 }, null, null] };
@@ -211,6 +221,7 @@ describe("addToInventory (纯函数)", () => {
   });
 });
 
+// 槽操作：consume 恢复 Need 并减堆叠、drop 生成地面物品（有拾取冷却）、transfer 移动/合并/交换
 describe("consumeSlot / dropSlot / transferSlot", () => {
   it("consumeSlot 恢复 Need 并减堆叠；不可食用返回 false", () => {
     const world = createBareWorld();
@@ -278,6 +289,7 @@ describe("consumeSlot / dropSlot / transferSlot", () => {
   });
 });
 
+// Need 衰减：按 dt 衰减、归零扣血（死亡统一交 deathSystem）、decayScale 规则倍率生效
 describe("needDecaySystem", () => {
   it("按 dt 衰减 Needs", () => {
     const world = createBareWorld();
@@ -314,6 +326,7 @@ describe("needDecaySystem", () => {
   });
 });
 
+// 采集：remaining-- 且产出入包；满包/枯竭拒绝、directConsume 直接恢复 Need、部分入时剩余落地面
 describe("harvest (gatheringModule)", () => {
   it("成功：remaining-- 且物品入背包", () => {
     const world = createBareWorld();
@@ -370,6 +383,7 @@ describe("harvest (gatheringModule)", () => {
   });
 });
 
+// 交互路由：读 Intent 对最近资源执行 harvest 后清空意图；超距不执行仍清空；死亡残留意图不跨重生窗口
 describe("interactionSystem 路由", () => {
   it("读 Intent 并对最近 Resource 节点 harvest，随后清空 Intent", () => {
     const world = createBareWorld();
@@ -413,6 +427,7 @@ describe("interactionSystem 路由", () => {
   });
 });
 
+// netSync 接线：多组件同字段以 OR 语义并入一列；AoS 组件经适配器展平为 numbers/strings
 describe("netSync：OR 语义 + AoS 适配（用真实 game 配置的 netSync 接线）", () => {
   it("仅 Transform+Size 的 item 实体对快照可见（OR 语义修旧 AND-query 缺陷）", () => {
     const { componentRegistry, archetypeRegistry } = getRegistries();
@@ -450,6 +465,7 @@ describe("netSync：OR 语义 + AoS 适配（用真实 game 配置的 netSync �
   });
 });
 
+// Slice 1 集成：两条生存路径闭环——消耗地面物品恢复 Need，或经采集→食用闭环；Need 归零不掉进负值
 describe("Slice 1 集成：生存循环两条路径", () => {
   it("路径 A：采集 → 食用 → Need 回升", () => {
     const world = createBareWorld();
@@ -490,6 +506,7 @@ describe("Slice 1 集成：生存循环两条路径", () => {
   });
 });
 
+// combat 原子：伤害=攻-防、冷却限制出手、友伤开关、超射程拒；0 血后由 deathSystem 收尾
 describe("Slice 2：combatSystem attackTarget 原子", () => {
   it("冷却中拒绝攻击", () => {
     const world = createBareWorld();
@@ -523,6 +540,7 @@ describe("Slice 2：combatSystem attackTarget 原子", () => {
   });
 });
 
+// 感知：光内/夜内过滤——光源内或白天内的目标不可感知，范围与遮挡共同决定可见性
 describe("Slice 2：perceptionSystem", () => {
   it("视野内写最近敌对目标；同队不写", () => {
     const world = createBareWorld();
@@ -573,6 +591,7 @@ describe("Slice 2：perceptionSystem", () => {
   });
 });
 
+// death：击杀者/位置归属落盘为掉落记录；无击杀者（环境致死）也照常掉落
 describe("Slice 2：deathSystem", () => {
   it("非玩家无掉落 → removeEntity", () => {
     const world = createBareWorld();
@@ -624,6 +643,7 @@ describe("Slice 2：deathSystem", () => {
   });
 });
 
+// respawn：按延迟在出生点重建实体并清残留（含背包/冷却/死亡窗口拒绝等状态恢复）
 describe("Slice 2：respawnSystem", () => {
   it("延迟未到不重置", () => {
     const world = createBareWorld();
@@ -659,6 +679,7 @@ describe("Slice 2：respawnSystem", () => {
   });
 });
 
+// BT 战斗节点：Chase 追击/Attack 攻击并回传黑板上目标状态/目标丢失返回待机，验证行为树驱动战斗
 describe("Slice 2：BT 战斗节点", () => {
   function makeInstance(definition: Parameters<typeof createNpcTree>[0]) {
     const registry = createActionRegistry();
@@ -785,6 +806,7 @@ describe("Slice 2：BT 战斗节点", () => {
   });
 });
 
+// 战斗闭环集成：感知→追击→攻击→死亡→掉落→重生 整条链在多系统协作下正确运转
 describe("Slice 2 集成：战斗闭环", () => {
   it("玩家攻击意图击杀敌人 → 掉落落地", () => {
     const world = createBareWorld();

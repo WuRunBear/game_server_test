@@ -18,7 +18,9 @@ import type { PlayerInput } from "./types";
 export interface InputGuardOptions {
   /** tickRate（用于把「每秒」换算成逻辑 tick 窗口）。 */
   tickRate: number;
+  /** 移动合成速度上限（像素/秒）；缺省不限速。 */
   maxMoveSpeed?: number;
+  /** 命令频率上限（条/秒）；缺省不限频。 */
   maxCommandsPerSec?: number;
 }
 
@@ -34,9 +36,15 @@ export interface InputGuard {
   removeSession(sessionId: string): void;
 }
 
+/**
+ * 构建输入校验器：闭包持有窗口大小与每个会话的命令 tick 历史。
+ * commandTicks 以逻辑 tick 号为时间戳计数（与真实时钟解耦，测试确定性好）。
+ */
 function buildGuard(options: InputGuardOptions): InputGuard {
   const { maxMoveSpeed, maxCommandsPerSec, tickRate } = options;
+  // 限频窗口 = 1 秒对应的逻辑 tick 数
   const windowSize = Math.max(1, Math.floor(tickRate));
+  // sessionId → 该会话最近被放行的命令 tick 号列表
   const commandTicks = new Map<string, number[]>();
 
   return {

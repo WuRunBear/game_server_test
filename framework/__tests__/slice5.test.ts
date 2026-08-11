@@ -1,3 +1,11 @@
+/**
+ * Slice 5 测试：持久化（世界快照）与联机服务端能力。
+ *
+ * 覆盖：serializeWorld/restoreWorld 世界快照序列化与恢复、定时存档与读档
+ * （fileRepository 文件后端）、兴趣裁剪（viewRadius）、输入校验（anti-cheat，
+ * 超速/命令限流）、审查修复（destroyEntity 清理 AoS、写盘串行、per-client
+ * $filter 编码链路），以及真实 server 规则集成（存档→恢复 demo）。
+ */
 import { describe, it, expect, beforeAll } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
@@ -38,6 +46,7 @@ import type { GameWorld } from "framework/world";
 import type { WorldRecord, ServerRule } from "framework/index";
 
 beforeAll(() => {
+  // 全局引导一次：注册表是幂等单例，所有用例共享同一套内置实现
   bootstrapFramework();
 });
 
@@ -100,6 +109,7 @@ function simWorld(sim: ReturnType<typeof createGameSimulation>): GameWorld {
   return (sim as unknown as { world: GameWorld }).world;
 }
 
+// 世界快照：全字段序列化（SoA+AoS+world 级）、瞬态组件不入档；恢复重建实体并清空初始实体，未知 kind 跳过
 describe("Slice 5：世界快照序列化/恢复", () => {
   it("serializeWorld：全实体全字段（SoA + AoS + world 级），瞬态组件缺席", () => {
     const world = createBareWorld();
@@ -189,6 +199,7 @@ describe("Slice 5：世界快照序列化/恢复", () => {
   });
 });
 
+// 持久化：按 saveIntervalMs 定时写盘（fileRepository）、initialRecord 读档恢复、addPlayer 复用原 networkId 与背包内容
 describe("Slice 5：持久化（定时存档 + 读档恢复 + 玩家复用）", () => {
   it("定时存档：达间隔写盘，未达不写；无规则不自动存档", async () => {
     const dir = mkdtempSync(join(tmpdir(), "s5-autosave-"));
@@ -243,6 +254,7 @@ describe("Slice 5：持久化（定时存档 + 读档恢复 + 玩家复用）", 
   });
 });
 
+// 兴趣裁剪：own 恒可见、viewRadius 内可见、范围外不可见；无 server 规则则不裁剪（旧协议兼容）
 describe("Slice 5：兴趣管理（视野裁剪）", () => {
   it("interest：own 恒可见，范围内实体可见，范围外不可见；无规则为 undefined", () => {
     const def = createDefaultGameDefinition();
@@ -300,6 +312,7 @@ describe("Slice 5：兴趣管理（视野裁剪）", () => {
   });
 });
 
+// 输入校验：超速输入不写 Velocity、命令频率限流；无 server 规则时全部放行（兼容旧客户端）
 describe("Slice 5：输入校验（anti-cheat）", () => {
   it("超速输入被拒（不写 Velocity）；合法输入通过", () => {
     const def = createDefaultGameDefinition();
@@ -356,6 +369,7 @@ describe("Slice 5：输入校验（anti-cheat）", () => {
   });
 });
 
+// 真实 server 规则集成：存档/读档与 interest/anti-cheat 走同一份 server.json 规则（无规则时旧协议兼容）
 describe("Slice 5：真实 game 配置（server 规则 + 存档→恢复 demo）", () => {
   it("server 规则解析 + 存档恢复：campfire 与玩家背包俱在", async () => {
     const def = loadGameDefinition({ gameJsonPath: "game/game.json" });
@@ -392,6 +406,7 @@ describe("Slice 5：真实 game 配置（server 规则 + 存档→恢复 demo）
   });
 });
 
+// 审查修复回归：destroyEntity 清 AoS 残留、非法记录防御、写盘串行、per-client $filter 编码链路
 describe("Slice 5：审查修复（destroyEntity / 存档防御 / 写盘串行 / per-client filter）", () => {
   it("destroyEntity：清除 AoS 残留（Inventory 等），防 eid 复用后污染存档", () => {
     const world = createBareWorld();

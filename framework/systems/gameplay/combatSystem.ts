@@ -6,7 +6,9 @@ import { getRuleModule } from "framework/api";
 import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
 import { emitEvent } from "framework/events/gameEvents";
 
+/** 攻击冷却缺省值（毫秒；rules/combat.json 可覆盖）。 */
 export const DEFAULT_COOLDOWN_MS = 1000;
+/** 攻击射程缺省值（像素；Attack 组件 range 与规则可覆盖）。 */
 export const DEFAULT_ATTACK_RANGE = 32;
 
 interface SystemConfig {

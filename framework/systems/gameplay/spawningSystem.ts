@@ -1,3 +1,18 @@
+/**
+ * spawningSystem：按刷怪规则周期刷出实体（tick 系统）。
+ *
+ * - 规则源：gameDef.resolvedSpawns（game/maps/registry.json 的 spawns 声明），
+ *   每条规则独立计时，间隔 respawnMs 毫秒。
+ * - 作用域：规则限定在声明的地图（mapId）与区域（zoneId）内生效；按
+ *   rule.kind 统计区域内当前实体数（不限定 NPC 标签，资源节点等也可刷），
+ *   达到 max 后本周期不刷。
+ * - 条件刷怪：rule.condition 引用 spawnConditions 注册的条件（如 isNight），
+ *   不满足则本周期不刷且不重置计时——条件满足后的下一个计时窗口自动生效。
+ * - 落点：区域内随机采样（多边形做包含性重试，退化场景回退包围盒随机点）。
+ * - 计时状态跨 tick 存于 world.systemRuntimes。
+ *
+ * 游戏无关——刷什么实体（kind → archetype）与何时刷全由配置声明。
+ */
 import { query } from "bitecs";
 import { Transform, Kind } from "components";
 import type { GameWorld } from "world";
@@ -8,14 +23,18 @@ import type { SpawnRule } from "framework/config/schema/GameDefinitionSchema";
 import { hasSpawnCondition, getSpawnCondition } from "framework/systems/gameplay/spawnConditions";
 import { pointInPolygon } from "framework/utils/geometry";
 
+/** 单条刷怪规则的计时状态（world.systemRuntimes 持久）。 */
 interface SpawnTimer {
+  /** 上次刷出时刻（毫秒；首帧初始化为 -Infinity 保证规则立即生效） */
   lastSpawnTime: number;
+  /** 该计时对应的规则引用 */
   rule: SpawnRule;
 }
 
 const SPAWN_KEY = "spawning";
 const RANDOM_POINT_MAX_RETRIES = 16;
 
+/** 取（或惰性创建）刷怪计时列表——按规则引用惰性建条目，跨 tick 保持。 */
 function getSpawnTimers(world: GameWorld): SpawnTimer[] {
   let timers = world.systemRuntimes.get(SPAWN_KEY) as SpawnTimer[] | undefined;
   if (timers) return timers;
@@ -24,6 +43,7 @@ function getSpawnTimers(world: GameWorld): SpawnTimer[] {
   return timers;
 }
 
+/** 统计 zoneId 区域内当前存在的 kind 实体数（多边形外的实体不计）。 */
 function countInZone(world: GameWorld, kind: string, zoneId: number): number {
   const zone = world.map?.zones.find((z) => z.id === zoneId);
   if (!zone) return 0;
@@ -41,6 +61,10 @@ function countInZone(world: GameWorld, kind: string, zoneId: number): number {
   return count;
 }
 
+/**
+ * 在 zone 内随机取点：多边形做包含性重试采样（命中即返回）；
+ * 重试耗尽或非多边形（点数 < 3）时退化为包围盒内随机点。
+ */
 function randomPointInZone(zone: { polygon: { x: number; y: number }[] }): { x: number; y: number } {
   if (zone.polygon.length === 0) return { x: 0, y: 0 };
 

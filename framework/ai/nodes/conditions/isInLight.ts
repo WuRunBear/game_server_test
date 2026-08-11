@@ -1,3 +1,8 @@
+/**
+ * condition：自身是否处于光源照亮范围内。
+ * 通过 isPointInLight 判断（燃料耗尽的熄灭光源不发光）；
+ * 具体"在光内做什么"由行为树组织决定，框架不识别游戏语义。
+ */
 import { Transform } from "framework/components";
 import type { BtContext } from "framework/ai/btRunner";
 import { isPointInLight } from "framework/utils/light";

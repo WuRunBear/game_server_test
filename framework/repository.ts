@@ -40,6 +40,8 @@ export interface WorldRecord {
 }
 
 export interface Repository {
+  /** 保存世界快照（幂等：同 id 覆盖，数据须为纯 JSON）。 */
   saveWorld(record: WorldRecord): Promise<void>;
+  /** 按 id 读取世界快照；找不到返回 null。 */
   loadWorld(id: string): Promise<WorldRecord | null>;
 }

@@ -15,9 +15,13 @@ export type AosInitializer = (
 ) => void;
 
 export interface ComponentRegistry {
+  /** 注册组件；同名重复注册抛错。 */
   register(name: string, component: unknown): void;
+  /** 取组件；未注册抛错。 */
   get(name: string): unknown;
+  /** 是否已注册。 */
   has(name: string): boolean;
+  /** 全部已注册组件（name → 组件）。 */
   all(): Readonly<Record<string, unknown>>;
   /** 注册 AoS 组件的 archetype 初始化钩子。 */
   registerAosInitializer(name: string, initializer: AosInitializer): void;
@@ -27,6 +31,13 @@ export interface ComponentRegistry {
   isAosComponent(name: string): boolean;
 }
 
+/**
+ * 创建组件注册表实例。
+ *
+ * 内部两张表按组件名并行索引：
+ * - components：SoA/Tag 组件定义（bitecs defineComponent 的产物）
+ * - aosInitializers：AoS 组件的 archetype 初始化钩子
+ */
 export function createComponentRegistry(): ComponentRegistry {
   const components = new Map<string, unknown>();
   const aosInitializers = new Map<string, AosInitializer>();
@@ -65,6 +76,7 @@ export function createComponentRegistry(): ComponentRegistry {
 
     isAosComponent(name) {
       const c = components.get(name);
+      // AoS 组件即普通 JS 数组；bitecs SoA 组件是 defineComponent 对象，非数组
       return Array.isArray(c);
     },
   };

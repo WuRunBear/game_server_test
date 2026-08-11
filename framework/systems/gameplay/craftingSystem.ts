@@ -51,6 +51,7 @@ export function craftRecipe(world: GameWorld, ownerEid: number, recipeId: string
   return true;
 }
 
+/** 合成者附近 range 内是否存在指定 stationType 的 CraftingStation 实体。 */
 function hasStationNearby(
   world: GameWorld,
   ownerEid: number,
@@ -68,6 +69,7 @@ function hasStationNearby(
   return false;
 }
 
+/** 背包中 recipe 每种 input 的数量是否都 ≥ 需求（跨槽合计）。 */
 function hasMaterials(inv: NonNullable<(typeof Inventory)[number]>, recipe: CraftingRecipe): boolean {
   for (const input of recipe.inputs) {
     let total = 0;

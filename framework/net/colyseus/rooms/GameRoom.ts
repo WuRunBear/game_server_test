@@ -1,3 +1,12 @@
+/**
+ * Colyseus 单房间实现——传输层胶水（仿真/传输解耦的"传输"半边）。
+ *
+ * 每 tick 流程：接收客户端输入（input / command）→ 经 SimulationPort
+ * 提交给仿真层（由 ECS 系统消费，如写入 Velocity）→ sim.tick(dtMs)
+ * 推进仿真 → 把 TickSnapshot 派生为 RoomState 视图，Colyseus 自动
+ * 增量同步给客户端。本文件不 import 任何 bitecs/ECS 符号（详见
+ * SimulationPort 接口与下方 GameRoom 类注释）。
+ */
 import { Room, type Client } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
 

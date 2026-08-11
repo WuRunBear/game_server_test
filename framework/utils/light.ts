@@ -1,3 +1,9 @@
+/**
+ * 光源判定通用工具（游戏无关）：判断坐标是否处于任一有效光源的半径内。
+ *
+ * 该能力是通用机制：行为树条件（IsInLight）与感知系统（光内目标不可感知）
+ * 共用同一份判定逻辑，不绑定任何游戏语义。
+ */
 import { query } from "bitecs";
 import { LightSource, Transform } from "components";
 import type { GameWorld } from "world";

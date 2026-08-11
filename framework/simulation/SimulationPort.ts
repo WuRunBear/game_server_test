@@ -1,3 +1,7 @@
+/**
+ * 仿真端口接口——传输层与仿真层之间的解耦契约（详见下方接口注释）。
+ * 具体实现见 GameSimulation.ts；传输层只依赖本接口，不依赖任何 ECS 符号。
+ */
 import type {
   PlayerInput, PlayerJoinResult, TickResult, DebugSnapshotOptions, PlayerCommand,
 } from "./types";

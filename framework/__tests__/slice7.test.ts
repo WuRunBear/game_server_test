@@ -1,3 +1,11 @@
+/**
+ * Slice 7 测试：事件总线 / 对话 / 任务 / 好感 链路。
+ *
+ * 覆盖：帧内事件总线（emit/consume 与击杀事件）、dialogueSystem
+ * （start/advance/效果执行）、questSystem（收集/击杀进度与提交）、
+ * talk 意图命令路由、Quest/Relation 持久化（Dialogue 不入档），
+ * 以及真实配置的对话任务线全链路。
+ */
 import { describe, it, expect, beforeAll } from "vitest";
 import { addComponent, addEntity, query } from "bitecs";
 import {
@@ -42,6 +50,7 @@ import type { DialogueTreeJson } from "framework/config/schema/DialogueSchema";
 import type { QuestDefinitionJson } from "framework/config/schema/QuestSchema";
 
 beforeAll(() => {
+  // 全局引导一次：注册表是幂等单例，所有用例共享同一套内置实现
   bootstrapFramework();
 });
 
@@ -154,6 +163,7 @@ function spawnNpc(world: GameWorld, x = 0, y = 0): number {
   return spawnEntity(world, world.archetypes.get("npc1"), getRegistries().componentRegistry, { x, y });
 }
 
+// 帧内事件总线：同类型事件一次取出并清空、其他类型保留；攻击致命一击发射 killed 事件（含击杀者/受害者/kind）
 describe("Slice 7：帧内事件总线", () => {
   it("emit/consume：同类型一次取出全部并清空，其他类型保留", () => {
     const world = createBareWorld();
@@ -187,6 +197,7 @@ describe("Slice 7：帧内事件总线", () => {
   });
 });
 
+// 对话：start 打开会话、advance 跳转并执行节点效果；无树/非可对话实体/超距/死亡拒，效果失败或无效跳转停留
 describe("Slice 7：dialogueSystem", () => {
   it("startDialogue：打开对话（起始节点 + 选项文本）；无树/非 NPC/超距/死亡拒", () => {
     const world = createBareWorld();
@@ -273,6 +284,7 @@ describe("Slice 7：dialogueSystem", () => {
   });
 });
 
+// 任务：accept 接任务、collect 按背包计数转 READY、kill 按击杀事件计数；submit 消耗材料并发奖励与好感
 describe("Slice 7：questSystem", () => {
   it("acceptQuest：成功 / 未知拒 / 重复拒", () => {
     const world = createBareWorld();
@@ -343,6 +355,7 @@ describe("Slice 7：questSystem", () => {
   });
 });
 
+// 命令链路：talk 意图经 interactionSystem 路由到 startDialogue（外部输入进入世界的方式）
 describe("Slice 7：命令链路（talk 意图路由）", () => {
   it("interactionSystem talk 意图路由 NPC → startDialogue", () => {
     const world = createBareWorld();
@@ -361,6 +374,7 @@ describe("Slice 7：命令链路（talk 意图路由）", () => {
   });
 });
 
+// 持久化：Quest/Relation 随玩家入档恢复；会话状态 Dialogue 不入档（重启自然清空）
 describe("Slice 7：持久化（Quest/Relation 入档，Dialogue 不入档）", () => {
   it("serializeWorld/restoreWorld：Quest/Relation 随玩家保留，Dialogue 跳过", () => {
     const world = createBareWorld();
@@ -395,6 +409,7 @@ describe("Slice 7：持久化（Quest/Relation 入档，Dialogue 不入档）", 
   });
 });
 
+// 端到端：真实 game 配置下 对话树→任务线（收集/击杀→提交→奖励）全链路走通
 describe("Slice 7：真实 game 配置集成（对话任务线全链路）", () => {
   it("talk 接任务 → 收集 → 提交 → 奖励与好感", () => {
     const def = loadGameDefinition({ gameJsonPath: "game/game.json" });

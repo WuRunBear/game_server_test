@@ -22,6 +22,7 @@ export interface EquipModifiers {
   gatherMult: number;
 }
 
+/** 无装备时的零值加成（tool 槽缺省倍率为 1，即不放大采集产出）。 */
 const EMPTY_MODIFIERS = (): EquipModifiers => ({ attackBonus: 0, defenseBonus: 0, gatherMult: 1 });
 
 const SLOT_FIELDS: { name: "weaponSlot" | "toolSlot" | "armorSlot"; slot: EquipEffect["slot"]; field: typeof Equipment.weaponSlot }[] = [

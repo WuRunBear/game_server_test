@@ -22,6 +22,7 @@ export interface InventoryEntry {
   slots: (ItemStack | null)[];
 }
 
+/** AoS 存储：普通 JS 数组按 eid 索引（非 bitecs 组件，不能 addComponent/query）。 */
 export const Inventory = [] as (InventoryEntry | undefined)[];
 
 /** Inventory archetype 配置形态。 */
@@ -29,6 +30,7 @@ interface InventoryConfig {
   capacity?: number;
 }
 
+/** 默认槽位数（配置未给出 capacity 时使用）。 */
 const DEFAULT_CAPACITY = 4;
 
 /** AoS 初始化钩子：按 archetype 配置建空槽位数组。 */

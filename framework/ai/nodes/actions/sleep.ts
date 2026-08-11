@@ -1,3 +1,7 @@
+/**
+ * action：睡眠——清零移动速度后立即返回 SUCCEEDED。
+ * 持续睡眠由行为树结构维持（详见下方工厂 JSDoc 对 SUCCEEDED / RUNNING 取舍的说明）。
+ */
 import { State } from "mistreevous";
 
 import { Velocity } from "framework/components";

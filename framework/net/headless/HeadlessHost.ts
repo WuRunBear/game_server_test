@@ -1,3 +1,9 @@
+/**
+ * 无头（headless）仿真驱动：不开网络、不连客户端，仅以固定步长
+ * 在本地 for 循环中驱动仿真。与 GameRoom 同为 SimulationPort 的
+ * 消费者——两者 tick 内部行为一致（都调 sim.tick(dtMs)），
+ * 只是"如何驱动"不同。典型用途：单元测试、离线基准测试。
+ */
 import type { SimulationPort } from "simulation/SimulationPort";
 import type { TickResult } from "simulation/types";
 

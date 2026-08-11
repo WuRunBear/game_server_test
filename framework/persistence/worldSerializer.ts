@@ -36,6 +36,8 @@ import type { SerializedEntity, WorldRecord } from "framework/repository";
  * - Intent：一帧脉冲信号
  * - LastSynced：传输层内部同步标记
  * - Kind：由 archetype.kind 承载（序列化用 kind 字段，恢复时 spawnEntity 重写）
+ * - NetworkId：单独存于 SerializedEntity.networkId 字段，恢复时显式覆写，故不进组件块
+ * - Dialogue：瞬态对话会话（当前对话树/节点/选项），断线重连后重置
  */
 const RUNTIME_ONLY_COMPONENTS = new Set([
   "Velocity",

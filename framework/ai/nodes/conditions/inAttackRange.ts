@@ -1,3 +1,7 @@
+/**
+ * condition：最近敌对目标是否已进入自身攻击射程。
+ * 射程取 Attack.range 组件（回退默认值），目标距离来自黑板感知结果。
+ */
 import { Attack } from "framework/components";
 import { DEFAULT_ATTACK_RANGE } from "framework/systems/gameplay/combatSystem";
 import { bbGet, BB_PERCEPTION_TARGET, type PerceivedTarget } from "framework/ai/blackboard";

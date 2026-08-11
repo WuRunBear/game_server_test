@@ -1,3 +1,7 @@
+/**
+ * condition：黑板上是否存在感知到的敌对目标（感知范围内是否有目标）。
+ * 目标由感知系统（perceptionSystem）写入黑板，详见下方工厂 JSDoc。
+ */
 import { bbGet, BB_PERCEPTION_TARGET, type PerceivedTarget } from "framework/ai/blackboard";
 import type { BtContext } from "framework/ai/btRunner";
 

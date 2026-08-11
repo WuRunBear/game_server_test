@@ -1,3 +1,9 @@
+/**
+ * Colyseus 服务端装配：创建 WebSocket 传输层、注册单房间类型
+ * （game）、启动一个常驻房间，并挂载少量调试 HTTP 端点
+ * （/health、/maps/runtime、/debug/colliders）。游戏逻辑全部在
+ * 仿真层，本文件只负责把 Colyseus 接到 GameRoom 上。
+ */
 import http from "node:http";
 
 import { Server, matchMaker } from "@colyseus/core";

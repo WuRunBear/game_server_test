@@ -1,3 +1,10 @@
+/**
+ * framework 公共导出面（barrel）。
+ *
+ * 所有对外能力（工具、注册表、引导、仿真、持久化、系统、事件、配置模型）
+ * 在此统一 re-export；游戏代码与工具代码只经此入口（或具体子路径）使用框架，
+ * 从而维持「tools/src → framework」的单向依赖。新增框架模块时在此补充导出。
+ */
 export { createLogger, type Logger } from "framework/utils/logger";
 export { clampMs } from "framework/utils/timer";
 export { createMetrics, recordTick, type Metrics } from "framework/metrics";

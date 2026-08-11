@@ -7,4 +7,5 @@
  * - 由 spawnEntity → setEntityKind 写入；不在 archetype.components 中声明，
  *   也不参与 bitecs 的 query/addComponent（与 Inventory 一致）。
  */
+/** AoS 存储：普通 JS 数组按 eid 索引（非 bitecs 组件，不能 addComponent/query）。 */
 export const Kind = [] as string[];

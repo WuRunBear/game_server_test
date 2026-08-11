@@ -1,6 +1,14 @@
 import { z } from "zod";
 
 /**
+ * item 定义配置 schema（game/items/*.json 数组元素）。
+ *
+ * item 是纯数据（可堆叠、可被引用），不是实体原型。本文件用 zod 校验 item
+ * 目录，声明 consume/equip/place 三类效果（Effect schema）的字段结构与语义，
+ * 由 consume/equipment/placeable 系统按 kind 查表解读。
+ */
+
+/**
  * 食用/消耗效果：把指定 Need 恢复指定数值。
  *
  * `need` 是字符串引用 Need 名（具体名由 game/ 配置约定）；框架不识别具体语义，
@@ -55,7 +63,11 @@ export const ItemKindSchema = z.object({
   place: PlaceEffectSchema.optional(),
 });
 
+/** 食用/消耗效果的类型推断。 */
 export type ConsumeEffect = z.infer<typeof ConsumeEffectSchema>;
+/** 穿戴效果的类型推断。 */
 export type EquipEffect = z.infer<typeof EquipEffectSchema>;
+/** 放置效果的类型推断。 */
 export type PlaceEffect = z.infer<typeof PlaceEffectSchema>;
+/** item kind 定义的类型推断（即 game/items/*.json 数组元素类型）。 */
 export type ItemKindSpec = z.infer<typeof ItemKindSchema>;

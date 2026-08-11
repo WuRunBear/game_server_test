@@ -10,6 +10,7 @@ export type SpawnCondition = (world: GameWorld) => boolean;
 
 const spawnConditions = new Map<string, SpawnCondition>();
 
+/** 注册刷怪条件（重名抛错，防配置引用歧义与插件覆盖）。 */
 export function registerSpawnCondition(name: string, condition: SpawnCondition): void {
   if (spawnConditions.has(name)) {
     throw new Error(`Spawn condition "${name}" is already registered`);
@@ -17,6 +18,7 @@ export function registerSpawnCondition(name: string, condition: SpawnCondition):
   spawnConditions.set(name, condition);
 }
 
+/** 取刷怪条件判定函数（未注册抛错——引用未知条件属配置错误，尽早暴露）。 */
 export function getSpawnCondition(name: string): SpawnCondition {
   const condition = spawnConditions.get(name);
   if (!condition) {
@@ -25,6 +27,7 @@ export function getSpawnCondition(name: string): SpawnCondition {
   return condition;
 }
 
+/** 刷怪条件是否已注册（spawningSystem 先用它预检，避免 get 抛错中断 tick）。 */
 export function hasSpawnCondition(name: string): boolean {
   return spawnConditions.has(name);
 }

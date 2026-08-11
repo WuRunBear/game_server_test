@@ -1,3 +1,7 @@
+/**
+ * 仿真层实现——SimulationPort 接口的具体实现（类级 JSDoc 见下方 GameSimulation，
+ * 完整说明架构位置、玩家管理/输入处理/快照构建/持久化等职责，此处不重复）。
+ */
 import { query } from "bitecs";
 import { NetworkId, Velocity, Inventory, Intent, Health } from "components";
 import { spawnEntity } from "framework/entities/spawn";

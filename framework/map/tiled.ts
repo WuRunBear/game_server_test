@@ -1,19 +1,42 @@
+/**
+ * Tiled 地图导入：把 Tiled（2D 地图编辑器）导出的 JSON 解析为 MapRuntime。
+ *
+ * 解析约定（依赖固定图层名）：
+ * - `collision`（tilelayer）：非 0 的 tile 视为阻挡（0=可走，1=阻挡）；
+ * - `zones`（objectgroup）：type="zone" 的对象，经 properties.zoneId 标识，
+ *   有 polygon 用多边形顶点，否则退回矩形（x/y/width/height 围成）兜底；
+ * - `objects`（objectgroup）：type="spawn_player" / "spawn_npc" 生成出生点。
+ *
+ * 坐标均为 Tiled 的像素世界坐标（原点在左上角）。
+ */
 import type { MapRuntime, MapZone, Vec2 } from "map/types";
 
+/** Tiled 对象的自定义属性（名称 / 类型 / 值）。 */
 type TiledProperty = { name: string; type: string; value: unknown };
 
+/** Tiled 对象层中的一个对象（区域、出生点、装饰等）。 */
 type TiledObject = {
+  /** 对象自增 id（本模块不直接使用）。 */
   id: number;
+  /** 对象名称（可作区域 / 出生点名称的兜底）。 */
   name?: string;
+  /** 对象类型（如 "zone" / "spawn_player"）。 */
   type?: string;
+  /** 左上角 X 坐标（像素）。 */
   x: number;
+  /** 左上角 Y 坐标（像素）。 */
   y: number;
+  /** 宽度（像素，矩形对象）。 */
   width?: number;
+  /** 高度（像素，矩形对象）。 */
   height?: number;
+  /** 多边形顶点（相对对象原点的偏移列表）。 */
   polygon?: Array<{ x: number; y: number }>;
+  /** 自定义属性列表。 */
   properties?: TiledProperty[];
 };
 
+/** Tiled 网格图层（data 为按行展平的 tile id 数组，0 表示空 tile）。 */
 type TiledTileLayer = {
   type: "tilelayer";
   name: string;
@@ -22,14 +45,17 @@ type TiledTileLayer = {
   data?: number[];
 };
 
+/** Tiled 对象组图层（objects 为对象列表）。 */
 type TiledObjectGroupLayer = {
   type: "objectgroup";
   name: string;
   objects?: TiledObject[];
 };
 
+/** 图层联合类型（tile 网格 或 对象组）。 */
 type TiledLayer = TiledTileLayer | TiledObjectGroupLayer;
 
+/** Tiled 导出 JSON 的顶层结构（只取本模块关心的字段）。 */
 type TiledMap = {
   width: number;
   height: number;

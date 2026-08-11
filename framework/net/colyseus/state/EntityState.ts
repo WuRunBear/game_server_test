@@ -1,3 +1,11 @@
+/**
+ * 实体网络状态视图（Colyseus Schema 定义）。
+ *
+ * 本文件只声明"实体如何同步到客户端"，不含任何仿真逻辑：
+ * 每帧由 GameRoom 从仿真快照（TickSnapshot）派生写入本 Schema，
+ * Colyseus 自动 diff 后增量推送给客户端（服务端权威，客户端只读）。
+ * 具体同步哪些字段由 game.json 的 netSync.fields 配置决定。
+ */
 import { MapSchema, Schema, type } from "@colyseus/schema";
 
 /**
@@ -10,6 +18,10 @@ import { MapSchema, Schema, type } from "@colyseus/schema";
 export class EntityState extends Schema {
   /**
    * 实体的稳定网络标识（来自 NetworkId.value）。
+   *
+   * 与 ECS 内部实体 id（eid）不同：eid 由 bitecs 分配、实体销毁后
+   * 可能被复用；NetworkId 与实体生命周期绑定、只增不复用，客户端
+   * 用它跨帧稳定绑定渲染对象。
    */
   @type("uint32")
   id: number = 0;

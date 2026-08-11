@@ -1,3 +1,15 @@
+/**
+ * AoS 组件的网络同步适配器注册表。
+ *
+ * AoS 组件是普通 JS 数组（按 eid 索引），不走 bitecs 的 SoA 数值数组路径，
+ * 无法被 bitecs query 选中。netSync 构建快照时（GameSimulation.buildSnapshot）
+ * 对每个 AoS 组件条目调用本模块注册的适配器，把实体的 AoS 数据按字段白名单
+ * 展平为 `{ numbers, strings }` 两个扁平 map，再合并进 EntitySnapshot。
+ *
+ * 与组件注册表的 AoS 初始化钩子（registerAosInitializer）互补：
+ * 初始化钩子负责**写入**（spawn 实体时按原型配置写数据），
+ * 这里的同步适配器负责**读出**（每帧同步时展平推送）。扩展 AoS 组件时需两者都注册。
+ */
 import type { GameWorld } from "world";
 import {
   Needs, Inventory, ItemMeta, ResourceNode, Portal,
@@ -5,35 +17,40 @@ import {
 } from "components";
 
 /**
- * AoS 组件的网络同步适配器。
- *
- * AoS 组件（普通 JS 数组）不能走 buildSnapshot 的 SoA `comp[field][eid]` 读路径，
- * 也无法被 bitecs query 选中；改由适配器把实体的 AoS 数据展平为
- * `{ numbers, strings }` 两个扁平 map，供 netSync 按 key 推送。
- *
- * - numbers：数值字段（写入 EntityState.values）
- * - strings：字符串字段（写入 EntityState.stringValues）
+ * AoS 适配器的展平输出——纯数据，无 ECS 引用。
  *
  * key 形态：`<Component>.<index?>.<field>`，索引位置稳定（容量内全发，空槽用占位值），
  * 便于客户端按前缀分组渲染。游戏无关——适配器只读通用结构字段。
  */
 export interface AosSyncOutput {
+  /** 数值字段（如 current/max/count），写入 EntitySnapshot.values。 */
   numbers: Record<string, number>;
+  /** 字符串字段（如 kind/name/treeId），写入 EntitySnapshot.strings。 */
   strings: Record<string, string>;
 }
 
+/**
+ * 适配器签名：读 eid 实体的 AoS 数据，按 fields 白名单展开为纯数据。
+ * @param world ECS world（当前内建适配器未使用，保留以备扩展需要）
+ * @param eid 实体 id
+ * @param fields netSync 配置的字段白名单（如 ["current", "max"]）
+ */
 export type AosSyncAdapter = (world: GameWorld, eid: number, fields: readonly string[]) => AosSyncOutput;
 
+/** 注册表：组件名 → 适配器（bootstrap 时由内建注册表填充，扩展组件可自注册）。 */
 const adapters = new Map<string, AosSyncAdapter>();
 
+/** 注册 AoS 同步适配器（重复注册覆盖同名旧适配器）。 */
 export function registerAosSyncAdapter(name: string, adapter: AosSyncAdapter): void {
   adapters.set(name, adapter);
 }
 
+/** 按组件名取适配器；未注册返回 undefined（buildSnapshot 会跳过该 netSync 条目）。 */
 export function getAosSyncAdapter(name: string): AosSyncAdapter | undefined {
   return adapters.get(name);
 }
 
+/** 空输出占位：组件数据缺失时返回，避免调用方重复判空。 */
 function empty(): AosSyncOutput {
   return { numbers: {}, strings: {} };
 }

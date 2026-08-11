@@ -19,14 +19,22 @@ import {
  */
 const ruleSchemas = new Map<string, ZodType>();
 
+/**
+ * 注册一个规则 schema（可扩展点：游戏自定义规则文件可注册自己的 schema）。
+ *
+ * @param name 注册名——即规则文件基名（去 .json），如 "combat"、"server"
+ * @param schema 校验该规则文件的 zod schema
+ */
 export function registerRuleSchema(name: string, schema: ZodType): void {
   ruleSchemas.set(name, schema);
 }
 
+/** 按规则文件基名取已注册的 schema；未注册返回 undefined（调用方 raw 透传）。 */
 export function getRuleSchema(name: string): ZodType | undefined {
   return ruleSchemas.get(name);
 }
 
+/** 判断某规则文件基名是否已注册 schema。 */
 export function hasRuleSchema(name: string): boolean {
   return ruleSchemas.has(name);
 }

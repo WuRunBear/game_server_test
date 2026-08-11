@@ -1,3 +1,10 @@
+/**
+ * Slice 3 测试：合成 / 装备 / 采集 链路。
+ *
+ * 覆盖：equipSlot 穿戴原子、getEquipModifiers 装备加成读取、craftRecipe
+ * 合成原子（消耗/产出/满包/站点距离约束）、战斗与采集读取装备修正、
+ * GameSimulation 命令路由（craft/equip），以及真实 game 配置端到端 demo。
+ */
 import { describe, it, expect, beforeAll } from "vitest";
 import { addComponent, addEntity, hasComponent, query } from "bitecs";
 import {
@@ -31,6 +38,7 @@ import type { ItemKindSpec } from "framework/config/schema/ItemKindSchema";
 import type { CraftingRecipe } from "framework/config/schema/RuleSchema";
 
 beforeAll(() => {
+  // 全局引导一次：注册表是幂等单例，所有用例共享同一套内置实现
   bootstrapFramework();
 });
 
@@ -159,6 +167,7 @@ function fillInventory(inv: InventoryEntry, entries: { kind: string; count: numb
   }
 }
 
+// 穿戴原子：按物品的 equip 声明（slot 类型）写入对应装备槽；不可穿戴 / 无装备组件实体拒绝
 describe("Slice 3：equipSlot 穿戴原子", () => {
   it("武器穿戴成功：写入 weaponSlot", () => {
     const world = createBareWorld();
@@ -204,6 +213,7 @@ describe("Slice 3：equipSlot 穿戴原子", () => {
   });
 });
 
+// 装备加成读取：按槽位类型汇总攻击/防御加成与工具倍率；槽不匹配或空槽时加成归零
 describe("Slice 3：getEquipModifiers 加成读取", () => {
   it("武器/护甲数值累加、工具倍率生效", () => {
     const world = createBareWorld();
@@ -274,6 +284,7 @@ describe("Slice 3：getEquipModifiers 加成读取", () => {
   });
 });
 
+// 合成原子：输入消耗+输出入包；缺料/未知配方/满包/站点类型与距离不符均拒绝且零副作用
 describe("Slice 3：craftRecipe 合成原子", () => {
   it("成功：inputs 消耗 + output 入包", () => {
     const world = createBareWorld();
@@ -392,6 +403,7 @@ describe("Slice 3：craftRecipe 合成原子", () => {
   });
 });
 
+// 战斗/采集读装备修正：攻击+武器加成、防御+护甲加成、采集产出×工具倍率
 describe("Slice 3：combatSystem / gatheringSystem 读装备修正", () => {
   it("攻击者武器加成：damage = 基础 + attackBonus", () => {
     const world = createBareWorld();
@@ -450,6 +462,7 @@ describe("Slice 3：combatSystem / gatheringSystem 读装备修正", () => {
   });
 });
 
+// GameSimulation 命令路由：craft/equip 命令从传输层进入世界并生效
 describe("Slice 3：GameSimulation 命令路由", () => {
   it("submitCommand craft / equip 生效；无效命令返回 false", () => {
     const gameDef = createDefaultGameDefinition();
@@ -492,6 +505,7 @@ describe("Slice 3：GameSimulation 命令路由", () => {
   });
 });
 
+// 端到端集成：真实 game 配置下 合成→装备→采集翻倍、合成武器→攻击增强（验证配置驱动全链路）
 describe("Slice 3 集成：合成→装备→采集翻倍 / 合成矛→攻击增强", () => {
   it("demo 主线：craft tool → equip → harvest 翻倍；craft weapon → 伤害 +15", () => {
     const world = createBareWorld();

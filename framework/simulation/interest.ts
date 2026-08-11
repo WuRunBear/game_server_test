@@ -29,24 +29,30 @@ export function computeInterest(
   viewRadius: number,
 ): Map<string, number[]> {
   const result = new Map<string, number[]>();
+  // 用距离平方比较（避免开方），radiusSq = viewRadius²
   const radiusSq = viewRadius * viewRadius;
 
   for (const [sessionId, eid] of playerEidBySessionId) {
+    // 以玩家的 ECS Transform 位置为视野中心
     const px = Transform.x[eid];
     const py = Transform.y[eid];
     const ownNetworkId = NetworkId.value[eid];
     const visible: number[] = [];
 
     for (const [networkId, snap] of snapshot.entities) {
+      // 玩家自身恒可见（客户端必须始终能追踪自己的控制实体）
       if (networkId === ownNetworkId) {
         visible.push(networkId);
         continue;
       }
+      // 其他实体位置取自快照的 Transform.x/y（与客户端收到的一致，且避免再读 ECS）
       const ex = snap.values["Transform.x"];
       const ey = snap.values["Transform.y"];
+      // 无位置数据的实体不可见（现实中不存在，防御分支）
       if (ex === undefined || ey === undefined) continue;
       const dx = ex - px;
       const dy = ey - py;
+      // 在视野半径内才可见，否则裁掉
       if (dx * dx + dy * dy <= radiusSq) {
         visible.push(networkId);
       }

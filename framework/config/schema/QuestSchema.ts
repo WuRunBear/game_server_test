@@ -11,6 +11,7 @@ import { z } from "zod";
  * （好感对象为提交对话的 NPC kind，由 dialogueSystem 传入）。
  */
 
+/** 任务提交效果：奖励物品 + 好感增减（缺省均无）。 */
 export const QuestSubmitSchema = z.object({
   /** 提交奖励物品（kind 引用 item 目录）。 */
   rewards: z.array(z.object({ kind: z.string(), count: z.number().int().min(1) })).default([]),
@@ -18,6 +19,7 @@ export const QuestSubmitSchema = z.object({
   relationDelta: z.number().default(0),
 }).default({ rewards: [], relationDelta: 0 });
 
+/** 单条任务定义（id 被对话效果 quest_accept/quest_submit 引用）。 */
 export const QuestDefinitionSchema = z.object({
   /** 任务 id（对话效果 quest_accept/quest_submit 的 questId 引用）。 */
   id: z.string(),
@@ -32,8 +34,13 @@ export const QuestDefinitionSchema = z.object({
   submit: QuestSubmitSchema,
 });
 
+/**
+ * 任务注册表（game/quests/*.json 的根结构）：一组任务定义。
+ */
 export const QuestRegistrySchema = z.object({
+  /** 任务定义列表。 */
   quests: z.array(QuestDefinitionSchema),
 });
 
+/** 任务定义的类型推断（即 game/quests/*.json 中的单个任务）。 */
 export type QuestDefinitionJson = z.infer<typeof QuestDefinitionSchema>;

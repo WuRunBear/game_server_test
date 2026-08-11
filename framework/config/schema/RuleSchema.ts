@@ -1,5 +1,21 @@
 import { z } from "zod";
 
+/**
+ * 规则文件配置 schema（game/rules/*.json）。
+ *
+ * 规则是跨实体的全局配置段（战斗/需求衰减/合成/昼夜/服务端），按文件基名
+ * 注册到 ruleSchemas 注册表（见 ruleSchemas.ts），加载时若已注册则用该 schema
+ * 校验，未注册则 raw 透传。所有规则 schema 均 .passthrough()——允许额外字段
+ * 透传，避免严格校验导致配置演进时破坏兼容。
+ */
+
+/**
+ * 战斗全局规则：作用于 combat 系统。
+ * - friendlyFire：同队是否可互相攻击
+ * - damageFormula / damageFormulaRef：伤害公式（内联表达式或注册公式引用）
+ * - attackCooldownMs：攻击冷却（毫秒）
+ * - attackRange：攻击距离（像素）
+ */
 export const CombatRuleSchema = z.object({
   friendlyFire: z.boolean().optional(),
   damageFormula: z.string().optional(),
@@ -20,6 +36,7 @@ export const NeedsRuleSchema = z.object({
   decayScale: z.number().optional(),
 }).passthrough();
 
+/** Needs 规则的类型推断（即 game/rules/needs.json）。 */
 export type NeedsRule = z.infer<typeof NeedsRuleSchema>;
 
 /**
@@ -31,11 +48,13 @@ export type NeedsRule = z.infer<typeof NeedsRuleSchema>;
  *
  * 字段名保持游戏无关（kind/stationType 皆为通用机制词）。
  */
+/** 合成配方输入/输出项：kind 引用 item 表 + 数量。 */
 const RecipeInputSchema = z.object({
   kind: z.string(),
   count: z.number().int().positive(),
 });
 
+/** 单条合成配方（id 唯一，供客户端/系统引用）。 */
 const RecipeSchema = z.object({
   id: z.string(),
   stationType: z.number().int().nonnegative().optional(),
@@ -65,6 +84,7 @@ export const DayNightRuleSchema = z.object({
   nightEndHour: z.number().min(0).max(24).optional(),
 }).passthrough();
 
+/** 昼夜规则的类型推断（即 game/rules/daynight.json）。 */
 export type DayNightRule = z.infer<typeof DayNightRuleSchema>;
 
 /**
@@ -85,4 +105,5 @@ export const ServerRuleSchema = z.object({
   maxCommandsPerSec: z.number().int().positive().optional(),
 }).passthrough();
 
+/** 服务端规则的类型推断（即 game/rules/server.json）。 */
 export type ServerRule = z.infer<typeof ServerRuleSchema>;

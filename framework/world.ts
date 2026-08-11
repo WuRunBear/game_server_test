@@ -27,8 +27,11 @@ export interface TimeOfDay {
 }
 
 export interface GameTime {
+  /** 已推进的逻辑帧号（每 tick +1）。 */
   tick: Tick;
+  /** 本帧实际步进时长（毫秒），由 GameInstance.step 计算并钳制后写入。 */
   dtMs: number;
+  /** 固定步长（毫秒），来自 tickRate；dtMs 异常（0/NaN/负数/过大）时的回退值。 */
   fixedDtMs: number;
   /** 昼夜状态，由 dayNightCycleSystem 推进（缺省配置时保持初始值）。 */
   timeOfDay: TimeOfDay;
@@ -53,8 +56,18 @@ export type GameWorld = ReturnType<typeof createWorld> & {
   runtimeEvents: GameEvent[];
 };
 
+/**
+ * 系统函数签名：接收并返回同一个 world。
+ * 系统按配置拓扑序逐个调用，前一个系统的输出是后一个的输入（链式组合）。
+ */
 export type System = (world: GameWorld) => GameWorld;
 
+/**
+ * 创建空的 GameWorld（仅挂时间/指标/日志/各注册表等基础设施，不含实体）。
+ *
+ * @param fixedDtMs 固定步长（毫秒），与 gameDef.tickRate 对应
+ * @returns 初始 world：tick=0、dtMs=fixedDtMs、从 8 时白天开始、nextNetworkId=1、空事件队列
+ */
 export function createGameWorld(fixedDtMs: number): GameWorld {
   const world = createWorld({
     time: {

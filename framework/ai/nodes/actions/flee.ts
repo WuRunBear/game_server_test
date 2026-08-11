@@ -1,3 +1,8 @@
+/**
+ * action：逃离——背向最近敌对目标移动（远离威胁）。
+ * 目标数据来自黑板感知结果；无目标时直接成功返回（无需逃窜），
+ * 移动速度默认 80，可用 args.speed 覆盖。
+ */
 import { State } from "mistreevous";
 
 import { bbGet, BB_PERCEPTION_TARGET, type PerceivedTarget } from "framework/ai/blackboard";

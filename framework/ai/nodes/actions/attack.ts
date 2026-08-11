@@ -1,3 +1,8 @@
+/**
+ * action：攻击——对最近敌对目标发动一次攻击。
+ * 目标数据来自黑板（perceptionSystem 写入的感知结果），
+ * 实际攻击经 combatSystem.attackTarget 统一处理冷却 / 射程 / 友伤校验。
+ */
 import { State } from "mistreevous";
 import { hasComponent } from "bitecs";
 

@@ -1,3 +1,10 @@
+/**
+ * 内置行为树节点注册：把框架自带的 action / condition 工厂统一注册进 ActionRegistry。
+ *
+ * 注册名即行为树配置中引用的名称（如 `action [Chase]`、`condition [IsNight]`）；
+ * 每一项都是工厂函数（createXxx），配置里的 args 会在编译期（btFactory）传入工厂。
+ * 游戏如需自定义节点，可在 src/register.ts 中另行注册。
+ */
 import type { ActionRegistry } from "framework/ai/actionRegistry";
 import { createIdleAction } from "framework/ai/nodes/actions/idle";
 import { createWanderAction } from "framework/ai/nodes/actions/wander";

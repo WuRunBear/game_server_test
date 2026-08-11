@@ -1,3 +1,7 @@
+/**
+ * action：追击——朝最近敌对目标移动直至进入自身攻击射程。
+ * 目标数据来自黑板（perceptionSystem 写入），方向计算复用 steer 工具。
+ */
 import { State } from "mistreevous";
 
 import { bbGet, BB_PERCEPTION_TARGET, type PerceivedTarget } from "framework/ai/blackboard";

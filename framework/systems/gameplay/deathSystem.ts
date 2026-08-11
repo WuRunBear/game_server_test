@@ -12,6 +12,7 @@ const DEATH_KEY = "death";
 const DEFAULT_RESPAWN_DELAY_MS = 2000;
 const LOOT_PICKUP_DELAY_MS = 300;
 
+/** 取（或惰性创建）重生标记表：eid → 重生截止时刻（world.systemRuntimes 持久）。 */
 export function getRespawnMarkers(world: GameWorld): Map<EntityId, RespawnMarker> {
   let markers = world.systemRuntimes.get(DEATH_KEY) as Map<EntityId, RespawnMarker> | undefined;
   if (markers) return markers;

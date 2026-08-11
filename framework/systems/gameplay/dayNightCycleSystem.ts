@@ -1,11 +1,15 @@
 import { PHASE_DAY, PHASE_NIGHT, type GameWorld } from "world";
 
 interface DayNightRule {
+  /** 完整昼夜周期的秒数（24 小时被压缩到此长度循环推进） */
   cycleLengthSec?: number;
+  /** 夜晚开始小时（支持跨午夜，如 19 入夜） */
   nightStartHour?: number;
+  /** 夜晚结束小时（支持跨午夜，如 5 天亮） */
   nightEndHour?: number;
 }
 
+/** 缺省夜晚区间：19 时入夜 … 次日 5 时天亮。 */
 const DEFAULT_NIGHT_START_HOUR = 19;
 const DEFAULT_NIGHT_END_HOUR = 5;
 
