@@ -21,6 +21,11 @@ import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitio
 /** dtMs 上限倍率：单帧步长最多为固定步长的 N 倍，防止负载尖峰导致物理穿透 */
 const MAX_DT_MULTIPLIER = 4;
 
+/**
+ * 游戏实例对外接口：持有 ECS 世界与按拓扑序排列的系统链，
+ * 对外只暴露两个操作——step 推进一个逻辑帧、spawnInitialEntities 生成地图初始实体。
+ * 由 createGameInstance 创建；上游 GameSimulation 仅依赖该接口驱动世界。
+ */
 export interface GameInstance {
   /** ECS 世界（含时间、地图、各注册表引用与 gameDef）。 */
   world: GameWorld;

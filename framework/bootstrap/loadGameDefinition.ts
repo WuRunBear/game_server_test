@@ -59,6 +59,7 @@ function loadFilesByGlob(baseDir: string, pattern: string): string[] {
   return existsSync(fullPath) ? [fullPath] : [];
 }
 
+/** 加载实体原型文件（每个文件一个 ArchetypeSchema，逐文件 zod 校验后拍平为原型列表）。 */
 function loadArchetypesFiles(baseDir: string, entityPattern?: string): ArchetypeSpec[] {
   if (!entityPattern) return [];
   const files = loadFilesByGlob(baseDir, entityPattern);
@@ -132,6 +133,7 @@ function loadSpawnsFile(baseDir: string, spawnsPattern?: string): SpawnRule[] {
   return results;
 }
 
+/** 加载对话树文件（DialogueRegistrySchema 解包出 trees，逐棵 push）；树 id 全局唯一，重复抛错。 */
 function loadDialoguesFile(baseDir: string, pattern?: string): DialogueTreeJson[] {
   if (!pattern) return [];
   const files = loadFilesByGlob(baseDir, pattern);
@@ -412,6 +414,15 @@ function collectActionNames(node: unknown, names: Set<string>): void {
   }
 }
 
+/**
+ * 加载完整游戏定义——配置文件加载管线的入口。
+ *
+ * 流程：解析 game.json 路径 → 不存在则返回内置默认定义（便于无配置启动/测试）→
+ * 读主配置并用 GameDefinitionSchema 校验（失败即抛错）→ 按各资源字段的 glob
+ * 逐个加载实体/行为/规则/刷怪/物品/对话/任务/地图 → 合并为 LoadedGameDefinition
+ * → validateIntegrity 做跨文件引用完整性校验。
+ * @param options gameJsonPath 指定主配置路径（相对 process.cwd()），缺省 "game/game.json"
+ */
 export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedGameDefinition {
   const jsonPath = resolve(
     process.cwd(),
@@ -462,6 +473,12 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
   return loaded;
 }
 
+/**
+ * 内置默认游戏定义：不依赖任何 game/*.json 的最小可用配置。
+ *
+ * 用于 loadGameDefinition 找不到主配置时的兜底（如测试或空工程起步），
+ * 启用一套最基础的系统链与 netSync 字段，资源数据全部为空数组/空对象。
+ */
 export function createDefaultGameDefinition(): LoadedGameDefinition {
   return {
     id: "default",
