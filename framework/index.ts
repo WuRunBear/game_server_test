@@ -10,6 +10,7 @@ export { clampMs } from "framework/utils/timer";
 export { createMetrics, recordTick, type Metrics } from "framework/metrics";
 export { createGameWorld, type GameWorld, type EntityId, type Tick, type System, type GameTime, type TimeOfDay, PHASE_DAY, PHASE_NIGHT } from "framework/world";
 export type { MapRuntime, MapSource, MapGrid, MapZone, MapSpawns, Vec2 } from "framework/map/types";
+export { buildMapChunks, computeMapVersion, describeMapSource, MAP_CHUNK_SIZE, type MapChunk, type MapMetaInfo } from "framework/map/version";
 
 export { createComponentRegistry, type ComponentRegistry } from "framework/components/componentRegistry";
 export { createSystemRegistry, type SystemRegistry, type SystemSpec, buildSystems } from "framework/systems/systemRegistry";
