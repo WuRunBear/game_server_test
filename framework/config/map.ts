@@ -87,13 +87,13 @@ function getString(entry: Record<string, unknown>, key: string): string | null {
  *
  * @param registryPath 地图清单路径
  * @param mapId 指定 mapId；为 null 则按 default/第一个可用 mapId 选择
- * @returns MapSource
+ * @returns MapSource；显式指定 mapId 且清单中不存在该 id 时返回 null
  * @throws Error 当清单格式错误或无法选择地图时抛出
  */
 function mapSourceFromRegistryFile(
   registryPath: string,
   mapId: string | null,
-): MapSource {
+): MapSource | null {
   const raw = readJsonFile(registryPath);
   if (!isRecord(raw)) throw new Error("地图清单格式错误：根节点必须是对象");
 
@@ -102,6 +102,8 @@ function mapSourceFromRegistryFile(
   if (!isRecord(mapsRaw)) throw new Error("地图清单格式错误：maps 必须是对象（mapId -> 配置）");
 
   const availableIds = Object.keys(mapsRaw);
+  if (mapId !== null && !(mapId in mapsRaw)) return null;
+
   const selectedId = mapId ?? defaultId ?? availableIds[0] ?? null;
   if (!selectedId) throw new Error("地图清单为空：至少需要一个 mapId");
 
@@ -144,10 +146,36 @@ function mapSourceFromRegistryFile(
 /**
  * 从项目配置读取地图来源（MapSource）。
  *
- * @returns MapSource
+ * 未指定 mapId 时返回默认地图（清单 default 项或第一个地图，永不返回 null）；
+ * 显式指定 mapId 且清单中不存在该 id 时返回 null，由调用方转换为 404。
+ *
+ * @param mapId 可选的地图 id；省略则使用默认地图
+ * @returns MapSource（未指定 mapId 时）；显式 mapId 不存在于清单时返回 null
  * @throws Error 当地图清单读取或解析失败时抛出
  */
-export function getMapSourceFromConfig(): MapSource {
+export function getMapSourceFromConfig(): MapSource;
+export function getMapSourceFromConfig(mapId: string): MapSource | null;
+export function getMapSourceFromConfig(mapId?: string): MapSource | null {
   const registryPath = "game/maps/registry.json";
-  return mapSourceFromRegistryFile(registryPath, null);
+  return mapSourceFromRegistryFile(registryPath, mapId ?? null);
+}
+
+/**
+ * 列出项目配置中注册的全部地图 id（清单 maps 的键，按声明顺序）。
+ *
+ * 与 getMapSourceFromConfig 一样，本函数持有「地图清单路径」知识；
+ * 供 /maps/runtime 的 404 available 列表与 /maps/meta 的地图遍历使用。
+ *
+ * @returns 地图 id 列表
+ * @throws Error 当地图清单读取或解析失败时抛出
+ */
+export function listMapIdsFromConfig(): string[] {
+  const registryPath = "game/maps/registry.json";
+  const raw = readJsonFile(registryPath);
+  if (!isRecord(raw)) throw new Error("地图清单格式错误：根节点必须是对象");
+
+  const mapsRaw = raw.maps;
+  if (!isRecord(mapsRaw)) throw new Error("地图清单格式错误：maps 必须是对象（mapId -> 配置）");
+
+  return Object.keys(mapsRaw);
 }

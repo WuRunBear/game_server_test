@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
     "start": "node dist/src/index.js",
-    "schema:gen": "schema-codegen src/network/colyseus/state/RoomState.ts --output src/network/colyseus/client-schema --ts --bundle",
+    "schema:gen": "mkdir -p src/network/colyseus/client-schema && schema-codegen framework/net/colyseus/state/RoomState.ts --output src/network/colyseus/client-schema --ts --bundle",
     "test": "vitest run",
     "tools": "tsx tools/cli.ts"
   },

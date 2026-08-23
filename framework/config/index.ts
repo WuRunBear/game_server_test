@@ -4,7 +4,8 @@
  * 框架其余部分需要配置时一律经本文件导入（路径别名 "config"），
  * 保持「游戏无关配置」的单一入口。当前导出：
  * - getMapSourceFromConfig：从项目配置解析地图来源（MapSource）
+ * - listMapIdsFromConfig：列出配置中注册的全部地图 id
  * - serverConfig / ServerConfig：服务端网络监听配置
  */
-export { getMapSourceFromConfig } from "config/map";
+export { getMapSourceFromConfig, listMapIdsFromConfig } from "config/map";
 export { serverConfig, type ServerConfig } from "config/server";

@@ -23,6 +23,7 @@ export default defineConfig({
       { find: "utils", replacement: resolve(__dirname, "framework/utils") },
       { find: "config", replacement: resolve(__dirname, "framework/config") },
       { find: "network", replacement: resolve(__dirname, "framework/net") },
+      { find: "simulation", replacement: resolve(__dirname, "framework/simulation") },
       { find: "database", replacement: resolve(__dirname, "framework") },
     ],
   },

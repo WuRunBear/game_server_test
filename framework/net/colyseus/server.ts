@@ -1,7 +1,7 @@
 /**
  * Colyseus 服务端装配：创建 WebSocket 传输层、注册单房间类型
  * （game）、启动一个常驻房间，并挂载少量调试 HTTP 端点
- * （/health、/maps/runtime、/debug/colliders）。游戏逻辑全部在
+ * （/health、/maps/runtime、/maps/meta、/debug/colliders）。游戏逻辑全部在
  * 仿真层，本文件只负责把 Colyseus 接到 GameRoom 上。
  */
 import http from "node:http";
@@ -9,8 +9,14 @@ import http from "node:http";
 import { Server, matchMaker } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 
-import { getMapSourceFromConfig, serverConfig } from "config";
-import { buildMapRuntime } from "map";
+import { getMapSourceFromConfig, listMapIdsFromConfig, serverConfig } from "config";
+import {
+  buildMapChunks,
+  buildMapRuntime,
+  computeMapVersion,
+  describeMapSource,
+} from "map";
+import type { MapSource } from "map";
 import { GameRoom } from "network/colyseus/rooms/GameRoom";
 import type { Logger } from "utils/logger";
 
@@ -49,7 +55,7 @@ export interface StartColyseusServerOptions {
  */
 export function startColyseusServer(options: StartColyseusServerOptions): ColyseusServer {
   const transport = new WebSocketTransport();
-  let cachedMapRuntimeJson: unknown | undefined;
+  const mapRuntimeCache = new Map<string, unknown>();
   let persistentRoomId: string | undefined;
 
   const gameServer = new Server({
@@ -86,20 +92,43 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
         res.status(200).json({ ok: true });
       });
 
-      app.get("/maps/runtime", (_req: any, res: any) => {
-        if (!cachedMapRuntimeJson) {
-          const runtime = buildMapRuntime(getMapSourceFromConfig());
-          cachedMapRuntimeJson = {
+      app.get("/maps/runtime", (req: any, res: any) => {
+        const rawMapId = req.query?.mapId;
+        const mapId = typeof rawMapId === "string" ? rawMapId : undefined;
+        const source = mapId !== undefined ? getMapSourceFromConfig(mapId) : getMapSourceFromConfig();
+
+        if (!source) {
+          res.status(404).json({ error: "unknown map", available: listMapIdsFromConfig() });
+          return;
+        }
+
+        let runtimeJson = mapRuntimeCache.get(source.id);
+        if (!runtimeJson) {
+          const runtime = buildMapRuntime(source);
+          runtimeJson = {
             id: runtime.id,
             name: runtime.name,
             grid: runtime.grid,
-            blockedBase64: Buffer.from(runtime.blocked).toString("base64"),
-            spawns: runtime.spawns,
-            zones: runtime.zones,
+            version: computeMapVersion(runtime),
+            chunks: buildMapChunks(runtime.blocked, runtime.grid),
           };
+          mapRuntimeCache.set(source.id, runtimeJson);
         }
 
-        res.status(200).json(cachedMapRuntimeJson);
+        res.status(200).json(runtimeJson);
+      });
+
+      app.get("/maps/meta", (_req: any, res: any) => {
+        const defaultSource = getMapSourceFromConfig();
+        const maps = listMapIdsFromConfig()
+          .map((mapId) => getMapSourceFromConfig(mapId))
+          .filter((source): source is MapSource => source !== null)
+          .map((source) => ({
+            ...describeMapSource(source),
+            version: computeMapVersion(buildMapRuntime(source)),
+          }));
+
+        res.status(200).json({ default: defaultSource.id, maps });
       });
 
       app.get("/debug/colliders", (_req: any, res: any) => {

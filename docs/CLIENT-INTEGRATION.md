@@ -16,7 +16,7 @@
 ```ts
 import { Client } from "colyseus.js";
 
-const endpoint = "ws://localhost:3001"; // ← 部署方提供
+const endpoint = "ws://localhost:3000"; // ← 部署方提供
 const client = new Client(endpoint);
 const room = await client.joinOrCreate<RoomState>("game");
 ```
@@ -316,7 +316,8 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 | 端点 | 说明 |
 |------|------|
 | `GET /health` | 健康检查，`{"ok":true}` |
-| `GET /maps/runtime` | 地图运行时数据：网格尺寸、阻挡位图（blockedBase64，按行位打包）、出生点、区域多边形。用于客户端加载地图/碰撞/出生点 |
+| `GET /maps/runtime?mapId=<id>` | 地图运行时数据：网格尺寸、阻挡位图（chunk 化）、内容版本。用于客户端加载地图/碰撞。`mapId` 可选：省略时返回注册表默认地图；未知 id 返回 404，错误体附可用图列表 |
+| `GET /maps/meta` | 地图清单：默认图 id 与全部地图的元信息（含 version）。客户端可先拉取清单列出地图、预检版本，再按需拉取 runtime |
 | `GET /debug/colliders` | 房间碰撞体调试快照（房间未就绪时 404） |
 
 `/maps/runtime` 返回示例：
@@ -325,12 +326,42 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 {
   "id": "generated-map",
   "name": "…",
-  "grid": { "width": 50, "height": 38, "tileWidth": 16, "tileHeight": 16 },
-  "blockedBase64": "…",           // 阻挡位图：width×height 字节，每格 1 字节（0=可走 1=阻挡），行序排列，base64 编码
-  "spawns": { "player": { "x": 512, "y": 512 }, "npcs": [ { "kind": "boar", "pos": { "x": 1, "y": 2 } } ] },
-  "zones": [ { "id": 0, "name": "…", "polygon": [ { "x": 0, "y": 0 } ] } ]
+  "grid": { "width": 64, "height": 64, "tileWidth": 16, "tileHeight": 16 },
+  "version": "a1b2c3d4",          // 内容哈希（uint32 hex）：同内容恒定、内容变化即变；客户端可作缓存键
+  "chunks": [                     // 阻挡位图分块：16×16 tile/块，行主序排列
+    { "cx": 0, "cy": 0, "data": "…" },   // data：256 字节（每格 1 字节，0=可走 1=阻挡），base64 编码
+    { "cx": 1, "cy": 0, "data": "…" }
+  ]
 }
 ```
+
+字段说明：
+
+| 字段 | 说明 |
+|------|------|
+| `grid` | 网格尺寸与 tile 尺寸；`width`/`height` 为 tile 数 |
+| `version` | 内容哈希（uint32 hex，8 位小写十六进制）。同一地图内容恒定则值恒定，内容变化（如重新生成）则变化。客户端可用 `{id, version}` 作缓存键，跳过重复拉取 |
+| `chunks` | 阻挡位图分块数组。每块 16×16 tile（256 字节，每格 1 字节：0=可走 1=阻挡），`data` 为 base64 编码。块按行主序排列：`cx` 为列索引、`cy` 为行索引，总块数 = `ceil(width/16) × ceil(height/16)`。客户端按 `cy` 行、`cx` 列顺序拼接为扁平字节数组（行主序重组） |
+
+`mapId` 参数语义：
+
+- 省略 `mapId`：返回注册表默认地图（即 `/maps/meta` 的 `default` 字段）。
+- 未知 `mapId`：返回 404，错误体附可用图列表，例如 `{"error":"unknown map","available":["generated-map","cave"]}`。
+- 客户端应在连接后以 `room.state.mapId` 作为请求参数；响应 `id` 与请求不符时告警并拒绝应用（防错图）。
+
+`/maps/meta` 返回示例：
+
+```jsonc
+{
+  "default": "generated-map",
+  "maps": [
+    { "id": "generated-map", "name": "…", "kind": "generated", "width": 64, "height": 64, "tileWidth": 16, "tileHeight": 16, "generatorId": "…", "seed": 1, "version": "a1b2c3d4" },
+    { "id": "cave", "name": "…", "kind": "generated", "width": 32, "height": 32, "tileWidth": 16, "tileHeight": 16, "generatorId": "…", "seed": 2, "version": "…" }
+  ]
+}
+```
+
+> 用法：客户端可先请求 `/maps/meta` 列出可用地图与各自 `version`（预检版本、渲染地图选择 UI），再按需请求 `/maps/runtime?mapId=<id>` 拉取具体地图数据。
 
 ---
 
