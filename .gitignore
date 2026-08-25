@@ -8,3 +8,4 @@ yarn-error.log*
 config/maps/exports/*
 logs
 data/saves
+.omo
