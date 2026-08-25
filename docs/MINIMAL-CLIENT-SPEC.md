@@ -23,14 +23,16 @@
 | # | 约束 |
 |---|------|
 | 1 | **单文件 index.html**：CSS/JS 全部内联；禁止任何构建工具/npm 包管理器 |
-| 2 | **Colyseus 浏览器 SDK 经 CDN 引入**（两段，浏览器实测通过）：<br>① SDK 全局脚本：`<script src="https://unpkg.com/@colyseus/sdk@0.17.43/dist/colyseus.js"></script>` → 全局 `window.Colyseus.Client`（与服务端 `@colyseus/core 0.17.43` 配套）；<br>② Schema 模块：`<script type="module">import { Schema, MapSchema, defineTypes, type } from "https://unpkg.com/@colyseus/schema@4.0.25/build/index.mjs"</script>` → 模块作用域 `Schema`/`MapSchema`/`defineTypes`。**注意**：`colyseus.js` 包无 0.17.x（已改名 `@colyseus/sdk`）；无 `dist/colyseus.min.js`（真实文件是 `dist/colyseus.js`）；0.17 起 Schema 类**不挂** `window.Colyseus` 全局，须从模块导入 |
+| 2 | **Colyseus 浏览器 SDK 经 CDN 引入，二选一（两条均浏览器实测通过）**：<br>**方式 A（pkg 官方 unpkg）**：① SDK 全局脚本 `<script src="https://unpkg.com/@colyseus/sdk@0.17.43/dist/colyseus.js">` → 全局 `window.Colyseus.Client`（与服务端 `@colyseus/core 0.17.43` 配套）；② Schema 模块 `<script type="module">import { Schema, MapSchema, defineTypes, type } from "https://unpkg.com/@colyseus/schema@4.0.25/build/index.mjs"</script>` → 模块作用域 `Schema`/`MapSchema`/`defineTypes`。<br>**方式 B（推荐——更简洁，importmap + jsdelivr `+esm`）**：先 `<script type="importmap">` 把 `@colyseus/sdk`/`@colyseus/schema` 映射到 jsdelivr `+esm`，再用 `import * as Colyseus from '@colyseus/sdk'`、`import { Schema, MapSchema, defineTypes } from '@colyseus/schema'`——`Colyseus.Client` 从模块导入、**不挂全局**；**importmap 必须放在所有 module script 之前**。完整写法见下方案例。<br>**⚠️ 禁止**用两个普通 `<script>` 标签分别加载 SDK 与 Schema（如 `<script src="...colyseus.js">` + `<script src="...colyseus-schema.js">`）——普通 script 无法解析裸导入/依赖关系，会报 `colyseus is not defined` / Schema 类未定义。**只能二选一：方式 A（全局脚本+模块导入配对）或方式 B（importmap+纯 ESM），绝不能拆分混用。**<br>**注意**：`colyseus.js` 包无 0.17.x（已改名 `@colyseus/sdk`）；无 `dist/colyseus.min.js`（真实文件是 `dist/colyseus.js`）；0.17 起 Schema 类**不挂** `window.Colyseus` 全局，须从模块导入 |
 | 3 | **Schema 类用纯 JS 方式声明**（实测通过）：从 `@colyseus/schema` 模块导入 `Schema`/`MapSchema`/`defineTypes`，用 `defineTypes()`（**不用装饰器**，避免需要编译步骤）；类名/字段名/类型/**字段顺序**严格照抄协议 §3.4——字段顺序是线协议的一部分。完整可运行示例见本表下方 |
 | 4 | **渲染只用原生 Canvas 2D**：实体=色块（圆/矩形）+ 文字标签；禁止引入任何游戏引擎/框架。**澄清：游戏引擎≠CSS 框架，Tailwind 不在此禁令范围**（见下表第 7 条） |
 | 5 | **服务端地址可配置**：页面顶部输入框记住上次输入（localStorage），默认 `ws://localhost:3000`；HTTP 基址由它派生（`ws:`→`http:`，`wss:`→`https:`） |
 | 6 | UI 与注释一律中文 |
 | 7 | **Tailwind 仅用于 DOM 覆盖层 UI**：允许经 Play CDN `<script src="https://cdn.tailwindcss.com"></script>` 引入，用途=仅给 DOM 覆盖层（HUD/面板/按钮）做样式；**canvas 渲染不受影响**，也不作为游戏引擎/框架使用 |
 
-### 约束 2/3 最小可运行示例（直接复制，纯 JS，无构建）
+### 约束 2/3 最小可运行示例 · 方式 A（直接复制，纯 JS，无构建；浏览器实测通过）
+
+> 方式 A = SDK 全局脚本（`window.Colyseus.Client`）+ Schema 模块导入（`Schema`/`MapSchema`/`defineTypes`）配对。已作为基准，5 条连接断言实测 PASS。
 
 ```html
 <!-- ① SDK 全局脚本（先加载；提供 window.Colyseus.Client） -->
@@ -70,6 +72,62 @@
   console.log(room.sessionId, room.state.tick, room.state.mapId);
 </script>
 ```
+**方式 A 已验证**：浏览器逐项实测 `window.Colyseus` 全局含 Client、模块导出 Schema 类可用，`joinOrCreate("game")` 成功（5/5 断言 PASS）。
+
+---
+
+### 约束 2/3 最小可运行示例 · 方式 B（推荐——importmap + jsdelivr `+esm`，纯 ESM；浏览器实测通过）
+
+> 方式 B = 一个 `<script type="importmap">` 把两个包名映射到 jsdelivr `+esm`，再用两条 ESM `import`。`Colyseus.Client` 从 `@colyseus/sdk` 模块导入、不挂全局。**importmap 必须放在所有 module script 之前**（否则浏览器报 `Uncaught TypeError: Failed to resolve module specifier`）。
+
+```html
+<script type="importmap">
+{
+  "imports": {
+    "@colyseus/sdk": "https://cdn.jsdelivr.net/npm/@colyseus/sdk@0.17.43/+esm",
+    "@colyseus/schema": "https://cdn.jsdelivr.net/npm/@colyseus/schema@4.0.25/+esm"
+  }
+}
+</script>
+<script type="module">
+  import * as Colyseus from '@colyseus/sdk';
+  import { Schema, MapSchema, defineTypes } from '@colyseus/schema';
+
+  // 三层 Schema 声明（纯 JS defineTypes，不用装饰器；字段名/类型/顺序严格照抄协议 §3.4）
+  class EntityState extends Schema {}
+  defineTypes(EntityState, {
+    id:           "uint32",          // NetworkId
+    values:       { map: "number" }, // 数值字段，"组件.字段"
+    stringValues: { map: "string" }, // 字符串字段，"组件.字段"
+  });
+
+  class PlayerState extends Schema {}
+  defineTypes(PlayerState, {
+    sessionId:       "string",              // 自己的 sessionId
+    entityId:        "uint32",              // 自己实体的 NetworkId
+    visibleEntities: { map: EntityState },  // 视野内实体（兴趣裁剪）
+  });
+
+  class RoomState extends Schema {}
+  defineTypes(RoomState, {
+    tick:     "uint32",                  // 逻辑帧号
+    hour:     "float64",                 // 世界小时 0-24
+    phase:    "uint8",                   // 0=白天 1=夜晚
+    mapId:    "string",                  // 当前地图 id
+    players:  { map: PlayerState },      // key=sessionId
+    entities: { map: EntityState },      // key=NetworkId 字符串（未裁剪模式）
+  });
+
+  // 连接：⚠️ 不要传自定义 Schema 类作第 3 参（见坑 K8），否则状态解码为空
+  const client = new Colyseus.Client("ws://localhost:3001");
+  const room   = await client.joinOrCreate("game");  // 不传 rootSchema
+  console.log(room.sessionId, room.state.tick, room.state.mapId);
+</script>
+```
+
+**两段示例均浏览器实测通过**：方式 A（unpkg 全局+模块导入，5/5 断言 PASS）；方式 B（jsdelivr `+esm`，`joinOrCreate("game")` 后 tick 为正整数、mapId="generated-map" 非空，9/9 断言 PASS）。方式 B 之所以可行，是因为 jsdelivr `+esm` 会在**服务端**把裸导入改写为绝对 `/npm/...` 路径——这正好绕开浏览器直接 `import` `@colyseus/sdk/build/index.mjs` 时因裸导入 `@colyseus/shared-types` 而报 `Failed to resolve module specifier` 的坑（见坑 K8.4）。**坑 K8 对两种方式同样适用**：`joinOrCreate("game")` 不传自定义 rootSchema。
+
+⚠️ **切勿用两个普通 `<script>` 标签分别加载 SDK 与 Schema**（例如 `<script src="...colyseus.js"></script>` + `<script src="...colyseus-schema.js"></script>`）——普通 script 无法解析裸导入/依赖关系，会报 `colyseus is not defined` / Schema 类未定义。**二选一**：方式 A（全局脚本+模块导入）或方式 B（importmap+纯 ESM），绝不能拆分混用。
 
 ---
 
@@ -140,12 +198,13 @@
 - **K5 CORS**：HTTP 端点受 `CORS_ORIGINS` 白名单限制（服务端默认 `http://localhost:5173`）。运行方式二选一：① 用任意静态服务器把页面跑在 `http://localhost:5173`（如 `npx serve -l 5173` 或 `python3 -m http.server 5173`）；② 在服务端 `.env` 设 `CORS_ORIGINS=<你的页面地址>` 后重启。
 - **K6 房间级换图**：任一玩家踩传送门会导致**全房间**玩家换图（`mapId` 变化），多人时别人的画面突然切换属正常现象。
 - **K7 权威模型**：服务端权威模拟，客户端**不做位移预测**，位置完全以同步状态为准（最小版直接读最新值渲染即可，不需要插值）。
-- **K8 引入与 rootSchema 五条实测坑**（下列任何一条都会“看似连上但状态不对”或直接崩）：
+- **K8 引入与 rootSchema 实测坑**（下列任何一条都会“看似连上但状态不对”或直接崩）：
   1. **勿传自定义 rootSchema**：`client.joinOrCreate("game", {}, RoomState)`（第 3 参传入客户端 `RoomState` 类）实测**状态解码为空**（`tick`/`mapId`/`players`/`entities` 全 `undefined`）——客户端用预实例化的 `RoomState` 做解码，而服务端反射/增量补丁没落到该实例。**正确：`joinOrCreate("game")`（不传第 3 参）**，由服务端反射自动解码，字段完整。客户端 `Schema/defineTypes` 声明仅作协议文档/校验用，勿作为 rootSchema 传入。
   2. **`colyseus.js` 包无 0.17.x**：已改名 `@colyseus/sdk`；且任何版本都**没有** `dist/colyseus.min.js`（真实文件是 `dist/colyseus.js`）。
   3. **0.17 起 Schema 类不挂 `window.Colyseus` 全局**：`Schema`/`MapSchema`/`defineTypes` 必须从 `@colyseus/schema` 模块导入（候选 `colyseus.js@0.16.22` 文件文本确有 `exports.Schema`，但运行时 `window.Colyseus` 键里并没有）。
-  4. **SDK 的 ESM 入口浏览器直载失败**：`@colyseus/sdk@0.17.43/build/index.mjs` 含 `@colyseus/schema`/`@colyseus/shared-types` 裸导入，浏览器报 `Failed to resolve module specifier`；必须用 `dist/colyseus.js` 全局版。
+  4. **SDK 的 ESM 入口浏览器直载失败**：`@colyseus/sdk@0.17.43/build/index.mjs` 含 `@colyseus/schema`/`@colyseus/shared-types` 裸导入，浏览器报 `Failed to resolve module specifier`；须用 `dist/colyseus.js` 全局版，或经 importmap（方式 B）让 CDN 服务端把裸导入改写为绝对 `/npm/...` 路径。
   5. **旧版浏览器直接崩**：`colyseus.js@0.15.28` 加载即抛 `Buffer is not defined`（`window.Colyseus` 是空 `{}`）；`0.16.22` 全局并不暴露 Schema 类。此两者均不可用。
+  6. **（方式 B 专用）importmap 位置**：`<script type="importmap">` **必须放在所有 module script 之前**，且一个页面**只能有一个** importmap；两个 module script 里重复贴 importmap 会报错。importmap 只影响裸名称解析，不影响方式 A（全局脚本+模块直导入）的正确性。
 
 ---
 
@@ -177,3 +236,4 @@
 |------|------|------|
 | v1 | 2026-08-25 | 首版。配套协议：`CLIENT-INTEGRATION.md`（含 chunked 地图契约 + `/maps/meta`）。服务端基线：@colyseus/core 0.17.43 / @colyseus/schema 4.0.25；兴趣裁剪开启（viewRadius=300）；存档周期 60s；注册表地图 generated-map(64×64) + cave(32×32)。K1 待服务端升级 colyseus ≥0.17.44 后复核移除 |
 | v1.1 | 2026-08-25 | CDN/导入写法修正（`colyseus.js`→`@colyseus/sdk@0.17.43` 全局版 + `@colyseus/schema@4.0.25` 模块导入，浏览器实测通过）；新增 Tailwind 条目（§1 约束表第 7 条）；新增坑 K8（自定义 rootSchema 传参即空状态等 5 条实测坑）。约束 2/3 改掉原先写错的双重错误地址与“全局提供 Schema 类”的说法；K1-K7 复核后表述保持成立未改 |
+| v1.2 | 2026-08-25 | 约束 2 写法升级：明确**两种实测可行的引入方式**（方式 A：unpkg 全局脚本+Schema 模块导入 / 方式 B：importmap + jsdelivr `+esm`），新增**「禁止两个普通 script 混用」警告**以消除 AI 生成 `colyseus is not defined` 的歧义；最小示例保留方式 A 基准并**新增方式 B 完整可复制示例**（均标注浏览器实测通过）；坑 K8 补第 6 条（方式 B 专用 importmap 位置）并改写 K8.4 说明方式 B 如何绕开裸导入坑 |
