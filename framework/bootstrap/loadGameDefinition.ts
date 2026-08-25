@@ -211,6 +211,7 @@ function resolveMapSources(
         height: genEntry.height ?? 64,
         tileWidth: genEntry.tileWidth ?? 16,
         tileHeight: genEntry.tileHeight ?? 16,
+        npcSpawns: genEntry.npcSpawns,
       };
     }
     sources[key] = source;

@@ -9,17 +9,25 @@
       "width": 64,
       "height": 64,
       "tileWidth": 16,
-      "tileHeight": 16
+      "tileHeight": 16,
+      "npcSpawns": [
+        { "kind": "villager", "offsetTiles": [2, 0], "zoneId": 1 }
+      ]
     },
     "cave": {
       "kind": "generated",
-      "generatorId": "simple",
+      "generatorId": "cave",
       "name": "洞穴",
       "seed": 2,
       "width": 32,
       "height": 32,
       "tileWidth": 16,
       "tileHeight": 16
+    },
+    "tiled-demo": {
+      "kind": "tiled",
+      "name": "Tiled 演示图",
+      "path": "tiled-demo.json"
     }
   }
 }

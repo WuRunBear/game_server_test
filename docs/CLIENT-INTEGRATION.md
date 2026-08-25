@@ -363,6 +363,99 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 
 > 用法：客户端可先请求 `/maps/meta` 列出可用地图与各自 `version`（预检版本、渲染地图选择 UI），再按需请求 `/maps/runtime?mapId=<id>` 拉取具体地图数据。
 
+### 5.3 地图内容：生成器 / 校验 / Tiled 制作
+
+> 本节补充地图「如何产生、是否可用、如何手工制作」的服务端视角（§5.2 已讲客户端如何拉取）。地图数据由 `game/maps/registry.json` 声明：`kind: "generated"` 走程序化生成器，`kind: "tiled"` 走外部 Tiled JSON 文件。客户端关注的是最终 `MapRuntime`（网格、阻挡位图、出生点、zone 列表），其规则如下。
+
+#### 5.3.1 内置地图生成器（generatorId）
+
+框架内置两种程序化生成器，生成地图条目通过字段 `generatorId` 选择：
+
+| generatorId | 说明 | 生成规则 |
+|-------------|------|----------|
+| `simple` | 默认生成器 | 边界一圈全阻挡；内部随机撒约 5% 障碍物；玩家出生在地图中心；单个默认区域。同种子可复现 |
+| `cave` | 元胞自动机洞穴 | 内部约 45% 概率初始置墙、边界恒墙；经典 B=r5 / D=r4 规则平滑 5 轮（8 邻域 ≥5 墙则成墙、否则成地面，每轮后边界强制为墙）；玩家出生在最大 4 向连通地面分量的质心最近格（tile 中心）；单个默认区域。同种子可复现 |
+
+两者都基于 xorshift32 伪随机：**相同 `seed` 生成相同地图**。
+
+`kind: "generated"` 条目完整字段示例（`game/maps/registry.json` 的 `maps` 表内）：
+
+```jsonc
+{
+  "kind": "generated",
+  "generatorId": "cave",       // simple | cave（缺省 simple）
+  "seed": 2,                   // 随机种子，同种子可复现
+  "width": 32,                 // 网格宽（tile 数）
+  "height": 32,                // 网格高（tile 数）
+  "tileWidth": 16,             // 单格宽（像素）
+  "tileHeight": 16,            // 单格高（像素）
+  "npcSpawns": [               // 可选：程序生成内置的 NPC 出生点（相对玩家出生点偏移，tile 单位）
+    { "kind": "villager", "offsetTiles": [2, 0], "zoneId": 1 }
+  ]
+}
+```
+
+`npcSpawns`（可选）语义：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `kind` | string | NPC 类型 id（数据，由配置给出，框架只透传，不硬编码） |
+| `offsetTiles` | `[number, number]` | 相对玩家出生点的偏移，单位 tile：`pos = player + offsetTiles × tileSize` |
+| `zoneId` | number（可选） | 归属的地图区域 id |
+
+`npcSpawns` 缺省或为空时，该地图不生成任何 NPC 出生点。`generated` 条目其余字段（`width`/`height`/`tileWidth`/`tileHeight`/`seed`）缺省时分别取 64/64/16/16/1。
+
+#### 5.3.2 地图校验（validateMapRuntime）
+
+`buildMapRuntime` 在出口处对**每种来源**（`generated` 与 `tiled`）统一调用 `validateMapRuntime`。校验器是纯函数（不抛错、不记日志），返回 `{ errors, warnings }`；由 `buildMapRuntime` 依 `errors` 抛错、对 `warnings` 逐条 `logger.warn`。
+
+| 级别 | 触发条件 | 表现 |
+|------|----------|------|
+| 硬错误（HARD ERROR） | 玩家/NPC 出生点落在阻挡格、越出网格边界，或玩家出生点缺失（null） | `buildMapRuntime` 抛出异常 → 该地图**不可用**（构建失败） |
+| 软告警（SOFT WARNING） | 最大 4 向连通可走域占全部地面 tile 的比例低于 40%（`MIN_WALKABLE_COMPONENT_FRACTION = 0.4`） | `logger.warn` 记录，**不阻断**构建 |
+
+硬错误常见于出生点被墙/障碍压住、出生点坐标超出地图范围、地图未声明玩家出生点。这类图视为「必坏图」，服务端拒绝构建。软告警的设计意图：洞穴/洞窟类地图天然存在封闭空腔（不可达 ≠ 坏图），因此「连通域占比过低」只告警、不断言地图不可用。
+
+出生点坐标以世界（像素）坐标换算为 tile 坐标后校验（`floor(pos.x / tileWidth)`、`floor(pos.y / tileHeight)`，行主序 `blocked[y * width + x]`），因此「落在阻挡格」与「越界」都拦得住。
+
+影响面：`tools/gen-map`、`tools/export-map` 与 HTTP 端点（`/maps/meta`、`/maps/runtime`）都经 `buildMapRuntime` 构建，因此：
+
+- **硬错误** = 命令非 0 退出 / 端点返回错误（该图无法产出运行时数据）；
+- **软告警** = 命令照常成功，日志出现该图的连通性警告。
+
+客户端效应：一个「必坏图」不会出现在可用的运行时数据里（`/maps/runtime` 对其直接返回错误而非 200 + 数据），客户端按拉图失败处理即可；正常地图恒可成功构建。
+
+#### 5.3.3 Tiled 地图制作与注册
+
+若需手工制作静态地图，用 [Tiled](https://www.mapeditor.org/) 编辑器绘制后导出为 JSON，再经服务端解析。依赖**固定图层名**，解析约定如下：
+
+| 图层 | 类型 | 约定 |
+|------|------|------|
+| `collision` | tilelayer | 阻挡层：非 0 的 tile 视为阻挡（0=可走，1=阻挡） |
+| `zones` | objectgroup | 区域：`type="zone"` 的对象，带 `zoneId` 属性；有 `polygon` 用多边形顶点，否则兜底为矩形（`x/y/width/height` 围成） |
+| `objects` | objectgroup | 出生点：`type="spawn_player"` / `type="spawn_npc"`；NPC 的 `kind` 由 `npcKind` 属性给出，`zoneId` 属性可选 |
+
+根字段：`width` / `height`（tile 数）、`tilewidth` / `tileheight`（单格像素）。对象坐标均为 Tiled 的像素世界坐标（原点左上角）。
+
+注册步骤：
+
+1. 把 Tiled 导出的 JSON 保存到 `game/maps/`（如 `tiled-demo.json`）。
+2. 在 `game/maps/registry.json` 中加入 `kind: "tiled"` 条目，`path` 指向该 JSON，并配所需的 `mapId`；之后用 `mapId` 引用它（`/maps/runtime?mapId=<id>`、`room.state.mapId`、传送门 `targetMap` 等）。
+
+```jsonc
+{
+  "maps": {
+    "tiled-demo": {
+      "kind": "tiled",
+      "path": "game/maps/tiled-demo.json",
+      "name": "手作示例地图"
+    }
+  }
+}
+```
+
+> 示例：`game/maps/tiled-demo.json` 是一张手工绘制的示例图，注册为 mapId `tiled-demo`（由独立任务产出，此处不列举其具体内容）。`kind: "tiled"` 条目经 `buildMapRuntime` 构建后同样接受 §5.3.2 的校验。
+
 ---
 
 ## 6. 对接清单（Checklist）

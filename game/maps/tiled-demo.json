@@ -1,0 +1,41 @@
+{
+  "width": 8,
+  "height": 8,
+  "tilewidth": 16,
+  "tileheight": 16,
+  "layers": [
+    {
+      "type": "tilelayer",
+      "name": "collision",
+      "width": 8,
+      "height": 8,
+      "data": [1,1,1,1,1,1,1,1, 1,0,0,0,0,0,0,1, 1,0,1,0,0,1,0,1, 1,0,0,0,0,0,0,1, 1,0,0,0,0,0,0,1, 1,0,0,0,0,0,0,1, 1,0,0,0,0,0,0,1, 1,1,1,1,1,1,1,1]
+    },
+    {
+      "type": "objectgroup",
+      "name": "zones",
+      "objects": [
+        {
+          "id": 1, "type": "zone", "name": "default",
+          "x": 16, "y": 16, "width": 96, "height": 96,
+          "properties": [ { "name": "zoneId", "type": "int", "value": 1 } ]
+        }
+      ]
+    },
+    {
+      "type": "objectgroup",
+      "name": "objects",
+      "objects": [
+        { "id": 2, "type": "spawn_player", "name": "player", "x": 64, "y": 64 },
+        {
+          "id": 3, "type": "spawn_npc", "name": "npc",
+          "x": 80, "y": 64,
+          "properties": [
+            { "name": "npcKind", "type": "string", "value": "villager" },
+            { "name": "zoneId", "type": "int", "value": 1 }
+          ]
+        }
+      ]
+    }
+  ]
+}

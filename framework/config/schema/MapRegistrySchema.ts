@@ -32,6 +32,19 @@ export const GeneratedMapEntrySchema = z.object({
   tileWidth: z.number().default(16),
   /** 单格高（像素）。 */
   tileHeight: z.number().default(16),
+  /** 程序生成时布置的 NPC 出生点列表（可选，相对玩家出生点偏移）。 */
+  npcSpawns: z
+    .array(
+      z.object({
+        /** NPC 类型 id（数据，由配置给出）。 */
+        kind: z.string(),
+        /** 相对玩家出生点的偏移，单位：[tileX, tileY]。 */
+        offsetTiles: z.tuple([z.number(), z.number()]),
+        /** 归属的地图区域 id（可选）。 */
+        zoneId: z.number().optional(),
+      }),
+    )
+    .optional(),
 });
 
 /**

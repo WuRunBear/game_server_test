@@ -189,6 +189,17 @@ describe("地图 HTTP 端点（/maps/runtime 与 /maps/meta）", () => {
     expect(body.version).toMatch(/^[0-9a-f]{8}$/);
   });
 
+  it("/maps/runtime?mapId=tiled-demo：200，chunks 非空，meta 已列出", async () => {
+    const { status, body } = await getRuntime("tiled-demo");
+    expect(status).toBe(200);
+    expect(body.id).toBe("tiled-demo");
+    expect(body.grid).toEqual({ width: 8, height: 8, tileWidth: 16, tileHeight: 16 });
+    expect(body.chunks.length).toBeGreaterThan(0);
+    expect(body.version).toMatch(/^[0-9a-f]{8}$/);
+    const meta = await getMeta();
+    expect(meta.maps.some((m) => m.id === "tiled-demo")).toBe(true);
+  });
+
   it("未知 mapId → 404 {error, available}（含空串 mapId）", async () => {
     const res = await fetch(`${baseUrl}/maps/runtime?mapId=does-not-exist`);
     expect(res.status).toBe(404);
@@ -197,6 +208,7 @@ describe("地图 HTTP 端点（/maps/runtime 与 /maps/meta）", () => {
     expect(body.available).toEqual(listMapIdsFromConfig());
     expect(body.available).toContain("generated-map");
     expect(body.available).toContain("cave");
+    expect(body.available).toContain("tiled-demo");
 
     // 空串视为显式 id（清单中不存在）→ 同样 404
     const empty = await fetch(`${baseUrl}/maps/runtime?mapId=`);
@@ -226,7 +238,7 @@ describe("地图 HTTP 端点（/maps/runtime 与 /maps/meta）", () => {
 
   it("/maps/meta 与 /maps/runtime 的 version 一致（两张图都验）", async () => {
     const meta = await getMeta();
-    expect(meta.maps).toHaveLength(2);
+    expect(meta.maps).toHaveLength(3);
 
     for (const entry of meta.maps) {
       const { status, body } = await getRuntime(entry.id);
@@ -261,12 +273,16 @@ describe("地图 HTTP 端点（/maps/runtime 与 /maps/meta）", () => {
   it("/maps/meta 响应形状：default=generated-map，两张图字段齐全", async () => {
     const meta = await getMeta();
     expect(meta.default).toBe("generated-map");
-    expect(meta.maps).toHaveLength(2);
+    expect(meta.maps).toHaveLength(3);
 
     const generatedMap = meta.maps.find((m) => m.id === "generated-map");
     const cave = meta.maps.find((m) => m.id === "cave");
     expect(generatedMap).toBeDefined();
     expect(cave).toBeDefined();
+
+    const tiledDemo = meta.maps.find((m) => m.id === "tiled-demo");
+    expect(tiledDemo).toBeDefined();
+    expect(tiledDemo).toMatchObject({ kind: "tiled", width: 8, height: 8, tileWidth: 16, tileHeight: 16 });
 
     expect(generatedMap).toMatchObject({
       kind: "generated",
@@ -283,7 +299,7 @@ describe("地图 HTTP 端点（/maps/runtime 与 /maps/meta）", () => {
       height: 32,
       tileWidth: 16,
       tileHeight: 16,
-      generatorId: "simple",
+      generatorId: "cave",
       seed: 2,
     });
 

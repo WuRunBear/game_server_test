@@ -1,6 +1,7 @@
 import fs from "node:fs";
+import { dirname, resolve } from "node:path";
 
-import type { MapSource } from "map";
+import type { MapSource, NpcSpawnSpec } from "map/types";
 
 /**
  * 地图来源解析（framework/config/map.ts）。
@@ -83,6 +84,36 @@ function getString(entry: Record<string, unknown>, key: string): string | null {
 }
 
 /**
+ * 从配置对象解析单个 NPC 出生点配置项；格式非法时返回 null。
+ */
+function asNpcSpawnSpec(value: unknown): NpcSpawnSpec | null {
+  if (!isRecord(value)) return null;
+  const kind = asString(value.kind);
+  if (kind === null) return null;
+  const offset = value.offsetTiles;
+  if (!Array.isArray(offset) || offset.length !== 2) return null;
+  const x = asNumber(offset[0]);
+  const y = asNumber(offset[1]);
+  if (x === null || y === null) return null;
+  const zoneId = asNumber(value.zoneId);
+  return zoneId === null ? { kind, offsetTiles: [x, y] } : { kind, offsetTiles: [x, y], zoneId };
+}
+
+/**
+ * 从配置对象解析可选的 npcSpawns 数组；缺省或非法时返回 undefined（省略该字段）。
+ */
+function parseNpcSpawns(value: unknown): NpcSpawnSpec[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const result: NpcSpawnSpec[] = [];
+  for (const item of value) {
+    const spec = asNpcSpawnSpec(item);
+    if (spec === null) return undefined;
+    result.push(spec);
+  }
+  return result;
+}
+
+/**
  * 从地图清单文件中解析出 MapSource。
  *
  * @param registryPath 地图清单路径
@@ -122,7 +153,7 @@ function mapSourceFromRegistryFile(
       kind: "tiled",
       id,
       name,
-      json: readJsonFile(path),
+      json: readJsonFile(resolve(dirname(registryPath), path)),
     };
   }
 
@@ -137,6 +168,7 @@ function mapSourceFromRegistryFile(
       height: getNumber(entryRaw, ["height"], 64),
       tileWidth: getNumber(entryRaw, ["tileWidth", "tileW"], 16),
       tileHeight: getNumber(entryRaw, ["tileHeight", "tileH"], 16),
+      npcSpawns: parseNpcSpawns(entryRaw.npcSpawns),
     };
   }
 

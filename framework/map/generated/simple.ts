@@ -4,10 +4,10 @@
  * 生成规则：
  * - 边界一圈全部阻挡（不可走）；
  * - 内部随机撒约 5% 的障碍物（xorshift32 伪随机，同种子结果可复现）；
- * - 出生点：玩家在地图中心，另附 1 个 NPC 出生点；
+ * - 出生点：玩家在地图中心，NPC 出生点按 npcSpawns 配置布置（缺省无）；
  * - 区域：1 个覆盖地图内侧的默认区域。
  */
-import type { MapRuntime } from "map/types";
+import type { MapRuntime, NpcSpawnSpec } from "map/types";
 
 /**
  * xorshift32 伪随机数生成器：由种子构造一个可复现的随机数闭包。
@@ -41,6 +41,8 @@ export interface SimpleGeneratorOptions {
   tileWidth: number;
   /** 单个 tile 高度（像素）。 */
   tileHeight: number;
+  /** 程序生成时布置的 NPC 出生点列表（可选，相对玩家出生点偏移）。 */
+  npcSpawns?: NpcSpawnSpec[];
 }
 
 /**
@@ -75,11 +77,16 @@ export function generateSimpleMap(options: SimpleGeneratorOptions): MapRuntime {
   const mapPixelW = options.width * options.tileWidth;
   const mapPixelH = options.height * options.tileHeight;
 
-  // 3) 出生点：玩家在地图中心，NPC 在中心右侧
+  // 3) 出生点：玩家在地图中心；NPC 出生点按 npcSpawns 配置（相对中心偏移）布置
   const player = { x: mapPixelW * 0.5, y: mapPixelH * 0.5 };
-  const npcs = [
-    { kind: "villager", pos: { x: mapPixelW * 0.5 + options.tileWidth * 2, y: mapPixelH * 0.5 }, zoneId: 1 },
-  ];
+  const npcs = (options.npcSpawns ?? []).map((s) => ({
+    kind: s.kind,
+    pos: {
+      x: player.x + s.offsetTiles[0] * options.tileWidth,
+      y: player.y + s.offsetTiles[1] * options.tileHeight,
+    },
+    zoneId: s.zoneId,
+  }));
 
   // 4) 单个默认区域：覆盖地图内侧（四周各留出边界 tile 的宽度）
   const zones = [{

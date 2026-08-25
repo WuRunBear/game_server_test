@@ -102,6 +102,28 @@ export interface MapRuntime {
 }
 
 /**
+ * NPC 出生点配置项（游戏无关）：声明一个 NPC 出生点相对玩家出生点的偏移。
+ *
+ * 语义：kind 由配置（数据）给出，框架不硬编码任何 NPC 类型；
+ * `offsetTiles` 是相对玩家出生点（地图中心）、以 tile 为单位的偏移；
+ * `zoneId` 可选，用于把 NPC 出生点归属到某个地图区域。
+ */
+export interface NpcSpawnSpec {
+  /**
+   * NPC 类型 id（由配置给出，框架只透传）。
+   */
+  kind: string;
+  /**
+   * 相对玩家出生点（地图中心）的偏移，单位：[tileX, tileY]。
+   */
+  offsetTiles: [number, number];
+  /**
+   * 归属的地图区域 id（可选）。
+   */
+  zoneId?: number;
+}
+
+/**
  * 程序生成地图的来源描述。
  */
 export interface GeneratedMapSource {
@@ -141,6 +163,11 @@ export interface GeneratedMapSource {
    * 单个 tile 的高度（像素）。
    */
   tileHeight: number;
+  /**
+   * 可选：程序生成时布置的 NPC 出生点列表（相对玩家出生点偏移）。
+   * 缺省时不生成任何 NPC 出生点。
+   */
+  npcSpawns?: NpcSpawnSpec[];
 }
 
 /**

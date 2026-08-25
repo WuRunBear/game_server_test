@@ -6,9 +6,10 @@
  */
 import type { GeneratorRegistry } from "framework/map/generatorRegistry";
 import { generateSimpleMap } from "framework/map/generated/simple";
+import { generateCaveMap } from "framework/map/generated/cave";
 
 /**
- * 注册全部内置生成器（当前仅 "simple"）。
+ * 注册全部内置生成器（"simple" 与 "cave"）。
  *
  * @param registry 生成器注册表（由 bootstrap 创建后传入）
  */
@@ -22,6 +23,24 @@ export function registerBuiltinGenerators(registry: GeneratorRegistry): void {
       height: opts.height as number,
       tileWidth: opts.tileWidth as number,
       tileHeight: opts.tileHeight as number,
+      npcSpawns: opts.npcSpawns as
+        | Array<{ kind: string; offsetTiles: [number, number]; zoneId?: number }>
+        | undefined,
+    }),
+  );
+
+  registry.register("cave", (opts: Record<string, unknown>) =>
+    generateCaveMap({
+      id: opts.id as string,
+      name: (opts.name as string) ?? "generated",
+      seed: opts.seed as number,
+      width: opts.width as number,
+      height: opts.height as number,
+      tileWidth: opts.tileWidth as number,
+      tileHeight: opts.tileHeight as number,
+      npcSpawns: opts.npcSpawns as
+        | Array<{ kind: string; offsetTiles: [number, number]; zoneId?: number }>
+        | undefined,
     }),
   );
 }

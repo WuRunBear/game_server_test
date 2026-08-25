@@ -8,6 +8,11 @@
  */
 export { buildMapRuntime } from "map/buildRuntime";
 export {
+  validateMapRuntime,
+  MIN_WALKABLE_COMPONENT_FRACTION,
+  type ValidationReport,
+} from "map/validate";
+export {
   buildMapChunks,
   computeMapVersion,
   describeMapSource,
