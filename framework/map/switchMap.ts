@@ -17,6 +17,7 @@ import { Transform } from "components";
 import { EntityMap } from "framework/components/entityMap";
 import { spawnEntity } from "framework/entities/spawn";
 import { buildMapRuntime } from "framework/map/buildRuntime";
+import { prewarmCollisionRuntime } from "framework/systems/core/collisionSystem";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import type { GameWorld, EntityId } from "framework/world";
@@ -91,6 +92,7 @@ export function movePlayerToMap(
   const spawn = world.maps[mapId].spawns.player ?? { x: 0, y: 0 };
   Transform.x[eid] = dest?.x ?? spawn.x;
   Transform.y[eid] = dest?.y ?? spawn.y;
-  // TODO(map): call prewarmCollisionRuntime(world, mapId) once collisionSystem per-map runtime lands (todo 6)
+  // 预暖目标图碰撞运行时：实体当 tick 进入一个「已有碰撞体」的世界（新激活图当 tick 即可碰撞）。
+  prewarmCollisionRuntime(world, mapId);
   return true;
 }
