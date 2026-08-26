@@ -2,9 +2,9 @@
  * Slice 6 测试：网格放置 / 静态碰撞 / 拆除 / 多地图（传送门）链路。
  *
  * 覆盖：gridSnap 网格对齐与 GridOccupancy 占用、静态体碰撞（墙不被推走）、
- * deconstruct 拆除（仅放置者可拆）、setWorldMap/enterMap/portalSystem
- * 切图与清场规则、spawningSystem 按 mapId 过滤、存档记录/恢复 mapId，
- * 以及真实 game 配置集成（墙放置→拆除全链路）。
+ * deconstruct 拆除（仅放置者可拆）、ensureMapActive/movePlayerToMap/portalSystem
+ * 分图语义（per-player：仅触发玩家切图，他人不动）、spawningSystem 按 mapId 过滤、
+ * 存档记录/恢复（实体级 EntityMap 归属），以及真实 game 配置集成（墙放置→拆除全链路）。
  */
 import { describe, it, expect, beforeAll } from "vitest";
 import { addComponent, addEntity, query } from "bitecs";
@@ -28,7 +28,7 @@ import { Player } from "framework/components/tags";
 import { Placeable } from "framework/components/placeable";
 import { GridOccupancy } from "framework/components/gridOccupancy";
 import { Portal } from "framework/components/portal";
-import { ItemMeta } from "framework/components/itemMeta";
+import { EntityMap } from "framework/components/entityMap";
 import { Inventory } from "framework/components/inventory";
 import { Kind } from "framework/components/kind";
 import { Size } from "framework/components/size";
@@ -103,6 +103,16 @@ function attachTwoMaps(world: GameWorld): void {
     },
   };
   world.map = undefined;
+}
+
+/** 清空 EntityMap 模块级单例残留（AoS 数组跨 world 复用 eid，防跨用例串扰）。 */
+function clearEntityMap(): void {
+  for (let i = 0; i < EntityMap.length; i++) EntityMap[i] = undefined;
+}
+
+/** 清空 Portal AoS 残留：玩家 eid 命中旧用例的 portal 槽会被误判为 portal 自触发。 */
+function clearPortal(): void {
+  for (let i = 0; i < Portal.length; i++) Portal[i] = undefined;
 }
 
 interface PlayerOpts {
@@ -304,96 +314,108 @@ describe("Slice 6：deconstruct 拆除（仅放置者可拆）", () => {
   });
 });
 
-// 多地图：setWorldMap 换图并重建地图缓存；enterMap 清场景实体保留玩家内容并传送；portalSystem 触触即切
+// 多地图：ensureMapActive 惰性激活（幂等，NPC 仅首次布置）；movePlayerToMap 仅移动单玩家；
+// portalSystem 触发者切图、他人不动、目标图无效不触发、不相交不触发
 describe("Slice 6：portal 场景切换", () => {
-  it("enterMap：换图 + 清场（保留玩家内容）+ 布置 + 传送玩家", () => {
+  it("movePlayerToMap：仅触发玩家换图+传送；他人与场景实体不动；目标图按需激活", () => {
     const world = createBareWorld();
+    clearEntityMap();
+    clearPortal();
     attachTwoMaps(world);
     expect(ensureMapActive(world, "a")).toBe(true);
-    expect(world.map?.id).toBe("a");
-
-    // legacy AoS 数组跨 world 共享：清零 ItemMeta 残留，防 eid 复用误判为玩家内容
-    for (let i = 0; i < ItemMeta.length; i++) ItemMeta[i] = undefined;
+    expect(world.maps["a"].id).toBe("a");
+    expect(world.activeMaps.has("a")).toBe(true);
 
     const player = spawnTestPlayer(world, { x: 10, y: 10 });
-    // 场景实体（无玩家内容组件）
+    EntityMap[player] = "a";
+    const other = spawnTestPlayer(world, { x: 50, y: 50 });
+    EntityMap[other] = "a";
+    // 场景实体（与图无关，不参与切图）
     ensureArchetype(world, { kind: "scn", components: { Size: { w: 16, h: 16 } } });
-    const sceneEntity = spawnEntity(world, world.archetypes.get("scn"), getRegistries().componentRegistry, { x: 20, y: 20 });
-    // 玩家内容：放置物 + 地面掉落物（ItemMeta 为 AoS 数据，实体须经 spawnEntity 挂组件）
-    ensureArchetype(world, {
-      kind: "plc2",
-      components: { Size: { w: 16, h: 16 }, Placeable: { footprintW: 16, footprintH: 16, canCollide: 1 } },
-    });
-    const placed = spawnEntity(world, world.archetypes.get("plc2"), getRegistries().componentRegistry, { x: 30, y: 20 });
-    const drop = spawnEntity(world, world.archetypes.get("scn"), getRegistries().componentRegistry, { x: 40, y: 20 });
-    ItemMeta[drop] = { kind: "x", count: 1, pickupAfterMs: 0 };
+    const scene = spawnEntity(world, world.archetypes.get("scn"), getRegistries().componentRegistry, { x: 20, y: 20 });
 
     expect(movePlayerToMap(world, player, "b", { x: 99, y: 77 })).toBe(true);
-    expect(world.map?.id).toBe("b");
-
-    // 场景实体被清场（eid 可能被 enterMap 布置的新实体复用，按 eid+Kind 联合判定；
-    // drop 同为 scn 原型但应保留）
-    const sceneStillAlive = query(world, [Transform]).some(
-      (e) => e === sceneEntity && Kind[e] === "scn",
-    );
-    expect(sceneStillAlive).toBe(false);
-    // 玩家内容保留
-    expect(query(world, [Placeable]).includes(placed)).toBe(true);
-    expect(query(world, [Transform]).includes(drop)).toBe(true);
-    expect(ItemMeta[drop]).toEqual({ kind: "x", count: 1, pickupAfterMs: 0 });
-
-    // 玩家传送到目标坐标；场景保留实体坐标不变
+    expect(EntityMap[player]).toBe("b");
     expect(Transform.x[player]).toBe(99);
     expect(Transform.y[player]).toBe(77);
-    expect(Transform.x[placed]).toBe(30);
+    // 无清场：其他玩家与场景实体原地不动
+    expect(EntityMap[other]).toBe("a");
+    expect(Transform.x[other]).toBe(50);
+    expect(Transform.y[other]).toBe(50);
+    expect(Transform.x[scene]).toBe(20);
+    // 目标图被惰性构建并激活
+    expect(world.maps["b"].id).toBe("b");
+    expect(world.activeMaps.has("b")).toBe(true);
   });
 
-  it("portalSystem：玩家与 portal 相交触发切图；目标图无效不触发；不相交不触发", () => {
+  it("portalSystem：玩家与 portal 相交仅触发者切图；另一玩家不动；目标图无效不触发", () => {
     const world = createBareWorld();
+    clearEntityMap();
+    clearPortal();
     attachTwoMaps(world);
-    ensureMapActive(world, "a");
-    const player = spawnTestPlayer(world, { x: 60, y: 60 });
+    const playerA = spawnTestPlayer(world, { x: 60, y: 60 });
+    EntityMap[playerA] = "a";
+    const playerB = spawnTestPlayer(world, { x: 300, y: 300 });
+    EntityMap[playerB] = "a";
     ensureArchetype(world, {
       kind: "p1",
       components: { Size: { w: 32, h: 32 }, Portal: { targetMap: "b", x: 111, y: 222 } },
     });
-    spawnEntity(world, world.archetypes.get("p1"), getRegistries().componentRegistry, { x: 64, y: 64 });
+    const p1 = spawnEntity(world, world.archetypes.get("p1"), getRegistries().componentRegistry, { x: 64, y: 64 });
+    EntityMap[p1] = "a";
 
     portalSystem(world);
-    expect(world.map?.id).toBe("b");
-    expect(Transform.x[player]).toBe(111);
-    expect(Transform.y[player]).toBe(222);
+    // 触发者：换图 + 传送到 portal 声明坐标；另一玩家完全不动（per-player 隔离）
+    expect(EntityMap[playerA]).toBe("b");
+    expect(Transform.x[playerA]).toBe(111);
+    expect(Transform.y[playerA]).toBe(222);
+    expect(EntityMap[playerB]).toBe("a");
+    expect(Transform.x[playerB]).toBe(300);
+    expect(Transform.y[playerB]).toBe(300);
+    expect(world.activeMaps.has("b")).toBe(true);
 
-    // 目标图无效（未注册）：不切换
+    // 目标图无效（未注册）：玩家与 portal 相交（同点重叠）也不移动
     ensureArchetype(world, {
       kind: "p2",
       components: { Size: { w: 32, h: 32 }, Portal: { targetMap: "nope", x: 0, y: 0 } },
     });
-    spawnEntity(world, world.archetypes.get("p2"), getRegistries().componentRegistry, { x: 40, y: 40 });
+    const p2 = spawnEntity(world, world.archetypes.get("p2"), getRegistries().componentRegistry, { x: 300, y: 300 });
+    EntityMap[p2] = "a";
     portalSystem(world);
-    expect(world.map?.id).toBe("b");
+    expect(EntityMap[playerB]).toBe("a");
+    expect(Transform.x[playerB]).toBe(300);
+    expect(Transform.y[playerB]).toBe(300);
+    expect(world.maps["nope"]).toBeUndefined();
   });
 
-  it("portalSystem：玩家未接触 portal 不触发", () => {
+  it("portalSystem：玩家与 portal 同图但不相交不触发", () => {
     const world = createBareWorld();
+    clearEntityMap();
+    clearPortal();
     attachTwoMaps(world);
-    ensureMapActive(world, "a");
     const player = spawnTestPlayer(world, { x: 10, y: 10 });
+    EntityMap[player] = "a";
     ensureArchetype(world, {
       kind: "p3",
       components: { Size: { w: 32, h: 32 }, Portal: { targetMap: "b", x: 0, y: 0 } },
     });
-    spawnEntity(world, world.archetypes.get("p3"), getRegistries().componentRegistry, { x: 100, y: 100 });
+    const p3 = spawnEntity(world, world.archetypes.get("p3"), getRegistries().componentRegistry, { x: 100, y: 100 });
+    EntityMap[p3] = "a";
     portalSystem(world);
-    expect(world.map?.id).toBe("a");
+    expect(EntityMap[player]).toBe("a");
     expect(Transform.x[player]).toBe(10);
+    expect(Transform.y[player]).toBe(10);
+    // 未触发：无任何图被构建/激活
+    expect(world.maps).toEqual({});
+    expect(world.activeMaps.size).toBe(0);
   });
 
   it("portalSystem：完整 tick 链（movement+collision 分离到接触距离）后仍可触发", () => {
     const world = createBareWorld();
+    clearEntityMap();
+    clearPortal();
     attachTwoMaps(world);
-    ensureMapActive(world, "a");
-    // 覆盖为无阻挡手工图（生成器随机障碍会干扰碰撞链；resolvedMapSources 保留供 enterMap）
+    // 覆盖为无阻挡手工图（生成器随机障碍会干扰碰撞链；resolvedMapSources 保留供触发后激活目标图）
     world.map = {
       id: "a", name: "a",
       grid: { width: 8, height: 8, tileWidth: 16, tileHeight: 16 },
@@ -411,8 +433,12 @@ describe("Slice 6：portal 场景切换", () => {
         Portal: { targetMap: "b", x: 111, y: 222 },
       },
     });
-    spawnEntity(world, world.archetypes.get("p4"), getRegistries().componentRegistry, { x: 80, y: 64 });
+    const portal = spawnEntity(world, world.archetypes.get("p4"), getRegistries().componentRegistry, { x: 80, y: 64 });
+    EntityMap[portal] = "a";
     const player = spawnTestPlayer(world, { x: 20, y: 64 });
+    EntityMap[player] = "a";
+    const other = spawnTestPlayer(world, { x: 500, y: 300 });
+    EntityMap[other] = "a";
 
     world.time.dtMs = 50;
     for (let i = 0; i < 20; i++) {
@@ -424,22 +450,48 @@ describe("Slice 6：portal 场景切换", () => {
     // 玩家被挡在 portal 左缘（接触距离 24，恰在 Size 半宽和处）
     expect(Transform.x[player]).toBeGreaterThanOrEqual(56);
     portalSystem(world);
-    expect(world.map?.id).toBe("b");
+    expect(EntityMap[player]).toBe("b");
     expect(Transform.x[player]).toBe(111);
     expect(Transform.y[player]).toBe(222);
+    // 他人不受影响
+    expect(EntityMap[other]).toBe("a");
+    expect(Transform.x[other]).toBe(500);
   });
 
-  it("setWorldMap：重建地图相关缓存（collision/spawning），保留死亡重生标记等无关缓存", () => {
+  it("ensureMapActive：首次激活构建运行时+布置 NPC；二次幂等；未知图返回 false", () => {
     const world = createBareWorld();
+    clearEntityMap();
+    clearPortal();
     attachTwoMaps(world);
-    ensureMapActive(world, "a");
-    world.systemRuntimes.set("death", new Map([[1, { untilTick: 100 }]]));
-    ensureMapActive(world, "b");
-    // 地图相关缓存被清（惰性重建于下个 tick）
-    expect(world.systemRuntimes.get("collision")).toBeUndefined();
-    expect(world.systemRuntimes.get("spawning")).toBeUndefined();
-    // 与地图无关的缓存保留
-    expect(world.systemRuntimes.get("death")).toBeDefined();
+    // 给图 a 补初始 NPC 出生点（本用例专属：验证首次激活布置、二次不重复）
+    world.gameDef.resolvedMapSources!["a"] = {
+      kind: "generated", generatorId: "simple", id: "a", name: "a",
+      seed: 1, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
+      npcSpawns: [
+        { kind: "npc1", offsetTiles: [1, 0] },
+        { kind: "npc1", offsetTiles: [0, 1] },
+      ],
+    };
+    ensureArchetype(world, { kind: "npc1", components: {} });
+
+    expect(ensureMapActive(world, "a")).toBe(true);
+    expect(world.maps["a"]).toBeDefined();
+    expect(world.maps["a"].id).toBe("a");
+    expect(world.activeMaps.has("a")).toBe(true);
+    // 首次激活按 npcSpawns 布置并归属该图
+    const npcs = query(world, [Transform]);
+    expect(npcs.length).toBe(2);
+    for (const eid of npcs) {
+      expect(EntityMap[eid]).toBe("a");
+    }
+    // 幂等：二次激活不重复布置 NPC
+    expect(ensureMapActive(world, "a")).toBe(true);
+    expect(query(world, [Transform]).length).toBe(2);
+
+    // 未知图（未注册）：返回 false，不构建不激活
+    expect(ensureMapActive(world, "nope")).toBe(false);
+    expect(world.maps["nope"]).toBeUndefined();
+    expect(world.activeMaps.has("nope")).toBe(false);
   });
 
   it("spawningSystem 按 mapId 过滤：只刷当前图规则", () => {
@@ -461,25 +513,35 @@ describe("Slice 6：portal 场景切换", () => {
     }
   });
 
-  it("serializeWorld 记录 mapId；createGameSimulation 恢复后切回存档图", () => {
+  it("serializeWorld 写 defaultMapId；initialRecord 恢复按实体 EntityMap 归属并激活玩家图", () => {
     const world = createBareWorld();
+    clearEntityMap();
+    clearPortal();
     attachTwoMaps(world);
     // 注册 test-player 原型（restoreWorld 按 kind 重建实体）
     ensureArchetype(world, { kind: "test-player", components: {} });
     ensureMapActive(world, "a");
-    spawnTestPlayer(world, { x: 5, y: 5 });
+    const player = spawnTestPlayer(world, { x: 5, y: 5 });
+    EntityMap[player] = "a";
     const record = serializeWorld(world, "save1");
-    expect(record.mapId).toBe("a");
+    // todo-15：record.mapId 写世界默认图 id（裸世界无图配置 → 空串）；实体级归属入 components
+    expect(record.mapId).toBe("");
+    const saved = record.entities.find((e) => e.kind === "test-player")!;
+    expect(saved.components["EntityMap"]).toBe("a");
 
-    // 新 world 默认在 b：读档恢复后应切回存档图 a（实体来自存档，不清场）
+    // 新 world 读档恢复：玩家回到其存档归属图（EntityMap 优先于 record.mapId），
+    // 玩家地图从实体归属重建激活（record.mapId 为 "" 不生效）
     const world2 = createBareWorld();
     attachTwoMaps(world2);
     ensureArchetype(world2, { kind: "test-player", components: {} });
-    ensureMapActive(world2, "b");
+    // restoreWorld 在 createGameSimulation 构造时就写 EntityMap——清零须在构造前
+    clearEntityMap();
     const sim = createGameSimulation(world2.gameDef, { initialRecord: record });
     const simWorld = (sim as unknown as { world: GameWorld }).world;
-    expect(simWorld.map?.id).toBe("a");
-    expect(query(simWorld, [NetworkId]).length).toBe(1);
+    const restored = query(simWorld, [NetworkId])[0];
+    expect(restored).toBeDefined();
+    expect(EntityMap[restored]).toBe("a");
+    expect(simWorld.activeMaps.has("a")).toBe(true);
   });
 });
 

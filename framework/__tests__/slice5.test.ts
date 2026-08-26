@@ -256,7 +256,7 @@ describe("Slice 5：持久化（定时存档 + 读档恢复 + 玩家复用）", 
 
 // 兴趣裁剪：own 恒可见、viewRadius 内可见、范围外不可见；无 server 规则则不裁剪（旧协议兼容）
 describe("Slice 5：兴趣管理（视野裁剪）", () => {
-  it("interest：own 恒可见，范围内实体可见，范围外不可见；无规则为 undefined", () => {
+  it("interest：own 恒可见，范围内实体可见，范围外不可见（viewRadius 配置）", () => {
     const def = createDefaultGameDefinition();
     def.resolvedRules["server"] = { viewRadius: 100 };
     const sim = createGameSimulation(def);
@@ -303,12 +303,25 @@ describe("Slice 5：兴趣管理（视野裁剪）", () => {
     expect(interest!.get("s2")!).toContain(NetworkId.value[e1]);
   });
 
-  it("无 server 规则：interest 为 undefined", () => {
+  it("无 server 规则：interest 恒存在——own 可见 + 同图全量（不裁距离）", () => {
     const def = createDefaultGameDefinition();
     const sim = createGameSimulation(def);
+    const world = simWorld(sim);
     sim.addPlayer("s1");
+    sim.addPlayer("s2");
+    const [p1, p2] = query(world, [Player]);
+    // 两玩家同图（默认图），s2 移到超远——无半径时仍同图全量可见
+    Transform.x[p2] = 9000;
+    Transform.y[p2] = 9000;
+    ensureTestArchetypes(world);
+    const c1 = spawnEntity(world, world.archetypes.get("c1"), getRegistries().componentRegistry, { x: 8000, y: 8000 });
+
     const { interest } = sim.tick(50);
-    expect(interest).toBeUndefined();
+    expect(interest).toBeDefined();
+    expect(interest!.get("s1")).toContain(NetworkId.value[p1]); // own 恒可见
+    expect(interest!.get("s1")).toContain(NetworkId.value[p2]); // 同图全量：无半径不裁距离
+    expect(interest!.get("s1")).toContain(NetworkId.value[c1]);
+    expect(interest!.get("s2")).toContain(NetworkId.value[p1]);
   });
 });
 
