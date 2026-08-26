@@ -13,6 +13,7 @@ import { Health, Attack, Defense, Team } from "framework/components/combat";
 import { AIState, Target, BlackboardRef } from "framework/components/ai";
 import { Inventory, initInventory } from "framework/components/inventory";
 import { ItemMeta } from "framework/components/itemMeta";
+import { EntityMap } from "framework/components/entityMap";
 import { Needs, initNeeds } from "framework/components/needs";
 import { ResourceNode, initResourceNode } from "framework/components/resourceNode";
 import { LootTable, initLootTable } from "framework/components/loot";
@@ -75,6 +76,8 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("Quest", Quest);
   registry.register("Relation", Relation);
   registry.register("Intent", Intent);
+  // 地图分区（AoS）：实体所属地图标识，无条目回退 world.defaultMapId
+  registry.register("EntityMap", EntityMap);
   // 网络同步
   registry.register("NetworkId", NetworkId);
   registry.register("LastSynced", LastSynced);

@@ -42,3 +42,5 @@ export { Quest, QUEST_AVAILABLE, QUEST_ACTIVE, QUEST_READY, QUEST_DONE, type Que
 export { Relation, type RelationState } from "components/relation";
 export { Intent } from "components/intent";
 export { Kind } from "components/kind";
+// —— 地图分区（AoS） ——
+export { EntityMap, entityMapOf } from "components/entityMap";
