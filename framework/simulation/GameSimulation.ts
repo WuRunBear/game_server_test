@@ -207,13 +207,13 @@ export class GameSimulation implements SimulationPort {
 
     this.maybeAutosave(dtMs);
 
-    // 恒计算 interest：客户端恒按 per-client 可见集同步（未配 viewRadius 时以
-    // 无穷半径视为全量可见；同图过滤由 todo 11 完成）。
+    // 恒计算 interest：客户端恒按 per-client 可见集同步；
+    // viewRadius 缺省时 computeInterest 返回同图全量（todo 11）。
     const interest = computeInterest(
       this.world,
       this.playerEidBySessionId,
       snapshot,
-      this.viewRadius ?? Number.POSITIVE_INFINITY,
+      this.viewRadius,
     );
 
     return {
