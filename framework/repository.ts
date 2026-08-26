@@ -33,7 +33,11 @@ export interface WorldRecord {
   nextNetworkId: number;
   /** world 级昼夜状态（可缺省，缺省时恢复到初始值）。 */
   timeOfDay?: { hour: number; phase: number };
-  /** 存档时的地图 id（world.map.id，可缺省；恢复时若与当前图不同则切回该图）。 */
+  /**
+   * 旧档迁移回退，新档不再作为唯一地图来源——新档每实体的地图归属存于
+   * 各实体 components["EntityMap"]，record.mapId 只为旧档（无 EntityMap 组件）
+   * 提供回退值（可缺省；缺省时各实体回退世界默认图）。
+   */
   mapId?: string;
   /** 存活实体清单。 */
   entities: SerializedEntity[];

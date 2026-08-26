@@ -20,8 +20,10 @@ import { query, hasComponent } from "bitecs";
 import { NetworkId } from "framework/components/network";
 import { Kind } from "framework/components/kind";
 import { Player } from "framework/components/tags";
+import { EntityMap } from "framework/components/entityMap";
 import { spawnEntity } from "framework/entities/spawn";
 import { destroyEntity } from "framework/entities/destroyEntity";
+import { ensureMapActive } from "framework/map/switchMap";
 import type { GameWorld } from "framework/world";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { SerializedEntity, WorldRecord } from "framework/repository";
@@ -99,7 +101,10 @@ export function serializeWorld(world: GameWorld, id: string): WorldRecord {
     tick: world.time.tick,
     nextNetworkId: world.nextNetworkId,
     timeOfDay: { ...world.time.timeOfDay },
-    mapId: world.map?.id,
+    // 保留写 mapId：仅作旧档迁移回退（新档实体归属以 components["EntityMap"]
+    // 为准）。写 world.defaultMapId 而非弃用别名 world.map——多图世界下 world.map
+    // 仅是默认图引用（T2 弃用别名），默认图 id 的权威字段是 world.defaultMapId。
+    mapId: world.defaultMapId,
     entities,
   };
 }
@@ -153,6 +158,7 @@ export function restoreWorld(world: GameWorld, record: WorldRecord): number[] {
   world.nextNetworkId = record.nextNetworkId;
 
   const orphanPlayers: number[] = [];
+  const restoredMaps = new Set<string>();
   const savedEntities = Array.isArray(record.entities) ? record.entities : [];
   for (const saved of savedEntities) {
     if (!saved || typeof saved !== "object") continue;
@@ -162,15 +168,31 @@ export function restoreWorld(world: GameWorld, record: WorldRecord): number[] {
       continue;
     }
 
-    const eid = spawnEntity(world, archetype, world.components_registry, {});
+    // 地图归属优先级链：存档实体标记 > 旧档 record.mapId 回退 > 世界默认图。
+    // 顺序说明：spawnEntity 先写 EntityMap[eid] = overrides.mapId ?? defaultMapId；
+    // 随后的 applyEntityState 对 components["EntityMap"]（若有）整体覆写回 eid——
+    // 与 overrides.mapId 同值（同源解析），两条路径交汇于同一归属，存档值胜出。
+    // 旧档实体无 EntityMap 组件 → applyEntityState 不写，回退值由 spawn 写入生效。
+    const savedMap = (saved.components as Record<string, unknown> | undefined)?.["EntityMap"];
+    const mapId = typeof savedMap === "string" ? savedMap : (record.mapId ?? world.defaultMapId);
+    const eid = spawnEntity(world, archetype, world.components_registry, { mapId });
     applyEntityState(world, eid, saved);
     NetworkId.value[eid] = saved.networkId;
+    if (typeof EntityMap[eid] === "string" && EntityMap[eid] !== "") {
+      restoredMaps.add(EntityMap[eid] as string);
+    }
     // 玩家判定按 Player tag（与具体 kind 名解耦）
     if (hasComponent(world, eid, Player)) {
       orphanPlayers.push(eid);
     }
   }
   world.nextNetworkId = record.nextNetworkId;
+
+  // 按恢复实体的地图归属重建激活集：实体归属生效即保证该图已构建/已激活
+  // （ensureMapActive 幂等；未知图返回 false 静默跳过，空串已过滤）。
+  for (const mapId of restoredMaps) {
+    ensureMapActive(world, mapId);
+  }
 
   return orphanPlayers;
 }
