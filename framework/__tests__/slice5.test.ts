@@ -470,6 +470,27 @@ describe("Slice 5：审查修复（destroyEntity / 存档防御 / 写盘串行 /
     expect(record!.entities[0].networkId).toBe(2);
   });
 
+  it("fileRepository：并发写盘串行化——多轮突发交叠，最终必为最后调用内容", async () => {
+    for (let i = 0; i < 10; i++) {
+      const dir = mkdtempSync(join(tmpdir(), "s5-stress-"));
+      const repo = createFileRepository(dir);
+      const save = (n: number) =>
+        repo.saveWorld({
+          id: "w", savedAt: n, tick: n, nextNetworkId: n + 1,
+          entities: [{ networkId: n, kind: "a", components: { Transform: { x: n, y: n, rot: 0, scale: 0 } } }],
+        });
+
+      // 突发并发：相邻调用交错发起（保存 ID 递增），最后调用(savedAt=5)必须胜出
+      const pending: Promise<void>[] = [];
+      for (let n = 1; n <= 5; n++) pending.push(save(n));
+      await Promise.all(pending);
+
+      const record = await repo.loadWorld("w");
+      expect(record!.savedAt).toBe(5);
+      expect(record!.entities[0].networkId).toBe(5);
+    }
+  });
+
   it("PlayerState.visibleEntities 的 $filter：仅所属玩家 sessionId 可见", () => {
     const ps = new PlayerState();
     ps.sessionId = "s1";

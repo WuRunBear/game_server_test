@@ -36,13 +36,13 @@ export function createFileRepository(dir: string): Repository {
 
   return {
     async saveWorld(record: WorldRecord) {
-      await mkdir(dir, { recursive: true });
       const target = join(dir, `${safeId(record.id)}.json`);
       const tmp = `${target}.tmp`;
       const payload = JSON.stringify(record);
 
-      // 入队串行写盘（队列失败不断链，错误由本次 await 抛出）
+      // 同步入队（在任何 await 之前）：保证入队顺序==调用顺序，旧档不覆盖新档。
       const task = writeQueue.then(async () => {
+        await mkdir(dir, { recursive: true });
         await writeFile(tmp, payload, "utf8");
         await rename(tmp, target);
       });
