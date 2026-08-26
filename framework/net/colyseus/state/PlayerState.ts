@@ -63,6 +63,14 @@ export class PlayerState extends Schema {
   entityId: number = 0;
 
   /**
+   * 该玩家当前所属地图 id（来自仿真快照 playerMaps；无地图时为空串）。
+   * 房间级 mapId 已随 RoomState 移除——地图语义按玩家拆分（per-player maps），
+   * 客户端据此切换自己的渲染场景。
+   */
+  @type("string")
+  mapId: string = "";
+
+  /**
    * 该玩家视野内可见的实体状态表（key=NetworkId 字符串）。
    *
    * `@view()` 声明该字段为过滤字段：只在 per-client 编码中出现

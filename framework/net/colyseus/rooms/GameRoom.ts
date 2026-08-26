@@ -11,7 +11,7 @@ import { Room, type Client } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
 
 import { createGameSimulation, type SimulationPort } from "simulation";
-import type { PlayerInput, PlayerCommand, TickSnapshot, TickResult, EntitySnapshot } from "simulation/types";
+import type { PlayerInput, PlayerCommand, TickResult, EntitySnapshot } from "simulation/types";
 import { loadGameDefinition } from "framework/bootstrap/loadGameDefinition";
 import { createFileRepository } from "framework/persistence/fileRepository";
 import type { Repository, WorldRecord } from "framework/repository";
@@ -306,13 +306,11 @@ export class GameRoom extends Room<{ state: RoomState }> {
   }
 
   /**
-   * 把仿真快照写入 Colyseus RoomState（双路径）。
+   * 把仿真快照写入 Colyseus RoomState（单路径：per-client 兴趣同步）。
    *
-   * - **兴趣路径**（result.interest 存在，启用了视野裁剪）：
-   *   按各客户端可见集合写入其 PlayerState.visibleEntities（per-client diff，
-   *   Colyseus 按连接分别增量同步）——每个客户端只见视野内实体。
-   * - **全量路径**（无 interest，未配置视野半径）：
-   *   写入共享 RoomState.entities 广播给所有客户端（兼容旧协议/旧客户端）。
+   * 每帧对每个客户端按其兴趣集合写入 PlayerState.visibleEntities
+   * （per-client diff，Colyseus 按连接分别增量同步）——每个客户端只见
+   * 自己视野内实体。
    *
    * @param result 仿真产出的本帧结果
    */
@@ -324,12 +322,8 @@ export class GameRoom extends Room<{ state: RoomState }> {
       this.state.phase = snapshot.timeOfDay.phase;
     }
     // 房间级 mapId 检测随 TickSnapshot.mapId 移除（todo 10）；per-client 同步由 todo 13 完成。
-
-    if (result.interest) {
-      this.applyInterest(result);
-      return;
-    }
-    this.applyFullSnapshot(snapshot);
+    // per-client 恒路径；全量广播路径已随 RoomState.entities 移除，todo 13 细化。
+    this.applyInterest(result);
   }
 
   /**
@@ -344,24 +338,6 @@ export class GameRoom extends Room<{ state: RoomState }> {
         this.sendCollisionDebugSnapshot(client, true);
       }
     }
-  }
-
-  /** 全量路径：把快照写入共享 RoomState.entities。 */
-  private applyFullSnapshot(snapshot: TickSnapshot): void {
-    const alive = new Set<number>();
-    for (const [networkId, snap] of snapshot.entities) {
-      alive.add(networkId);
-      const key = String(networkId);
-      let entityState = this.state.entities.get(key);
-      if (!entityState) {
-        entityState = new EntityState();
-      }
-      this.writeEntityState(entityState, networkId, snap);
-      this.state.entities.set(key, entityState);
-    }
-    this.state.entities.forEach((_value: EntityState, key: string) => {
-      if (!alive.has(Number(key))) this.state.entities.delete(key);
-    });
   }
 
   /**

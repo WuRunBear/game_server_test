@@ -4,12 +4,12 @@
  * RoomState 不是 ECS 世界本身，只是每 tick 从仿真快照派生的只读视图：
  * GameRoom 每帧把 TickSnapshot 映射到本 Schema，Colyseus 自动 diff 后
  * 增量推送给房间内客户端（服务端权威，客户端不做逻辑）。
- * entities / players 均以稳定标识为 key（NetworkId / sessionId），
- * 与 ECS 内部 eid 无关。
+ * players 以 sessionId 为 key，与 ECS 内部 eid 无关。
+ * 地图/实体数据已按玩家拆分：地图 id 在 PlayerState.mapId（per-player maps），
+ * 实体同步恒走 per-client 可见表（PlayerState.visibleEntities）。
  */
 import { MapSchema, Schema, type } from "@colyseus/schema";
 
-import { EntityState } from "./EntityState";
 import { PlayerState } from "./PlayerState";
 
 /**
@@ -18,7 +18,7 @@ import { PlayerState } from "./PlayerState";
  * 约定：
  * - tick 为逻辑帧号（与 ECS world.time.tick 对齐）
  * - players 用 sessionId 做 key，便于客户端识别“自己是谁”
- * - entities 用 NetworkId 做 key，便于客户端稳定绑定渲染对象
+ * - 地图 id 与实体同步均为 per-player：PlayerState.mapId / visibleEntities
  */
 export class RoomState extends Schema {
   /**
@@ -40,21 +40,8 @@ export class RoomState extends Schema {
   phase: number = 0;
 
   /**
-   * 当前地图 id（来自仿真快照的 mapId；无地图时为空串）。
-   * 客户端据此切换渲染场景。
-   */
-  @type("string")
-  mapId: string = "";
-
-  /**
    * 房间内玩家列表（key=sessionId）。
    */
   @type({ map: PlayerState })
   players: MapSchema<PlayerState> = new MapSchema<PlayerState>();
-
-  /**
-   * 房间内实体状态表（key=NetworkId 字符串）。
-   */
-  @type({ map: EntityState })
-  entities: MapSchema<EntityState> = new MapSchema<EntityState>();
 }
