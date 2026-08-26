@@ -1,8 +1,18 @@
 import { query } from "bitecs";
-import { Inventory, Transform, Player, Item, ItemMeta } from "components";
+import { Inventory, Transform, Player, Item, ItemMeta, entityMapOf } from "components";
 import type { GameWorld } from "world";
 import { addToInventory } from "framework/systems/gameplay/inventoryOps";
 import { destroyEntity } from "framework/entities/destroyEntity";
+
+/**
+ * 拾取判定的实体地图 id：存储的 mapId 在本世界无对应图（跨 world 残留或未知 id）
+ * → 按世界默认图处理（单图世界行为与无地图标记一致）。
+ */
+function effectiveMapOf(world: GameWorld, eid: number): string {
+  const m = entityMapOf(world, eid);
+  if (m !== "" && !world.maps[m] && world.map?.id !== m) return world.defaultMapId;
+  return m;
+}
 
 /**
  * inventorySystem：自动拾取。玩家靠近地面 item 实体时把其堆叠并入背包。
@@ -24,6 +34,7 @@ export function inventorySystem(world: GameWorld): GameWorld {
       const meta = ItemMeta[itemEid];
       if (!meta) continue;
       if (now < meta.pickupAfterMs) continue;
+      if (effectiveMapOf(world, itemEid) !== effectiveMapOf(world, playerEid)) continue;
 
       const dist = Math.hypot(
         Transform.x[playerEid] - Transform.x[itemEid],

@@ -1,5 +1,5 @@
 import { hasComponent, query } from "bitecs";
-import { Health, Attack, Defense, Team, Kind } from "components";
+import { Health, Attack, Defense, Team, Kind, entityMapOf } from "components";
 import { Cooldown, Transform } from "components";
 import type { GameWorld } from "world";
 import { getRuleModule } from "framework/api";
@@ -41,13 +41,23 @@ export function createCombatSystem(_config?: Record<string, unknown>) {
 }
 
 /**
+ * 攻击判定的实体地图 id：存储的 mapId 在本世界无对应图（跨 world 残留或未知 id）
+ * → 按世界默认图处理（单图世界行为与无地图标记一致）。
+ */
+function effectiveMapOf(world: GameWorld, eid: number): string {
+  const m = entityMapOf(world, eid);
+  if (m !== "" && !world.maps[m] && world.map?.id !== m) return world.defaultMapId;
+  return m;
+}
+
+/**
  * 攻击原子：attacker 对 target 发动一次攻击。
  *
- * 校验顺序：双方组件齐全 → 目标存活（Health > 0）→ 冷却 → 友伤 → 射程；
+ * 校验顺序：双方组件齐全 → 目标存活（Health > 0）→ 同图 → 冷却 → 友伤 → 射程；
  * 命中后按规则公式计算伤害并扣减 Health。**不负责死亡处理**（统一归
  * deathSystem），只负责伤害本身。
  *
- * @returns 本次攻击是否命中（失败原因：无组件/目标已死/冷却中/友军/超射程）。
+ * @returns 本次攻击是否命中（失败原因：无组件/目标已死/跨图/冷却中/友军/超射程）。
  */
 export function attackTarget(world: GameWorld, attackerEid: number, targetEid: number): boolean {
   if (attackerEid === targetEid) return false;
@@ -55,6 +65,8 @@ export function attackTarget(world: GameWorld, attackerEid: number, targetEid: n
     return false;
   }
   if ((Health.current[targetEid] ?? 0) <= 0) return false;
+  // 攻击者与目标必须同图（分图隔离的攻防侧）
+  if (effectiveMapOf(world, attackerEid) !== effectiveMapOf(world, targetEid)) return false;
 
   const rules = world.gameDef.resolvedRules["combat"] as SystemConfig | undefined;
   const friendlyFire = rules?.friendlyFire ?? true;

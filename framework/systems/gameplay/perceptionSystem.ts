@@ -1,9 +1,19 @@
 import { hasComponent, query } from "bitecs";
-import { Perception, Transform, Team, Health, NPC } from "components";
+import { Perception, Transform, Team, Health, NPC, entityMapOf } from "components";
 import { bbSet, BB_PERCEPTION_TARGET, type PerceivedTarget } from "ai/blackboard";
 import { getOrCreateBlackboard } from "framework/systems/gameplay/aiSystem";
 import { isPointInLight } from "framework/utils/light";
 import type { GameWorld } from "world";
+
+/**
+ * 感知判定用的实体地图 id：存储的 mapId 在本世界无对应图（跨 world 残留或未知 id）
+ * → 按世界默认图处理（单图世界行为与无地图标记一致）。
+ */
+function effectiveMapOf(world: GameWorld, eid: number): string {
+  const m = entityMapOf(world, eid);
+  if (m !== "" && !world.maps[m] && world.map?.id !== m) return world.defaultMapId;
+  return m;
+}
 
 /**
  * perceptionSystem：感知扫描。
@@ -17,6 +27,7 @@ import type { GameWorld } from "world";
  * - 必须是活物：有 Health 组件且当前 Health > 0（尸体/重生窗口内的玩家不追猎）
  * - 不在任一有效光源（LightSource）半径内：光源是"安全区"通用机制，
  *   光内的实体不可被敌对感知（火光回避的感知侧实现）
+ * - 同图：不同地图的实体互不可感知（分图隔离的感知侧）
  *
  * 游戏无关——只按 Team 分组与半径通用字段，不识别具体阵营语义。
  */
@@ -30,6 +41,7 @@ export function perceptionSystem(world: GameWorld): GameWorld {
     if (radius > 0) {
       for (const other of query(world, [Transform, Team])) {
         if (other === eid) continue;
+        if (effectiveMapOf(world, other) !== effectiveMapOf(world, eid)) continue;
         const otherTeam = Team.id[other];
         if (otherTeam === 0 || otherTeam === myTeam) continue;
         if (!hasComponent(world, other, Health) || (Health.current[other] ?? 0) <= 0) continue;

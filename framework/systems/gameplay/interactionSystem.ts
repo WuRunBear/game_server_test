@@ -1,5 +1,5 @@
 import { query } from "bitecs";
-import { Player, NPC, Transform, Resource, Enemy, Health, Intent } from "components";
+import { Player, NPC, Transform, Resource, Enemy, Health, Intent, entityMapOf } from "components";
 import type { GameWorld } from "world";
 import { harvest } from "framework/systems/gameplay/gatheringSystem";
 import { attackTarget } from "framework/systems/gameplay/combatSystem";
@@ -10,6 +10,16 @@ interface SystemConfig {
 }
 
 const DEFAULT_RANGE = 24;
+
+/**
+ * 路由判定的实体地图 id：存储的 mapId 在本世界无对应图（跨 world 残留或未知 id）
+ * → 按世界默认图处理（单图世界行为与无地图标记一致）。
+ */
+function effectiveMapOf(world: GameWorld, eid: number): string {
+  const m = entityMapOf(world, eid);
+  if (m !== "" && !world.maps[m] && world.map?.id !== m) return world.defaultMapId;
+  return m;
+}
 
 /**
  * interactionSystem：交互意图路由器。
@@ -47,6 +57,7 @@ export function createInteractionSystem(config?: Record<string, unknown>) {
         let nearestEid = -1;
         let nearestDist = Infinity;
         for (const nodeEid of query(world, [Resource, Transform])) {
+          if (effectiveMapOf(world, nodeEid) !== effectiveMapOf(world, playerEid)) continue;
           const d = Math.hypot(px - Transform.x[nodeEid], py - Transform.y[nodeEid]);
           if (d <= range && d < nearestDist) {
             nearestEid = nodeEid;
@@ -61,6 +72,7 @@ export function createInteractionSystem(config?: Record<string, unknown>) {
         let nearestEid = -1;
         let nearestDist = Infinity;
         for (const enemyEid of query(world, [Enemy, Health, Transform])) {
+          if (effectiveMapOf(world, enemyEid) !== effectiveMapOf(world, playerEid)) continue;
           const d = Math.hypot(px - Transform.x[enemyEid], py - Transform.y[enemyEid]);
           if (d < nearestDist) {
             nearestEid = enemyEid;
@@ -75,6 +87,7 @@ export function createInteractionSystem(config?: Record<string, unknown>) {
         let nearestEid = -1;
         let nearestDist = Infinity;
         for (const npcEid of query(world, [NPC, Transform])) {
+          if (effectiveMapOf(world, npcEid) !== effectiveMapOf(world, playerEid)) continue;
           const d = Math.hypot(px - Transform.x[npcEid], py - Transform.y[npcEid]);
           if (d <= range && d < nearestDist) {
             nearestEid = npcEid;
