@@ -53,8 +53,6 @@ export type GameWorld = ReturnType<typeof createWorld> & {
   /** 当前激活（规则/系统常驻运行）的地图 id 集合；默认图在开机时激活。 */
   activeMaps: Set<string>;
   /** 默认地图 id（新玩家出生图）；无地图配置时为空串。 */
-
-  /** 默认地图 id（新玩家出生图）；无地图配置时为空串。 */
   defaultMapId: string;
 
   gameDef: LoadedGameDefinition;
