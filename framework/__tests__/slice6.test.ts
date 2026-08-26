@@ -16,8 +16,8 @@ import {
   loadGameDefinition,
   spawnEntity,
   getRegistries,
-  setWorldMap,
-  enterMap,
+  ensureMapActive,
+  movePlayerToMap,
   serializeWorld,
 } from "framework/index";
 import { Transform } from "framework/components/transform";
@@ -309,7 +309,7 @@ describe("Slice 6：portal 场景切换", () => {
   it("enterMap：换图 + 清场（保留玩家内容）+ 布置 + 传送玩家", () => {
     const world = createBareWorld();
     attachTwoMaps(world);
-    expect(setWorldMap(world, "a")).toBe(true);
+    expect(ensureMapActive(world, "a")).toBe(true);
     expect(world.map?.id).toBe("a");
 
     // legacy AoS 数组跨 world 共享：清零 ItemMeta 残留，防 eid 复用误判为玩家内容
@@ -328,7 +328,7 @@ describe("Slice 6：portal 场景切换", () => {
     const drop = spawnEntity(world, world.archetypes.get("scn"), getRegistries().componentRegistry, { x: 40, y: 20 });
     ItemMeta[drop] = { kind: "x", count: 1, pickupAfterMs: 0 };
 
-    expect(enterMap(world, "b", { x: 99, y: 77 })).toBe(true);
+    expect(movePlayerToMap(world, player, "b", { x: 99, y: 77 })).toBe(true);
     expect(world.map?.id).toBe("b");
 
     // 场景实体被清场（eid 可能被 enterMap 布置的新实体复用，按 eid+Kind 联合判定；
@@ -351,7 +351,7 @@ describe("Slice 6：portal 场景切换", () => {
   it("portalSystem：玩家与 portal 相交触发切图；目标图无效不触发；不相交不触发", () => {
     const world = createBareWorld();
     attachTwoMaps(world);
-    setWorldMap(world, "a");
+    ensureMapActive(world, "a");
     const player = spawnTestPlayer(world, { x: 60, y: 60 });
     ensureArchetype(world, {
       kind: "p1",
@@ -377,7 +377,7 @@ describe("Slice 6：portal 场景切换", () => {
   it("portalSystem：玩家未接触 portal 不触发", () => {
     const world = createBareWorld();
     attachTwoMaps(world);
-    setWorldMap(world, "a");
+    ensureMapActive(world, "a");
     const player = spawnTestPlayer(world, { x: 10, y: 10 });
     ensureArchetype(world, {
       kind: "p3",
@@ -392,7 +392,7 @@ describe("Slice 6：portal 场景切换", () => {
   it("portalSystem：完整 tick 链（movement+collision 分离到接触距离）后仍可触发", () => {
     const world = createBareWorld();
     attachTwoMaps(world);
-    setWorldMap(world, "a");
+    ensureMapActive(world, "a");
     // 覆盖为无阻挡手工图（生成器随机障碍会干扰碰撞链；resolvedMapSources 保留供 enterMap）
     world.map = {
       id: "a", name: "a",
@@ -432,9 +432,9 @@ describe("Slice 6：portal 场景切换", () => {
   it("setWorldMap：重建地图相关缓存（collision/spawning），保留死亡重生标记等无关缓存", () => {
     const world = createBareWorld();
     attachTwoMaps(world);
-    setWorldMap(world, "a");
+    ensureMapActive(world, "a");
     world.systemRuntimes.set("death", new Map([[1, { untilTick: 100 }]]));
-    setWorldMap(world, "b");
+    ensureMapActive(world, "b");
     // 地图相关缓存被清（惰性重建于下个 tick）
     expect(world.systemRuntimes.get("collision")).toBeUndefined();
     expect(world.systemRuntimes.get("spawning")).toBeUndefined();
@@ -466,7 +466,7 @@ describe("Slice 6：portal 场景切换", () => {
     attachTwoMaps(world);
     // 注册 test-player 原型（restoreWorld 按 kind 重建实体）
     ensureArchetype(world, { kind: "test-player", components: {} });
-    setWorldMap(world, "a");
+    ensureMapActive(world, "a");
     spawnTestPlayer(world, { x: 5, y: 5 });
     const record = serializeWorld(world, "save1");
     expect(record.mapId).toBe("a");
@@ -475,7 +475,7 @@ describe("Slice 6：portal 场景切换", () => {
     const world2 = createBareWorld();
     attachTwoMaps(world2);
     ensureArchetype(world2, { kind: "test-player", components: {} });
-    setWorldMap(world2, "b");
+    ensureMapActive(world2, "b");
     const sim = createGameSimulation(world2.gameDef, { initialRecord: record });
     const simWorld = (sim as unknown as { world: GameWorld }).world;
     expect(simWorld.map?.id).toBe("a");

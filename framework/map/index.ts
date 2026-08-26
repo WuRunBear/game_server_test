@@ -7,6 +7,7 @@
  * - 内容版本与分块工具（computeMapVersion / buildMapChunks / describeMapSource）。
  */
 export { buildMapRuntime } from "map/buildRuntime";
+export { ensureMapActive, movePlayerToMap, spawnInitialNpcs } from "map/switchMap";
 export {
   validateMapRuntime,
   MIN_WALKABLE_COMPONENT_FRACTION,

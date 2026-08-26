@@ -97,7 +97,7 @@ export function createGameInstance(gameDef: LoadedGameDefinition): GameInstance 
     },
 
     spawnInitialEntities() {
-      spawnInitialNpcs(world);
+      spawnInitialNpcs(world, world.defaultMapId);
     },
   };
 

@@ -41,7 +41,7 @@ export type { Repository, WorldRecord, SerializedEntity } from "framework/reposi
 
 export { dayNightCycleSystem } from "framework/systems/gameplay/dayNightCycleSystem";
 export { portalSystem } from "framework/systems/gameplay/portalSystem";
-export { setWorldMap, enterMap, spawnInitialNpcs } from "framework/map/switchMap";
+export { ensureMapActive, movePlayerToMap, spawnInitialNpcs } from "framework/map/switchMap";
 export { registerSpawnCondition, getSpawnCondition, hasSpawnCondition, registerBuiltinSpawnConditions, type SpawnCondition } from "framework/systems/gameplay/spawnConditions";
 export { placeEntity } from "framework/systems/gameplay/placeableSystem";
 export { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";

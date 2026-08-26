@@ -21,7 +21,7 @@ import { deconstructEntity } from "framework/systems/gameplay/deconstructSystem"
 import { advanceDialogue } from "framework/systems/gameplay/dialogueSystem";
 import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
 import { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
-import { setWorldMap } from "framework/map/switchMap";
+import { ensureMapActive } from "framework/map/switchMap";
 import type { Repository } from "framework/repository";
 import type { ServerRule } from "framework/config/schema/RuleSchema";
 import { computeInterest } from "./interest";
@@ -147,10 +147,10 @@ export class GameSimulation implements SimulationPort {
     this.saveId = options?.saveId;
     if (options?.initialRecord) {
       this.orphanPlayerEids = restoreWorld(this.world, options.initialRecord);
-      // 读档地图还原：存档实体是用户状态，仅切图不清场（清场只属于 portal 场景切换）
+      // 读档地图还原：存档实体是用户状态，仅确保存档图已激活（不清场；清场只属于 portal 场景切换）
       const savedMapId = options.initialRecord.mapId;
       if (savedMapId && savedMapId !== this.world.map?.id) {
-        if (!setWorldMap(this.world, savedMapId)) {
+        if (!ensureMapActive(this.world, savedMapId)) {
           this.world.logger.warn("读档地图不存在，保持当前地图", { savedMapId });
         }
       }

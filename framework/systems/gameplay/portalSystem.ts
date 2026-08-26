@@ -11,7 +11,7 @@
 import { query } from "bitecs";
 
 import { Transform, Size, Player, Portal } from "components";
-import { enterMap } from "framework/map/switchMap";
+import { movePlayerToMap } from "framework/map/switchMap";
 import type { EntityId, GameWorld } from "world";
 
 const DEFAULT_HALF_SIZE = 8;
@@ -44,7 +44,7 @@ export function portalSystem(world: GameWorld): GameWorld {
 
     for (const player of players) {
       if (!aabbOverlap(world, portal, player)) continue;
-      if (enterMap(world, state.targetMap, { x: state.x, y: state.y })) {
+      if (movePlayerToMap(world, player, state.targetMap, { x: state.x, y: state.y })) {
         return world;
       }
     }
