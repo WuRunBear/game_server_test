@@ -1,16 +1,15 @@
 /**
  * 场景传送系统（tick 系统）。
  *
- * 玩家实体与 Portal 实体 AABB 相交时触发场景切换：
- * enterMap（换图 + 清场 + 布置 + 传送玩家至 Portal 声明坐标）。
- * 每 tick 至多触发一次（防多 portal 连锁切换）；目标图无效时不触发。
- *
- * 场景切换为房间级语义：所有玩家共享 world.map，任一玩家触发全员换图
- * （多人同场景协作模型，per-player 分图状态不在本切片范围）。
+ * 对每个 portal × 每个玩家配对检查：玩家与 portal 所属同一地图
+ * （entityMapOf 相等）且 AABB 相交时，仅移动该玩家到目标图与目标坐标
+ * （movePlayerToMap）。同 tick 同一玩家至多移动一次（每玩家每 tick 单次，
+ * 防连锁过户）；目标图无效（movePlayerToMap 返回 false）不移动、继续扫描。
+ * 不同玩家互不影响（per-player 语义：任一玩家触发只切换自身地图）。
  */
 import { query } from "bitecs";
 
-import { Transform, Size, Player, Portal } from "components";
+import { Transform, Size, Player, Portal, entityMapOf } from "components";
 import { movePlayerToMap } from "framework/map/switchMap";
 import type { EntityId, GameWorld } from "world";
 
@@ -38,14 +37,19 @@ export function portalSystem(world: GameWorld): GameWorld {
   const players = [...query(world, [Transform, Player])];
   if (players.length === 0) return world;
 
+  const movedThisTick = new Set<number>();
+
   for (const portal of portals) {
     const state = Portal[portal];
     if (!state || !state.targetMap) continue;
+    const portalMap = entityMapOf(world, portal);
 
     for (const player of players) {
+      if (movedThisTick.has(player)) continue;
+      if (entityMapOf(world, player) !== portalMap) continue;
       if (!aabbOverlap(world, portal, player)) continue;
       if (movePlayerToMap(world, player, state.targetMap, { x: state.x, y: state.y })) {
-        return world;
+        movedThisTick.add(player);
       }
     }
   }
