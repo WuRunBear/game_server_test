@@ -60,7 +60,7 @@ framework/
     fileRepository.ts       # createFileRepository — JSON 文件仓储（默认后端，原子写）
   components/               # ECS 组件 + componentRegistry
     componentRegistry.ts    # 组件注册表: 名 → defineComponent
-    registerBuiltin.ts      # 注册 39 个内置组件
+    registerBuiltin.ts      # 注册 40 个内置组件
     index.ts                # barrel 导出
     transform.ts, size.ts, physics.ts (Velocity/Acceleration/Collider/ColliderShape),
     combat.ts (Health/Attack/Defense/Team), ai.ts (AIState/Target/BlackboardRef),
@@ -69,7 +69,7 @@ framework/
     dialogue.ts / dialogueSource.ts / quest.ts / relation.ts (AoS 对话会话/对话源/任务/好感),
     inventory.ts (AoS 例外), network.ts (NetworkId/LastSynced),
     timer.ts (Cooldown/Duration), tags.ts (Player/Enemy/NPC/Item/Resource),
-    needs.ts / resourceNode.ts / loot.ts / intent.ts / kind.ts / itemMeta.ts (AoS 家族)
+    needs.ts / resourceNode.ts / loot.ts / intent.ts / kind.ts / itemMeta.ts / entityMap.ts (AoS 家族)
   systems/
     systemRegistry.ts       # 系统注册表 + buildSystems (拓扑排序, Kahn 算法)
     registerBuiltinSystems.ts   # 注册 17 个内置系统
@@ -166,14 +166,14 @@ Colyseus Schema 每 tick 同步。`EntityState` 的字段通过 `game.json` 的 
 
 由 `game/rules/server.json`（`ServerRuleSchema` 校验）驱动，全部经 `createGameSimulation(gameDef, options)` 注入：
 
-- **持久化**：`saveIntervalMs` + `saveId` 开启定时存档（`worldSerializer` 全量快照 → `createFileRepository` 写 `data/saves/`，可用 `SAVE_DIR` 覆盖目录）；`GameRoom.onCreate` 启动时读档恢复，玩家实体由 `addPlayer` 复用绑定（networkId/进度保留）。
-- **兴趣管理**：`viewRadius` 开启视野裁剪——每客户端只见视野内实体（`PlayerState.visibleEntities`，own 恒可见）；未配置时全量广播 `RoomState.entities`（兼容旧客户端协议）。
+- **持久化**：`saveIntervalMs` + `saveId` 开启定时存档（`worldSerializer` 全量快照 → `createFileRepository` 写 `data/saves/`，可用 `SAVE_DIR` 覆盖目录）；`GameRoom.onCreate` 启动时读档恢复，玩家实体由 `addPlayer` 复用绑定（networkId/进度保留）。实体地图按 `EntityMap` 入档/恢复，恢复后按实体归属激活各图；`WorldRecord.mapId` 保留仅作旧档迁移回退（新档实体归属以 `components["EntityMap"]` 为准）。
+- **兴趣管理**：`interest` 恒计算（`computeInterest` 经 `GameSimulation.tick` 调用——先按玩家所属地图过滤，再可选按 `viewRadius` 半径裁剪；未配置 `viewRadius` 时同图全量）。每个客户端经 `PlayerState.visibleEntities` 收取本图可见实体（own 恒可见）；`PlayerState.mapId` 同步玩家当前地图；`RoomState.mapId/entities` 已移除（协议断代，旧客户端不兼容——实体同步恒走 per-client 可见表）。
 - **输入校验**：`maxMoveSpeed` 超速输入被拒（记日志）、`maxCommandsPerSec` 命令频率限流；未配置时不校验。
 
 ### 建造与场景切换
 
 - **建造**：`place` 命令（`ItemKindSchema.place` → `placeableSystem.placeEntity`）放置 Placeable 实体——`rules/place.json` 的 `gridSnap` 开启时占位矩形对齐地图网格（`GridOccupancy` 格组写入 + 同格重放被拒，墙/地板可无缝拼接）；`deconstruct` 命令（`deconstructSystem`）拆除，仅放置者可拆（`Placeable.ownerNetworkId`，0=世界物不可拆，不返还材料）。静态碰撞：无 `Velocity` 的实体（建筑/资源）注册为静态碰撞体，不会被推开。
-- **场景切换**：`Portal` 组件（AoS，声明 targetMap + 传送坐标）+ `portalSystem` tick 检测玩家 AABB 相交 → `enterMap`（`framework/map/switchMap.ts`）：换 `world.map` + 重建系统缓存 + 清场（保留玩家/放置物/地面掉落，场景生态随图重置）+ 按新图出生点布置 + 传送玩家。房间级语义：所有玩家共享当前地图。存档记录 `mapId`，读档恢复自动切回存档地图。刷怪规则可带 `mapId` 限定生效地图。`RoomState.mapId` 同步给客户端。
+- **场景切换**：`Portal` 组件（AoS，声明 targetMap + 传送坐标）+ `portalSystem` tick 逐配对检测「玩家与 portal 同图（entityMapOf 相等）且 AABB 相交」→ `movePlayerToMap`（`framework/map/switchMap.ts`）只移动触发玩家（换图 + 传送，可省略 dest 缺省目标图出生点），不同玩家互不影响（per-player 语义：任一玩家触发只切换自身地图）。房间级语义（`enterMap`/`setWorldMap` 全员换图/清场）已移除；地图生命周期改为 `ensureMapActive`（`world.maps` 惰性构建缓存 + `world.activeMaps` 常驻激活）+ `spawnInitialNpcs`。存档记录 `mapId` 作旧档迁移回退——实体地图按 `EntityMap` 入档，读档按实体归属激活各图。刷怪规则带 `mapId` 限定生效地图（缺省作用于全部激活图）。玩家当前地图经 `PlayerState.mapId` 同步给客户端。
 
 ### 对话与任务（社交进度）
 
