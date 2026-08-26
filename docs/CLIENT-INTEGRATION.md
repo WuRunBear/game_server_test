@@ -101,9 +101,9 @@ Colyseus Schema 增量同步（补丁 + 全量握手）。**客户端必须声�
 | `tick` | uint32 | 逻辑帧号，服务端 20 帧/秒（50ms/帧） |
 | `hour` | float64 | 世界小时 0–24（昼夜循环推进） |
 | `phase` | uint8 | 0=白天，1=夜晚 |
-| `mapId` | string | 当前地图 id（多地图部署时场景切换会变化） |
 | `players` | map\<string, PlayerState\> | key = sessionId |
-| `entities` | map\<string, EntityState\> | key = NetworkId 字符串。**仅当服务端未开启兴趣裁剪时使用**（见 §3.2） |
+
+> **房间级状态只有上面四个字段**（协议破坏性变更）：`RoomState` 不再携带 `mapId` / `entities`。玩家的当前地图是 **per-player** 的，经 `PlayerState.mapId` 同步（见 §3.2），**不是**房间级字段；实体同步恒走 per-client 的 `PlayerState.visibleEntities`（见 §3.2），`RoomState` 内没有实体表。
 
 ### 3.2 PlayerState（每玩家）
 
@@ -111,13 +111,15 @@ Colyseus Schema 增量同步（补丁 + 全量握手）。**客户端必须声�
 |------|------|------|
 | `sessionId` | string | 本连接 sessionId（等于 `room.sessionId`） |
 | `entityId` | uint32 | 自己控制的实体 NetworkId（`players.get(room.sessionId).entityId`） |
-| `visibleEntities` | map\<string, EntityState\> | **兴趣裁剪开启时**的实体表：key = NetworkId 字符串，只含本玩家视野内实体 |
+| `mapId` | string | 该玩家**当前所在地图 id**（per-player）：仅当**该玩家自己**走进传送门触发换图时变化，其他玩家不受影响 |
+| `visibleEntities` | map\<string, EntityState\> | 本玩家可见实体表（**唯一的实体来源**）：key = NetworkId 字符串，只含本玩家可见实体 |
 
-**兴趣裁剪（重要）**：当服务端配置了视野半径时，实体数据**不会**出现在 `RoomState.entities`，而是进入每个玩家自己的 `visibleEntities`：
+**兴趣裁剪（重要）**：实体同步**恒**走每个玩家自己的 `visibleEntities`——自 per-player 协议起，`RoomState` 的 `entities` 已移除，**不存在**房间级实体表或兼容通道：
 - 自己（`entityId` 对应实体）恒在表中；其他实体进入半径（当前部署默认 300px）才出现，离开即被删除。
-- 客户端渲染遍历 `state.players.get(room.sessionId).visibleEntities`。
-- 该表仅对自己可见（服务端按连接过滤），不要假设能看到其他玩家的表。
-- 兼容路径：未开启裁剪的部署中，`visibleEntities` 恒为空，实体走 `RoomState.entities` 全量广播。客户端可两者都监听，取非空者（或按部署方告知的模式）。
+- 客户端只遍历 `state.players.get(room.sessionId).visibleEntities`，无需再读任何房间级实体表。
+- 该表仅对自己可见（服务端按连接过滤，经 `$filter` per-client 编码），不要假设能看到其他玩家的表。
+- 跨图实体被过滤：玩家只看到**同一地图**（`PlayerState.mapId`）内的实体 + 半径内；换图后旧图实体随即从此表移除。
+- 这是**唯一**的实体交付路径（破坏性变更，旧客户端读取 `RoomState` 的 `entities` 会失败）。
 
 ### 3.3 EntityState（单实体）
 
@@ -150,6 +152,7 @@ export class EntityState extends Schema {
 export class PlayerState extends Schema {
   @type("string") sessionId: string = "";
   @type("uint32") entityId: number = 0;
+  @type("string") mapId: string = "";
   @type({ map: EntityState }) visibleEntities = new MapSchema<EntityState>();
 }
 
@@ -157,11 +160,11 @@ export class RoomState extends Schema {
   @type("uint32") tick: number = 0;
   @type("float64") hour: number = 8;
   @type("uint8") phase: number = 0;
-  @type("string") mapId: string = "";
   @type({ map: PlayerState }) players = new MapSchema<PlayerState>();
-  @type({ map: EntityState }) entities = new MapSchema<EntityState>();
 }
 ```
+
+> 协议破坏性变更：`RoomState` 已移除 `mapId` 与 `entities`（旧字段顺序对齐的客户端会错位解码）；`PlayerState` 新增 `mapId`。字段**顺序**是线协议的一部分——客户端声明必须与服务端一致（见 §3.4 顶部提示），旧客户端解码新流会错位、需升级。
 
 （非 TS/JS 客户端：以本表字段名/类型/顺序为准，用各自语言的 @colyseus/schema 绑定声明。）
 
@@ -225,7 +228,7 @@ export class RoomState extends Schema {
 | 拆除 | `command deconstruct` | 仅放置者可拆、范围校验、不返还材料 | — |
 | 任务 | 对话选项触发 | 见 §4.7 | — |
 | 昼夜 | 被动 | `hour/phase` 每帧同步 | 19–5 点为夜晚 |
-| 场景切换 | 走近传送门 | `mapId` 变化、实体集切换（玩家保留） | — |
+| 场景切换 | 走近传送门 | 该玩家 `PlayerState.mapId` 变化、实体集切换（玩家自身保留；其他玩家不受影响） | — |
 
 ### 4.1 背包与物品
 
@@ -347,7 +350,7 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 
 - 省略 `mapId`：返回注册表默认地图（即 `/maps/meta` 的 `default` 字段）。
 - 未知 `mapId`：返回 404，错误体附可用图列表，例如 `{"error":"unknown map","available":["generated-map","cave"]}`。
-- 客户端应在连接后以 `room.state.mapId` 作为请求参数；响应 `id` 与请求不符时告警并拒绝应用（防错图）。
+- `mapId` 是**本次 HTTP 请求关心的地图 id**（客户端通常取自己的 `players.get(room.sessionId).mapId` 作为参数），与 per-player 当前地图字段同义但归属于**请求**——`RoomState` 级 `mapId` 已不存在，客户端不要读房间根状态。响应 `id` 与请求不符时告警并拒绝应用（防错图）。
 
 `/maps/meta` 返回示例：
 
@@ -440,7 +443,7 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 注册步骤：
 
 1. 把 Tiled 导出的 JSON 保存到 `game/maps/`（如 `tiled-demo.json`）。
-2. 在 `game/maps/registry.json` 中加入 `kind: "tiled"` 条目，`path` 指向该 JSON，并配所需的 `mapId`；之后用 `mapId` 引用它（`/maps/runtime?mapId=<id>`、`room.state.mapId`、传送门 `targetMap` 等）。
+2. 在 `game/maps/registry.json` 中加入 `kind: "tiled"` 条目，`path` 指向该 JSON，并配所需的 `mapId`；之后用 `mapId` 引用它（`/maps/runtime?mapId=<id>`、`players.get(room.sessionId).mapId`（per-player 当前地图）、传送门 `targetMap` 等）。
 
 ```jsonc
 {
@@ -463,7 +466,7 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 1. 声明 §3.4 的 Schema（字段名/类型/顺序严格一致）。
 2. `joinOrCreate("game")`，记 `room.sessionId`。
 3. 每帧发 `input`（seq 递增，速度 ≤ 200）；按键边沿发 interact/attack/talk。
-4. 渲染：遍历自己的 `visibleEntities`（或 `entities`，视部署是否开裁剪）。
+4. 渲染：遍历自己的 `players.get(room.sessionId).visibleEntities`（唯一实体来源）。
 5. 按 §3.6 辨识实体种类，按 §3.5 读字段。
 6. UI 操作 → `command`（§2.2），失败以状态回退为准。
 7. 用 `/maps/runtime` 初始化地图与出生点。
@@ -476,7 +479,7 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 |------|------|
 | 连接失败/握手无响应 | Schema 与服务端不一致（字段顺序/类型）、地址错误、CORS 白名单未含客户端 Origin |
 | 角色不动 | 输入超速被拒（回退 seq 需重发）；或未发 `input`（只发 state 监听） |
-| 实体表为空 | 未开兴趣裁剪时实体在 `state.entities`；开了则在自己 `visibleEntities`（首帧后才有） |
+| 实体表为空 | 实体恒在自己 `visibleEntities`（首帧后才开始填充）；若持续为空，检查是否同一地图/半径内无实体、或 Schema 声明顺序与服务端不一致 |
 | 命令"没反应" | 命令失败无回执：缺料/满包/频率超限/距离不够，观察状态确认 |
 | 断线重进后实体变了 | 服务端重启恢复存档，未到存档周期的最后几分钟进度会丢（60s 周期内） |
-| 换图后实体全变 | 正常：`mapId` 变化 = 场景切换，实体集随图切换（玩家自身保留） |
+| 换图后实体全变 | 正常：该玩家 `PlayerState.mapId` 变化 = 该玩家场景切换，实体集随图切换（玩家自身保留）；其他玩家不受影响 |

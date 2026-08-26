@@ -53,7 +53,8 @@
   defineTypes(PlayerState, {
     sessionId:       "string",              // 自己的 sessionId
     entityId:        "uint32",              // 自己实体的 NetworkId
-    visibleEntities: { map: EntityState },  // 视野内实体（兴趣裁剪）
+    mapId:           "string",              // 该玩家当前地图 id（per-player）
+    visibleEntities: { map: EntityState },  // 视野内实体（唯一实体来源）
   });
 
   class RoomState extends Schema {}
@@ -61,15 +62,13 @@
     tick:     "uint32",                  // 逻辑帧号
     hour:     "float64",                 // 世界小时 0-24
     phase:    "uint8",                   // 0=白天 1=夜晚
-    mapId:    "string",                  // 当前地图 id
     players:  { map: PlayerState },      // key=sessionId
-    entities: { map: EntityState },      // key=NetworkId 字符串（未裁剪模式）
   });
 
   // 连接：⚠️ 不要传自定义 Schema 类作第 3 参（见坑 K8），否则状态解码为空
   const client = new Colyseus.Client("ws://localhost:3001");
   const room   = await client.joinOrCreate("game");  // 不传 rootSchema
-  console.log(room.sessionId, room.state.tick, room.state.mapId);
+  console.log(room.sessionId, room.state.tick, room.state.players.get(room.sessionId).mapId);
 </script>
 ```
 **方式 A 已验证**：浏览器逐项实测 `window.Colyseus` 全局含 Client、模块导出 Schema 类可用，`joinOrCreate("game")` 成功（5/5 断言 PASS）。
@@ -105,7 +104,8 @@
   defineTypes(PlayerState, {
     sessionId:       "string",              // 自己的 sessionId
     entityId:        "uint32",              // 自己实体的 NetworkId
-    visibleEntities: { map: EntityState },  // 视野内实体（兴趣裁剪）
+    mapId:           "string",              // 该玩家当前地图 id（per-player）
+    visibleEntities: { map: EntityState },  // 视野内实体（唯一实体来源）
   });
 
   class RoomState extends Schema {}
@@ -113,19 +113,17 @@
     tick:     "uint32",                  // 逻辑帧号
     hour:     "float64",                 // 世界小时 0-24
     phase:    "uint8",                   // 0=白天 1=夜晚
-    mapId:    "string",                  // 当前地图 id
     players:  { map: PlayerState },      // key=sessionId
-    entities: { map: EntityState },      // key=NetworkId 字符串（未裁剪模式）
   });
 
   // 连接：⚠️ 不要传自定义 Schema 类作第 3 参（见坑 K8），否则状态解码为空
   const client = new Colyseus.Client("ws://localhost:3001");
   const room   = await client.joinOrCreate("game");  // 不传 rootSchema
-  console.log(room.sessionId, room.state.tick, room.state.mapId);
+  console.log(room.sessionId, room.state.tick, room.state.players.get(room.sessionId).mapId);
 </script>
 ```
 
-**两段示例均浏览器实测通过**：方式 A（unpkg 全局+模块导入，5/5 断言 PASS）；方式 B（jsdelivr `+esm`，`joinOrCreate("game")` 后 tick 为正整数、mapId="generated-map" 非空，9/9 断言 PASS）。方式 B 之所以可行，是因为 jsdelivr `+esm` 会在**服务端**把裸导入改写为绝对 `/npm/...` 路径——这正好绕开浏览器直接 `import` `@colyseus/sdk/build/index.mjs` 时因裸导入 `@colyseus/shared-types` 而报 `Failed to resolve module specifier` 的坑（见坑 K8.4）。**坑 K8 对两种方式同样适用**：`joinOrCreate("game")` 不传自定义 rootSchema。
+**两段示例均浏览器实测通过**：方式 A（unpkg 全局+模块导入，5/5 断言 PASS）；方式 B（jsdelivr `+esm`，`joinOrCreate("game")` 后 tick 为正整数、玩家 `mapId="generated-map"` 非空，9/9 断言 PASS）。方式 B 之所以可行，是因为 jsdelivr `+esm` 会在**服务端**把裸导入改写为绝对 `/npm/...` 路径——这正好绕开浏览器直接 `import` `@colyseus/sdk/build/index.mjs` 时因裸导入 `@colyseus/shared-types` 而报 `Failed to resolve module specifier` 的坑（见坑 K8.4）。**坑 K8 对两种方式同样适用**：`joinOrCreate("game")` 不传自定义 rootSchema。
 
 ⚠️ **切勿用两个普通 `<script>` 标签分别加载 SDK 与 Schema**（例如 `<script src="...colyseus.js"></script>` + `<script src="...colyseus-schema.js"></script>`）——普通 script 无法解析裸导入/依赖关系，会报 `colyseus is not defined` / Schema 类未定义。**二选一**：方式 A（全局脚本+模块导入）或方式 B（importmap+纯 ESM），绝不能拆分混用。
 
@@ -137,7 +135,7 @@
 
 1. `new Colyseus.Client(endpoint)` → `joinOrCreate("game")`，记 `room.sessionId`。
 2. 自身实体 id：`state.players.get(room.sessionId)?.entityId`（uint32）。
-3. **实体来源双通道兼容（见坑条款 K1）**：优先遍历自身 `PlayerState.visibleEntities`，回退 `state.entities`。
+3. **实体来源（见坑条款 K1）**：只遍历自身 `state.players.get(room.sessionId).visibleEntities`（唯一实体来源；`state` 的 `entities` 已随协议移除）。
 4. 按协议 §3.6 特征辨识实体种类，配色渲染：
 
    | 种类 | 判定特征 | 颜色 | 标签 |
@@ -156,12 +154,12 @@
 
 ### P1 地图加载
 
-1. join 成功后：`GET {httpBase}/maps/runtime?mapId=` + `encodeURIComponent(room.state.mapId)`。
+1. join 成功后：`GET {httpBase}/maps/runtime?mapId=` + `encodeURIComponent(room.state.players.get(room.sessionId).mapId)`。
 2. **校验**：响应 `id` 必须等于请求的 mapId，不符则控制台告警并拒绝应用。
 3. 解码：每块 `data`（base64）→ `atob` → 逐字节写入 `blocked[(cy*16+r)*grid.width + cx*16+c]`；总长度应 = `width*height`，不符即报错。
 4. 渲染：`blocked[i]===1` 的格子画半透明白色方块（尺寸 `grid.tileWidth/tileHeight`）。
 5. 缓存：以 `{id, version}` 为键缓存已解码地图，命中则跳过拉取与重组。
-6. 监听 `state.mapId` 变化 → 变化时重新执行 1-4（换图）。
+6. 监听 `state.players.get(room.sessionId).mapId` 变化 → 变化时重新执行 1-4（该玩家换图）。
 7. 相机：平移画布使自身实体居中（不做边界钳制也可）。
 
 ### P2 输入
@@ -184,19 +182,19 @@
 
 ### P4 状态 HUD
 
-左上角常驻：HP（Health.current）、hunger/thirst 条（Needs.0/1）、时钟（hour + phase 昼/夜）、mapId；
+左上角常驻：HP（Health.current）、hunger/thirst 条（Needs.0/1）、时钟（hour + phase 昼/夜）、mapId（该玩家当前地图）；
 底部 12 格背包条（`Inventory.{i}.kind/count`，空槽灰显）；右上角任务列表（`Quest.*`，state 含义见协议 §4.7）。
 
 ---
 
 ## 3. ⚠️ 已知坑（违反任何一条都会“看似连上但显示不对”）
 
-- **K1 visibleEntities 空 shell 回退**：受服务端已知上游 bug 影响（colyseus#935/#936，core 0.17.43），`visibleEntities` 可能解码“成功”但实体内容为空壳（`id` 不是数字）。**规则：表中存在至少一个 `typeof e.id === "number"` 的实体才使用 visibleEntities；否则回退遍历 `state.entities`**。注意：开启兴趣裁剪时**玩家自身实体只存在于 visibleEntities**，回退路径下自身状态会缺失属预期行为。服务端升级修复后本条可删除。
+- **K1 visibleEntities 空 shell 兜底**：受服务端已知上游 bug 影响（colyseus#935/#936，core 0.17.43），`visibleEntities` 可能解码“成功”但实体内容为空壳（`id` 不是数字）。`visibleEntities` 是**唯一**实体来源（`state` 的 `entities` 已随协议移除，**没有回退通道**）。**规则：表中存在至少一个 `typeof e.id === "number"` 的实体才使用 visibleEntities；若解码为空壳，客户端应视为无可见实体**（不再有任何实体表回退）。注意：此场景下**玩家自身实体只存在于 visibleEntities**，空壳时自身状态缺失属预期行为。服务端升级修复后本条可删除。
 - **K2 seq 无需重传机制**：被拒输入（超速等）会被丢弃，客户端无法感知；只需保证 seq 严格递增、每次携带最新输入即可，后续输入自然覆盖，勿实现复杂重传。
 - **K3 边沿触发**：键盘 `keydown` 有系统自动重复（auto-repeat），必须检查 `event.repeat` 过滤，否则 interact/attack/talk 会被连续触发。
 - **K4 命令失败无回执**：所有命令失败（缺料/满包/距离不够）服务端零副作用且**不回复错误**。UI 不等待响应、不做乐观本地修改，一切以状态同步为准。
 - **K5 CORS**：HTTP 端点受 `CORS_ORIGINS` 白名单限制（服务端默认 `http://localhost:5173`）。运行方式二选一：① 用任意静态服务器把页面跑在 `http://localhost:5173`（如 `npx serve -l 5173` 或 `python3 -m http.server 5173`）；② 在服务端 `.env` 设 `CORS_ORIGINS=<你的页面地址>` 后重启。
-- **K6 房间级换图**：任一玩家踩传送门会导致**全房间**玩家换图（`mapId` 变化），多人时别人的画面突然切换属正常现象。
+- **K6 换图改为 per-player**：玩家踩传送门只切换**该玩家自己**的地图（其 `players.get(room.sessionId).mapId` 变化），其他玩家的 `mapId` 不受影响、画面不切换——不再有房间级全员换图。
 - **K7 权威模型**：服务端权威模拟，客户端**不做位移预测**，位置完全以同步状态为准（最小版直接读最新值渲染即可，不需要插值）。
 - **K8 引入与 rootSchema 实测坑**（下列任何一条都会“看似连上但状态不对”或直接崩）：
   1. **勿传自定义 rootSchema**：`client.joinOrCreate("game", {}, RoomState)`（第 3 参传入客户端 `RoomState` 类）实测**状态解码为空**（`tick`/`mapId`/`players`/`entities` 全 `undefined`）——客户端用预实例化的 `RoomState` 做解码，而服务端反射/增量补丁没落到该实例。**正确：`joinOrCreate("game")`（不传第 3 参）**，由服务端反射自动解码，字段完整。客户端 `Schema/defineTypes` 声明仅作协议文档/校验用，勿作为 rootSchema 传入。
@@ -225,7 +223,7 @@
 6. `C` 打开合成面板 → 合成斧头（木材×2）成功入包；`F` 装备后采集速度提升。
 7. 吃浆果（选中+F）→ 饥饿度回升。
 8. 选中火堆套件按 `B` → 身前出现火堆实体（橙色）；`X` 可拆除自己放置的建筑。
-9. 找到紫色传送门走进去 → `mapId` 变为 cave，地图重绘为 32×32 小图；走回传送门可返回。
+9. 找到紫色传送门走进去 → 该玩家 `mapId` 变为 cave（`players.get(room.sessionId).mapId`），地图重绘为 32×32 小图；走回传送门可返回。
 10. 重启服务端后重连 → 位置/背包/任务基本恢复（60s 存档周期内的最后变更可能丢失）。
 
 ---
