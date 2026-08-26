@@ -10,7 +10,7 @@
  */
 import { hasComponent, query } from "bitecs";
 
-import { Transform, NetworkId, Placeable } from "components";
+import { Transform, NetworkId, Placeable, entityMapOf } from "components";
 import { destroyEntity } from "framework/entities/destroyEntity";
 import type { EntityId, GameWorld } from "world";
 
@@ -45,6 +45,7 @@ export function deconstructEntity(
   }
   if (targetEid === undefined) return false;
   if (!hasComponent(world, targetEid, Placeable)) return false;
+  if (entityMapOf(world, targetEid) !== entityMapOf(world, playerEid)) return false;
 
   // 所有权判定：无主（0）与非放置者不可拆
   const owner = Placeable.ownerNetworkId[targetEid] ?? 0;

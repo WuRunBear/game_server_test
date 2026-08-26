@@ -8,7 +8,7 @@ import { bbGet, BB_PERCEPTION_TARGET, type PerceivedTarget } from "framework/ai/
 import type { BtContext } from "framework/ai/btRunner";
 import { attackRangeOf } from "framework/ai/nodes/conditions/inAttackRange";
 import { clampDirectionToMapBounds, mapPixelBounds, normalizeOrFallback } from "framework/ai/nodes/steer";
-import { Transform, Velocity } from "framework/components";
+import { Transform, Velocity, entityMapOf } from "framework/components";
 
 const DEFAULT_SPEED = 60;
 
@@ -42,7 +42,7 @@ export function createChaseAction(args?: Record<string, unknown>): () => State {
 
     const finalSpeed = speed ?? DEFAULT_SPEED;
     let dir = normalizeOrFallback(dx, dy);
-    const bounds = mapPixelBounds(world.map?.grid);
+    const bounds = mapPixelBounds((world.maps[entityMapOf(world, self)] ?? world.map)?.grid);
     if (bounds) {
       dir = clampDirectionToMapBounds(
         Transform.x[self],

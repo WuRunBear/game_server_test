@@ -86,24 +86,26 @@ export function placeEntity(
 
   const { w, h } = footprintOf(archetype);
 
+  const placerMap = entityMapOf(world, playerEid);
+
   // 网格对齐（gridSnap 开启）：目标坐标取对齐后格组中心，并校验格组占用
   let targetX = x;
   let targetY = y;
   let cell: { cellX: number; cellY: number; cellW: number; cellH: number } | undefined;
   if (rules?.gridSnap) {
-    const snapped = snapToGrid(world, x, y, w, h);
+    const snapped = snapToGrid(world, placerMap, x, y, w, h);
     targetX = snapped.x;
     targetY = snapped.y;
     if (snapped.cellW > 0 && snapped.cellH > 0) {
       cell = snapped;
-      if (overlapsOccupiedGrid(world, snapped.cellX, snapped.cellY, snapped.cellW, snapped.cellH)) {
+      if (overlapsOccupiedGrid(world, placerMap, snapped.cellX, snapped.cellY, snapped.cellW, snapped.cellH)) {
         return false;
       }
     }
   }
 
-  if (overlapsAnyEntity(world, targetX, targetY, w, h)) return false;
-  if (overlapsMapBlocked(world, targetX, targetY, w, h)) return false;
+  if (overlapsAnyEntity(world, placerMap, targetX, targetY, w, h)) return false;
+  if (overlapsMapBlocked(world, placerMap, targetX, targetY, w, h)) return false;
 
   // 消耗 1 个（kit 未必有 consume 效果，直接扣减堆叠）
   stack.count -= 1;
@@ -112,7 +114,7 @@ export function placeEntity(
   const eid = spawnEntity(world, archetype, world.components_registry as ComponentRegistry, {
     x: targetX,
     y: targetY,
-    mapId: entityMapOf(world, playerEid),
+    mapId: placerMap,
   });
 
   // 所有权 + 格组写入（仅目标 archetype 声明了对应组件时写，防序列化污染）

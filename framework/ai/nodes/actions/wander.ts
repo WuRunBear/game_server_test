@@ -12,7 +12,7 @@ import {
   mapPixelBounds,
   clampDirectionToMapBounds,
 } from "framework/ai/nodes/steer";
-import { Transform, Velocity } from "framework/components";
+import { Transform, Velocity, entityMapOf } from "framework/components";
 
 /** 游荡节点的运行期状态（存入黑板，跨 tick 保持方向与换向时机）。 */
 type WanderRuntime = {
@@ -59,7 +59,7 @@ export function createWanderAction(args?: Record<string, unknown>): () => State 
       rt.nextChangeTick = tick + randInt(20, 60);
     }
 
-    const bounds = mapPixelBounds(world.map?.grid);
+    const bounds = mapPixelBounds((world.maps[entityMapOf(world, self)] ?? world.map)?.grid);
     const tileW = bounds?.tileW ?? 16;
     const finalSpeed = speed ?? tileW * 2;
 

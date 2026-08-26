@@ -12,7 +12,7 @@
  */
 import { hasComponent, query } from "bitecs";
 
-import { Dialogue, DialogueSource, Kind, NetworkId, Transform, Player, Health } from "components";
+import { Dialogue, DialogueSource, Kind, NetworkId, Transform, Player, Health, entityMapOf } from "components";
 import type { EntityId, GameWorld } from "world";
 import { acceptQuest, submitQuest } from "framework/systems/gameplay/questSystem";
 import { addRelation } from "framework/systems/gameplay/relation";
@@ -32,7 +32,7 @@ function dialogueTreeOf(world: GameWorld, treeId: string): DialogueTreeJson | un
   return world.gameDef.dialoguesByKind?.get(treeId);
 }
 
-/** 打开对话：玩家与 npcEid（须带 DialogueSource）建立会话（超范围/无树/死亡拒绝）。 */
+/** 打开对话：玩家与 npcEid（须带 DialogueSource）建立会话（超范围/跨图/无树/死亡拒绝）。 */
 export function startDialogue(
   world: GameWorld,
   playerEid: EntityId,
@@ -42,6 +42,7 @@ export function startDialogue(
   if (!hasComponent(world, playerEid, Player)) return false;
   if ((Health.current[playerEid] ?? 0) <= 0) return false;
   if (!hasComponent(world, playerEid, Transform)) return false;
+  if (entityMapOf(world, playerEid) !== entityMapOf(world, npcEid)) return false;
 
   const src = DialogueSource[npcEid];
   if (!src || !src.treeId) return false;
