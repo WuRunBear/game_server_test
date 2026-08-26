@@ -131,14 +131,23 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
         res.status(200).json({ default: defaultSource.id, maps });
       });
 
-      app.get("/debug/colliders", (_req: any, res: any) => {
+      app.get("/debug/colliders", (req: any, res: any) => {
         if (!persistentRoomId) {
           res.status(404).json({ error: "room_not_ready" });
           return;
         }
 
+        // 可选 mapId：快照只含该图碰撞体；缺省由房间内仿真回退默认图
+        // （与 /maps/runtime?mapId 的解析口径一致：非字符串视为缺省）。
+        const rawMapId = req.query?.mapId;
+        const mapId = typeof rawMapId === "string" ? rawMapId : undefined;
+
         void matchMaker
-          .remoteRoomCall<GameRoom>(persistentRoomId, "getCollisionDebugSnapshot")
+          .remoteRoomCall<GameRoom>(
+            persistentRoomId,
+            "getCollisionDebugSnapshot",
+            mapId !== undefined ? [{ mapId }] : [],
+          )
           .then(
             (snapshot) => {
               res.status(200).json(snapshot);

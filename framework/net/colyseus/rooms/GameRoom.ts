@@ -281,7 +281,7 @@ export class GameRoom extends Room<{ state: RoomState }> {
    *
    * 实现直接委托给仿真层，传输层不关心快照结构。
    */
-  getCollisionDebugSnapshot(options?: { includeMapBodies?: boolean }): unknown {
+  getCollisionDebugSnapshot(options?: { includeMapBodies?: boolean; mapId?: string }): unknown {
     return this.sim.getDebugSnapshot(options);
   }
 
