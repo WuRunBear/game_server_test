@@ -120,16 +120,14 @@ export class GameRoom extends Room<{ state: RoomState }> {
   private debugSubscribers = new Set<string>();
 
   /**
-   * 已接收过首次地图碰撞体的客户端集合。
+   * 每客户端已发过地图碰撞体的归属图（sessionId → 已发图 id）。
    *
-   * 首次订阅时推送包含地图碰撞体的完整快照（includeMapBodies=true），
-   * 之后只推送实体碰撞体（includeMapBodies=false），避免每帧发送不变的地图数据。
-   * 地图切换（onMapChanged）时清空，强制订阅者重拉新图碰撞体。
+   * 首次订阅/拉取时推送包含该客户端所在图地图碰撞体的完整快照
+   * （includeMapBodies=true），之后只推送实体碰撞体（includeMapBodies=false），
+   * 避免每帧发送不变的地图数据。客户端所在图变化（onMapChanged 检测）时
+   * 重置该标记，强制其重拉新图碰撞体。
    */
-  private debugMapSentSubscribers = new Set<string>();
-
-  /** 上一帧同步的地图 id（applySnapshot 检测变化用）。 */
-  private prevMapId = "";
+  private debugMapSentSubscribers = new Map<string, string>();
 
   /**
    * 调试推送冷却计时器（毫秒）。
@@ -321,20 +319,30 @@ export class GameRoom extends Room<{ state: RoomState }> {
       this.state.hour = snapshot.timeOfDay.hour;
       this.state.phase = snapshot.timeOfDay.phase;
     }
-    // 房间级 mapId 检测随 TickSnapshot.mapId 移除（todo 10）；per-client 同步由 todo 13 完成。
-    // per-client 恒路径；全量广播路径已随 RoomState.entities 移除，todo 13 细化。
+    // per-client 地图状态：每玩家从 snapshot.playerMaps 写入各自 PlayerState
+    // （playerMaps 恒存在，todo 10；PlayerState.mapId 为 T12 新增字段）。
+    for (const client of this.clients) {
+      const playerState = this.state.players.get(client.sessionId);
+      if (!playerState) continue;
+      playerState.mapId = snapshot.playerMaps.get(client.sessionId) ?? "";
+    }
+    // per-client 地图变更检测（调试快照标记重置），随后恒走 per-client 兴趣路径。
+    this.onMapChanged();
     this.applyInterest(result);
   }
 
   /**
-   * 地图变更处理：清空"已发过地图碰撞体"标记并给订阅者强制推一次完整快照，
+   * per-client 地图变更处理：对每个订阅了调试推送的客户端，若其所在图与
+   * "已发过地图碰撞体的图"不一致，则重置标记并强制推一次该新图完整快照，
    * 避免客户端缓存旧图碰撞体（换图后旧图数据过期）。
    */
   private onMapChanged(): void {
-    this.debugMapSentSubscribers.clear();
-    if (this.debugSubscribers.size === 0) return;
     for (const client of this.clients) {
-      if (this.debugSubscribers.has(client.sessionId)) {
+      if (!this.debugSubscribers.has(client.sessionId)) continue;
+      const playerState = this.state.players.get(client.sessionId);
+      if (!playerState) continue;
+      if (this.debugMapSentSubscribers.get(client.sessionId) !== playerState.mapId) {
+        this.debugMapSentSubscribers.delete(client.sessionId);
         this.sendCollisionDebugSnapshot(client, true);
       }
     }
@@ -426,10 +434,16 @@ export class GameRoom extends Room<{ state: RoomState }> {
     }
     this.debugPushCooldownMs = 0;
 
-    // 节流推送不包含地图碰撞体（客户端已有首次快照的地图数据）
-    const snapshot = this.sim.getDebugSnapshot({ includeMapBodies: false });
+    // 节流推送不包含地图碰撞体（客户端已有首次快照的地图数据）；
+    // per-client：按各订阅客户端所在图取快照并单发。
     for (const client of this.clients) {
       if (!this.debugSubscribers.has(client.sessionId)) continue;
+      const playerState = this.state.players.get(client.sessionId);
+      if (!playerState) continue;
+      const snapshot = this.sim.getDebugSnapshot({
+        includeMapBodies: false,
+        mapId: playerState.mapId,
+      });
       client.send("debug_colliders_snapshot", snapshot);
     }
   }
@@ -444,18 +458,21 @@ export class GameRoom extends Room<{ state: RoomState }> {
    * @param forceIncludeMapBodies 是否强制包含地图碰撞体
    */
   private sendCollisionDebugSnapshot(client: Client, forceIncludeMapBodies = false): void {
-    // 首次发送: forceIncludeMapBodies=true 或该客户端还没收过地图数据
+    // 快照使用该客户端所在玩家的地图（playerState.mapId，applySnapshot 每帧写入）。
+    const playerState = this.state.players.get(client.sessionId);
+    const clientMapId = playerState?.mapId ?? "";
+    // 首次发送: forceIncludeMapBodies=true 或该客户端还没收过当前图的地图数据
     const includeMapBodies =
-      forceIncludeMapBodies || !this.debugMapSentSubscribers.has(client.sessionId);
+      forceIncludeMapBodies || this.debugMapSentSubscribers.get(client.sessionId) !== clientMapId;
 
     client.send(
       "debug_colliders_snapshot",
-      this.sim.getDebugSnapshot({ includeMapBodies }),
+      this.sim.getDebugSnapshot({ includeMapBodies, mapId: clientMapId }),
     );
 
-    // 标记该客户端已收过地图碰撞体
+    // 标记该客户端已收过当前图的地图碰撞体
     if (includeMapBodies) {
-      this.debugMapSentSubscribers.add(client.sessionId);
+      this.debugMapSentSubscribers.set(client.sessionId, clientMapId);
     }
   }
 }
