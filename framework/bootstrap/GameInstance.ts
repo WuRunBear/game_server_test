@@ -67,8 +67,10 @@ export function createGameInstance(gameDef: LoadedGameDefinition): GameInstance 
 
   // 开机仅构建并激活默认地图（world.map 为弃用别名，与 world.maps[defaultId] 同对象）；
   // 其余地图由 ensureMapActive 按需惰性构建（不在此处全量构建）。
+  // 默认图键取 REGISTRY KEY（resolvedDefaultMapId，runtime 命名空间键）而非 source.id——
+  // 显式 id ≠ registry key 时 world.maps/activeMaps/defaultMapId 必须以 registry key 为键。
   // 无地图配置（createDefaultGameDefinition 兜底路径）时三者保持默认值，行为与旧版一致。
-  const defaultMapId = gameDef.resolvedMapSource?.id;
+  const defaultMapId = gameDef.resolvedDefaultMapId;
   if (gameDef.resolvedMapSource && defaultMapId !== undefined) {
     const mapBuilt = buildMapRuntime(gameDef.resolvedMapSource);
     world.map = mapBuilt;

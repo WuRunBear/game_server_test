@@ -2,7 +2,7 @@
  * 分图（per-player maps）地图生命周期测试（per-player-maps 计划 todo 3）。
  *
  * 覆盖：
- * - ensureMapActive：首次激活按 source.id 惰性构建并布置初始 NPC（EntityMap 写入），
+ * - ensureMapActive：首次激活按 registry key 惰性构建并布置初始 NPC（EntityMap 写入），
  *   二次调用幂等（不重复布置）。
  * - movePlayerToMap：移动玩家（EntityMap + Transform），目标图未激活时自动构建/激活，
  *   dest 缺省用目标图出生点，同图移动也传送。
@@ -112,7 +112,7 @@ describe("map lifecycle", () => {
     ensureArchetype(world, { kind: "npc1", components: {} });
 
     expect(ensureMapActive(world, "a")).toBe(true);
-    // 运行时按 source.id 惰性构建入缓存，图被激活
+    // 运行时按 registry key 惰性构建入缓存，图被激活
     expect(world.maps["a"]).toBeDefined();
     expect(world.maps["a"].id).toBe("a");
     expect(world.activeMaps.has("a")).toBe(true);
@@ -177,19 +177,20 @@ describe("map lifecycle", () => {
 });
 
 /**
- * 归一分歧回归（todo：显式 id ≠ registry key 时错位）。
+ * 归一分歧回归（todo：F2 残余缺陷——EntityMap 值 = source.id 时与 registry key 错位）。
  *
- * `resolvedMapSources` 以 registry key 为查找键，但条目可带显式 `id`（MapSource.id）。
- * 规范语义是：**source.id 为运行时缓存/激活/归属的唯一规范键；registry key 仅是配置查找键
- * （两者可不同）**。本用例钉住「显式 id 条目」整条链路始终以 source.id 为键：
- * world.maps 存储、activeMaps 成员、初始 NPC 归属、movePlayerToMap 的运行时/出生点访问，
- * 全部不得回落到 registry key——否则 movePlayerToMap 会抛 TypeError 且 NPC 永不 spawn。
+ * `resolvedMapSources` 以 registry key 为查找键，条目可带显式 `id`（MapSource.id）。
+ * **运行时规范化键 = registry key**：`MapSource.id`（显式 id）仅为信息性字段（保留在 schema，
+ * 用于 buildMapRuntime 的 runtime.id 与校验错误串）。整条链路——world.maps 存储、
+ * activeMaps 成员、EntityMap 归属、movePlayerToMap 的运行时/出生点访问——一律以 registry key
+ * 为键；显式 id ≠ registry key 时不得用 source.id 替换键（否则移动抛 TypeError、NPC 不
+ * spawn、读档恢复静默跳过）。本用例用显式 id `"mk-canon"` ≠ registry key `"mk"` 钉住该约定。
  */
-describe("map-id 归一（显式 id ≠ registry key）", () => {
-  it("ensureMapActive/movePlayerToMap 以 source.id 为规范键；registry key 仅作查找键", () => {
+describe("map-id 归一（registry key = 运行时规范化键；source.id 信息性）", () => {
+  it("ensureMapActive/movePlayerToMap 以 registry key 为键；显式 id 不影响运行时命名空间", () => {
     const world = createBareWorld();
     clearEntityMap();
-    // registry key "mk"，显式 id "mk-canon"（规范键），带 2 个 NPC 出生点（种子 1 已校验可走）。
+    // registry key "mk"，显式 id "mk-canon"（信息性），带 2 个 NPC 出生点（种子 1 已校验可走）。
     world.gameDef.resolvedMapSources = {
       mk: {
         kind: "generated", generatorId: "simple", id: "mk-canon", name: "mk-canon",
@@ -202,21 +203,20 @@ describe("map-id 归一（显式 id ≠ registry key）", () => {
     };
     ensureArchetype(world, { kind: "npc1", components: {} });
 
-    // ensureMapActive(registry key) 返回 true；运行时按 source.id（规范键）构建/激活
+    // ensureMapActive(registry key) 返回 true；运行时按 registry key 构建/激活（非 source.id）
     expect(ensureMapActive(world, "mk")).toBe(true);
-    expect(world.maps["mk-canon"]).toBeDefined();
-    expect(world.maps["mk-canon"].id).toBe("mk-canon");
-    expect(world.activeMaps.has("mk-canon")).toBe(true);
-    expect(world.activeMaps.has("mk")).toBe(false);
+    expect(world.maps["mk"]).toBeDefined();
+    expect(world.activeMaps.has("mk")).toBe(true);
+    expect(world.activeMaps.has("mk-canon")).toBe(false);
 
-    // 初始 NPC 以规范键（source.id）归属，且确实出生（无 id 错位时 2 只全部落同图）
+    // 初始 NPC 以 registry key 归属，且确实出生（无 id 错位时 2 只全部落同图）
     const npcEids = query(world, [Transform]);
     expect(npcEids.length).toBe(2);
     for (const eid of npcEids) {
-      expect(EntityMap[eid]).toBe("mk-canon");
+      expect(EntityMap[eid]).toBe("mk");
     }
 
-    // movePlayerToMap(registry key) 不再抛 TypeError；玩家按规范键移动
+    // movePlayerToMap(registry key) 不再抛 TypeError；玩家按 registry key 移动
     const player = spawnTestPlayer(world, { x: 0, y: 0 });
     EntityMap[player] = undefined;
     let movedExplicit = false;
@@ -224,13 +224,13 @@ describe("map-id 归一（显式 id ≠ registry key）", () => {
       movedExplicit = movePlayerToMap(world, player, "mk", { x: 33, y: 44 });
     }).not.toThrow();
     expect(movedExplicit).toBe(true);
-    expect(EntityMap[player]).toBe("mk-canon");
+    expect(EntityMap[player]).toBe("mk");
     expect(Transform.x[player]).toBe(33);
     expect(Transform.y[player]).toBe(44);
 
-    // dest 缺省：按规范键取该图出生点（world.maps[source.id].spawns.player）
+    // dest 缺省：按 registry key 取该图出生点（world.maps["mk"].spawns.player）
     expect(movePlayerToMap(world, player, "mk")).toBe(true);
-    expect(Transform.x[player]).toBe(world.maps["mk-canon"].spawns.player!.x);
-    expect(Transform.y[player]).toBe(world.maps["mk-canon"].spawns.player!.y);
+    expect(Transform.x[player]).toBe(world.maps["mk"].spawns.player!.x);
+    expect(Transform.y[player]).toBe(world.maps["mk"].spawns.player!.y);
   });
 });

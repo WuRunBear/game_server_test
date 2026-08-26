@@ -107,6 +107,8 @@ export interface LoadedGameDefinition extends GameDefinition {
   resolvedMapSource?: MapSource;
   /** 全部地图来源（maps/registry.json 的 maps 表，key=地图 id）——portal 场景切换用。 */
   resolvedMapSources?: Record<string, MapSource>;
+  /** 默认地图（game.json 的 map.default，缺省 registry 首项）的 REGISTRY KEY（runtime 命名空间键）。 */
+  resolvedDefaultMapId?: string;
   /** 实体原型定义表（来自 game/entities/*.json）。 */
   resolvedEntities: ArchetypeSpec[];
   /** 行为树定义表（来自 game/behaviors/*.json）。 */

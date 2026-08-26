@@ -213,3 +213,63 @@ describe("persist 恢复不重复布置初始 NPC", () => {
     expect(hillNpcs.length).toBe(2);
   });
 });
+
+/**
+ * 读档恢复 explicit-id 图回归（F2 残余缺陷：EntityMap 值 = source.id 时与 registry key 错位）。
+ *
+ * 实体归属（EntityMap）现以 registry key 为规范化键。若 restoreWorld 的激活键/缓存键与实体
+ * 归属键不一致（旧实现按 source.id），恢复时 ensureMapActive 以 EntityMap 值查
+ * resolvedMapSources 会命中不了（键不同于 key），图静默不重建——activeMaps 空、world.maps 缺键、
+ * spawning 规则失效、collision 回退默认墙。本用例用显式 id `"hill-canon"` ≠ registry key
+ * `"hill"` 钉住：序列化→恢复后按 registry key 重建激活/缓存，NPC 不翻倍。
+ */
+describe("persist 恢复 explicit-id 图（registry key 命名空间）", () => {
+  /** 挂一张带 2 个 NPC 出生点的 explicit-id 图：registry key "hill"，显式 id "hill-canon"。 */
+  function attachExplicitIdMap(world: GameWorld): void {
+    world.gameDef.resolvedMapSources = {
+      hill: {
+        kind: "generated", generatorId: "simple", id: "hill-canon", name: "hill-canon",
+        seed: 1, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
+        npcSpawns: [
+          { kind: "npc1", offsetTiles: [1, 0] },
+          { kind: "npc1", offsetTiles: [0, 1] },
+        ],
+      },
+    };
+  }
+
+  it("explicit-id 图恢复：按 registry key 重建激活与缓存，NPC 计数与存档前一致", () => {
+    const world1 = createBareWorld();
+    clearEntityMap();
+    attachExplicitIdMap(world1);
+    ensureArchetype(world1, { kind: "npc1", components: {} });
+
+    // 首次激活 hill（registry key）→ spawnInitialNpcs 布置 2 个初始 NPC（存档前置基准），归属=key
+    expect(ensureMapActive(world1, "hill")).toBe(true);
+    expect(world1.activeMaps.has("hill")).toBe(true);
+    const preCount = query(world1, [NetworkId]).length;
+    expect(preCount).toBe(2);
+
+    const record = serializeWorld(world1, "s1");
+
+    // 恢复进全新 world2（同源 resolvedMapSources；同 npcSpawns）
+    const world2 = createBareWorld();
+    clearEntityMap();
+    attachExplicitIdMap(world2);
+    ensureArchetype(world2, { kind: "npc1", components: {} });
+
+    const orphan = restoreWorld(world2, record);
+    expect(orphan).toEqual([]);
+    // 恢复后按 registry key 重建激活与缓存；不得以 source.id（hill-canon）为键
+    expect(world2.activeMaps.has("hill")).toBe(true);
+    expect(world2.activeMaps.has("hill-canon")).toBe(false);
+    expect(world2.maps["hill"]).toBeDefined();
+    // NPC 计数与存档前一致（不翻倍），全部归属 registry key（非 source.id）
+    const postCount = query(world2, [NetworkId]).length;
+    expect(postCount).toBe(preCount);
+    const hillNpcs = query(world2, [NetworkId]).filter((eid) => EntityMap[eid] === "hill");
+    expect(hillNpcs.length).toBe(2);
+    // 再次 ensureMapActive(registry key) 仍解析到来源返回 true
+    expect(ensureMapActive(world2, "hill")).toBe(true);
+  });
+});

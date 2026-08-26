@@ -178,7 +178,7 @@ function loadQuestsFile(baseDir: string, pattern?: string): QuestDefinitionJson[
 function resolveMapSources(
   baseDir: string,
   mapRegistryPath?: string,
-): { sources: Record<string, MapSource>; defaultSource?: MapSource } {
+): { sources: Record<string, MapSource>; defaultSource?: MapSource; defaultKey?: string } {
   if (!mapRegistryPath) return { sources: {} };
   const fullPath = resolve(baseDir, mapRegistryPath);
   if (!existsSync(fullPath)) return { sources: {} };
@@ -187,6 +187,7 @@ function resolveMapSources(
   const registry = MapRegistrySchema.parse(raw);
   const sources: Record<string, MapSource> = {};
   let defaultSource: MapSource | undefined;
+  let defaultKey: string | undefined;
 
   for (const [key, entry] of Object.entries(registry.maps)) {
     let source: MapSource;
@@ -217,10 +218,11 @@ function resolveMapSources(
     sources[key] = source;
     if (key === (registry.default ?? Object.keys(registry.maps)[0])) {
       defaultSource = source;
+      defaultKey = key;
     }
   }
 
-  return { sources, defaultSource };
+  return { sources, defaultSource, defaultKey };
 }
 
 /**
@@ -456,6 +458,7 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
     resolvedQuests,
     resolvedMapSource: mapResult.defaultSource,
     resolvedMapSources: mapResult.sources,
+    resolvedDefaultMapId: mapResult.defaultKey,
   };
 
   validateIntegrity(loaded);
@@ -495,5 +498,6 @@ export function createDefaultGameDefinition(): LoadedGameDefinition {
     resolvedQuests: [],
     resolvedMapSource: undefined,
     resolvedMapSources: {},
+    resolvedDefaultMapId: undefined,
   };
 }

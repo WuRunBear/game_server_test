@@ -190,6 +190,8 @@ export function restoreWorld(world: GameWorld, record: WorldRecord): number[] {
 
   // 按恢复实体的地图归属重建激活集：实体归属生效即保证该图已构建/已激活
   // （ensureMapActive 幂等；未知图返回 false 静默跳过，空串已过滤）。
+  // EntityMap 值即 registry key（运行时命名空间键），直接作为 ensureMapActive 的 mapId
+  // 按 key 查来源即可，无需反查 source.id。
   // 以 { spawnInitialNpcs: false } 激活：恢复出的 NPC 已是存档实体，禁止在其上
   // 二次 spawn 初始 NPC（否则持久化 NPC 之上叠加同坐标的第二波，见 todo 修复）；投影
   // 图 activeMaps 收齐即可（常驻语义），实际实体由恢复循环重建。
