@@ -1,5 +1,5 @@
 import { hasComponent, query } from "bitecs";
-import { Health, Player, Transform, LootTable } from "components";
+import { Health, Player, Transform, LootTable, entityMapOf } from "components";
 import { spawnDroppedItem } from "framework/systems/gameplay/inventoryOps";
 import { destroyEntity } from "framework/entities/destroyEntity";
 import type { EntityId, GameWorld } from "world";
@@ -57,6 +57,7 @@ export function deathSystem(world: GameWorld): GameWorld {
             Transform.x[eid] ?? 0,
             Transform.y[eid] ?? 0,
             now + LOOT_PICKUP_DELAY_MS,
+            entityMapOf(world, eid),
           );
         }
       }

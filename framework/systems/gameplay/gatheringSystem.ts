@@ -1,5 +1,5 @@
 import { query } from "bitecs";
-import { Resource, ResourceNode, Needs, Inventory, type ResourceNodeState } from "components";
+import { Resource, ResourceNode, Needs, Inventory, entityMapOf, type ResourceNodeState } from "components";
 import type { GameWorld } from "world";
 import { addToInventory, spawnDroppedItem } from "framework/systems/gameplay/inventoryOps";
 import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
@@ -44,6 +44,7 @@ export function harvest(world: GameWorld, actorEid: number, nodeEid: number): bo
         0,
         0,
         world.time.tick * world.time.fixedDtMs + 1000,
+        entityMapOf(world, actorEid),
       );
     }
   }

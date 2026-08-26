@@ -9,7 +9,7 @@
 import { hasComponent } from "bitecs";
 import type { GameWorld } from "world";
 import { Inventory, ItemMeta, Needs, type InventoryEntry, type ItemStack } from "components";
-import { Item, Transform } from "components";
+import { EntityMap, Item, Transform, entityMapOf } from "components";
 import { spawnEntity } from "framework/entities/spawn";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
@@ -139,7 +139,14 @@ export function dropSlot(world: GameWorld, ownerEid: number, slot: number): bool
   if (!hasComponent(world, ownerEid, Transform)) return false;
 
   const now = world.time.tick * world.time.fixedDtMs;
-  spawnDroppedItem(world, stack, Transform.x[ownerEid], Transform.y[ownerEid], now + 1000);
+  spawnDroppedItem(
+    world,
+    stack,
+    Transform.x[ownerEid],
+    Transform.y[ownerEid],
+    now + 1000,
+    entityMapOf(world, ownerEid),
+  );
   inv.slots[slot] = null;
   return true;
 }
@@ -151,6 +158,7 @@ export function spawnDroppedItem(
   x: number,
   y: number,
   pickupAfterMs: number,
+  mapId: string,
 ): number {
   const archetypeRegistry = world.archetypes as ArchetypeRegistry;
   const componentRegistry = world.components_registry as ComponentRegistry;
@@ -164,6 +172,7 @@ export function spawnDroppedItem(
     y: y + Math.sin(angle) * dist,
   });
 
+  EntityMap[eid] = mapId;
   ItemMeta[eid] = { kind: stack.kind, count: stack.count, pickupAfterMs };
   return eid;
 }

@@ -18,6 +18,7 @@ import type { ComponentRegistry } from "framework/components/componentRegistry";
 
 import { Transform } from "framework/components/transform";
 import { NetworkId } from "framework/components/network";
+import { EntityMap } from "framework/components/entityMap";
 import { Player, NPC, Enemy, Item, Resource } from "framework/components/tags";
 import { Team } from "framework/components/combat";
 import { setEntityKind } from "framework/systems/gameplay/aiSystem";
@@ -30,6 +31,8 @@ export interface SpawnOverrides {
   x?: number;
   /** 生成坐标 y（缺省 0）。 */
   y?: number;
+  /** 实体所属地图 id；缺省写 world.defaultMapId（无默认图时为空串）。 */
+  mapId?: string;
   /** 预留：未来可覆盖原型组件初始值（key = 组件字段名）。 */
   [key: string]: unknown;
 }
@@ -100,6 +103,9 @@ export function spawnEntity(
 
   // 分配稳定网络标识（world.nextNetworkId 自增；读档恢复时由存档值覆写）
   NetworkId.value[eid] = world.nextNetworkId++;
+
+  // 写实体所属地图标识：显式 overrides.mapId 优先，回退世界默认图（无配置时空串）
+  EntityMap[eid] = overrides?.mapId ?? world.defaultMapId;
 
   // 写 Kind 组件：AI/行为系统按 kind 路由实体（kind 即原型名）
   setEntityKind(world, eid, archetype.kind);

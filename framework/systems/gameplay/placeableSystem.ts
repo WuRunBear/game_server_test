@@ -17,7 +17,7 @@
  * 校验全部在消耗之前完成：任一校验失败即拒绝，不留半成品状态。
  * 放置范围经 rules/place.json 的 placeRange 配置（缺省 64）。
  */
-import { Transform, Inventory, NetworkId, Placeable, GridOccupancy } from "components";
+import { Transform, Inventory, NetworkId, Placeable, GridOccupancy, entityMapOf } from "components";
 import { spawnEntity } from "framework/entities/spawn";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { ArchetypeRegistry, ArchetypeSpec } from "framework/entities/archetypeRegistry";
@@ -112,6 +112,7 @@ export function placeEntity(
   const eid = spawnEntity(world, archetype, world.components_registry as ComponentRegistry, {
     x: targetX,
     y: targetY,
+    mapId: entityMapOf(world, playerEid),
   });
 
   // 所有权 + 格组写入（仅目标 archetype 声明了对应组件时写，防序列化污染）
