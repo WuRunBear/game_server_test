@@ -175,3 +175,62 @@ describe("map lifecycle", () => {
     expect(world.activeMaps.size).toBe(0);
   });
 });
+
+/**
+ * 归一分歧回归（todo：显式 id ≠ registry key 时错位）。
+ *
+ * `resolvedMapSources` 以 registry key 为查找键，但条目可带显式 `id`（MapSource.id）。
+ * 规范语义是：**source.id 为运行时缓存/激活/归属的唯一规范键；registry key 仅是配置查找键
+ * （两者可不同）**。本用例钉住「显式 id 条目」整条链路始终以 source.id 为键：
+ * world.maps 存储、activeMaps 成员、初始 NPC 归属、movePlayerToMap 的运行时/出生点访问，
+ * 全部不得回落到 registry key——否则 movePlayerToMap 会抛 TypeError 且 NPC 永不 spawn。
+ */
+describe("map-id 归一（显式 id ≠ registry key）", () => {
+  it("ensureMapActive/movePlayerToMap 以 source.id 为规范键；registry key 仅作查找键", () => {
+    const world = createBareWorld();
+    clearEntityMap();
+    // registry key "mk"，显式 id "mk-canon"（规范键），带 2 个 NPC 出生点（种子 1 已校验可走）。
+    world.gameDef.resolvedMapSources = {
+      mk: {
+        kind: "generated", generatorId: "simple", id: "mk-canon", name: "mk-canon",
+        seed: 1, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
+        npcSpawns: [
+          { kind: "npc1", offsetTiles: [1, 0] },
+          { kind: "npc1", offsetTiles: [0, 1] },
+        ],
+      },
+    };
+    ensureArchetype(world, { kind: "npc1", components: {} });
+
+    // ensureMapActive(registry key) 返回 true；运行时按 source.id（规范键）构建/激活
+    expect(ensureMapActive(world, "mk")).toBe(true);
+    expect(world.maps["mk-canon"]).toBeDefined();
+    expect(world.maps["mk-canon"].id).toBe("mk-canon");
+    expect(world.activeMaps.has("mk-canon")).toBe(true);
+    expect(world.activeMaps.has("mk")).toBe(false);
+
+    // 初始 NPC 以规范键（source.id）归属，且确实出生（无 id 错位时 2 只全部落同图）
+    const npcEids = query(world, [Transform]);
+    expect(npcEids.length).toBe(2);
+    for (const eid of npcEids) {
+      expect(EntityMap[eid]).toBe("mk-canon");
+    }
+
+    // movePlayerToMap(registry key) 不再抛 TypeError；玩家按规范键移动
+    const player = spawnTestPlayer(world, { x: 0, y: 0 });
+    EntityMap[player] = undefined;
+    let movedExplicit = false;
+    expect(() => {
+      movedExplicit = movePlayerToMap(world, player, "mk", { x: 33, y: 44 });
+    }).not.toThrow();
+    expect(movedExplicit).toBe(true);
+    expect(EntityMap[player]).toBe("mk-canon");
+    expect(Transform.x[player]).toBe(33);
+    expect(Transform.y[player]).toBe(44);
+
+    // dest 缺省：按规范键取该图出生点（world.maps[source.id].spawns.player）
+    expect(movePlayerToMap(world, player, "mk")).toBe(true);
+    expect(Transform.x[player]).toBe(world.maps["mk-canon"].spawns.player!.x);
+    expect(Transform.y[player]).toBe(world.maps["mk-canon"].spawns.player!.y);
+  });
+});

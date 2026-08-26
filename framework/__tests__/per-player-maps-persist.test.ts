@@ -152,3 +152,64 @@ describe("persist", () => {
     expect(query(world, [NetworkId]).length).toBe(0);
   });
 });
+
+/**
+ * 读档恢复不重复布置初始 NPC 回归（todo：restoreWorld 二次 spawn）。
+ *
+ * restoreWorld 经 ensureMapActive 为每个恢复图重建 activeMaps；若该路径再跑
+ * spawnInitialNpcs，会在持久化的 NPC（尚未即已入档）之上再铺一份同名同坐标的第二波，
+ * 且会复活存档前已被击杀的 NPC。修复方向：restoreWorld 以 `{ spawnInitialNpcs: false }`
+ * 激活恢复图，NPC 仅来自存档实体——每图 NPC 计数必须等于存档前计数（不翻倍）。
+ */
+describe("persist 恢复不重复布置初始 NPC", () => {
+  /**
+   * 挂两张生成图：cave 无 NPC 出生点，hill 带 2 个 NPC 出生点（种子经校验格可走）。
+   * 两图 seed 独立复用（各图几何互不影响），仅 hill 的 spawns.npcs 会被 spawInitialNpcs 消费。
+   */
+  function attachTwoMapsWithNpcSpawns(world: GameWorld): void {
+    world.gameDef.resolvedMapSources = {
+      cave: {
+        kind: "generated", generatorId: "simple", id: "cave", name: "cave",
+        seed: 2, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
+      },
+      hill: {
+        kind: "generated", generatorId: "simple", id: "hill", name: "hill",
+        seed: 1, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
+        npcSpawns: [
+          { kind: "npc1", offsetTiles: [1, 0] },
+          { kind: "npc1", offsetTiles: [0, 1] },
+        ],
+      },
+    };
+  }
+
+  it("restoreWorld 激活恢复图时不再 spawn 初始 NPC：hill NPC 计数与存档前一致（不翻倍）", () => {
+    const world1 = createBareWorld();
+    clearEntityMap();
+    attachTwoMapsWithNpcSpawns(world1);
+    ensureArchetype(world1, { kind: "npc1", components: {} });
+
+    // 首次激活 hill → spawnInitialNpcs 布置 2 个初始 NPC（存档前置基准）
+    expect(ensureMapActive(world1, "hill")).toBe(true);
+    const preCount = query(world1, [NetworkId]).length;
+    expect(preCount).toBe(2);
+
+    const record = serializeWorld(world1, "s1");
+
+    // 恢复进全新 world2（同两张图；同 npcSpawns）
+    const world2 = createBareWorld();
+    clearEntityMap();
+    attachTwoMapsWithNpcSpawns(world2);
+    ensureArchetype(world2, { kind: "npc1", components: {} });
+
+    const orphan = restoreWorld(world2, record);
+    expect(orphan).toEqual([]);
+    // hill 从实体归属重建激活，但不得重复布置初始 NPC
+    expect(world2.activeMaps.has("hill")).toBe(true);
+    const postCount = query(world2, [NetworkId]).length;
+    expect(postCount).toBe(preCount);
+    // 全部 NPC 归属 hill（无多余实体混入）
+    const hillNpcs = query(world2, [NetworkId]).filter((eid) => EntityMap[eid] === "hill");
+    expect(hillNpcs.length).toBe(2);
+  });
+});
