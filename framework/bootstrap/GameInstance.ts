@@ -65,11 +65,17 @@ export function createGameInstance(gameDef: LoadedGameDefinition): GameInstance 
 
   const systems = buildSystems(world, gameDef.systems ?? [], systemRegistry);
 
-  // 构建地图运行时（碰撞体/生成点等）；无地图配置则 world.map 为 undefined
-  const mapBuilt = gameDef.resolvedMapSource
-    ? buildMapRuntime(gameDef.resolvedMapSource)
-    : undefined;
-  world.map = mapBuilt;
+  // 开机仅构建并激活默认地图（world.map 为弃用别名，与 world.maps[defaultId] 同对象）；
+  // 其余地图由 ensureMapActive 按需惰性构建（不在此处全量构建）。
+  // 无地图配置（createDefaultGameDefinition 兜底路径）时三者保持默认值，行为与旧版一致。
+  const defaultMapId = gameDef.resolvedMapSource?.id;
+  if (gameDef.resolvedMapSource && defaultMapId !== undefined) {
+    const mapBuilt = buildMapRuntime(gameDef.resolvedMapSource);
+    world.map = mapBuilt;
+    world.maps[defaultMapId] = mapBuilt;
+    world.activeMaps.add(defaultMapId);
+    world.defaultMapId = defaultMapId;
+  }
 
   const instance: GameInstance = {
     world,

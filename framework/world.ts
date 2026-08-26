@@ -41,7 +41,21 @@ export type GameWorld = ReturnType<typeof createWorld> & {
   time: GameTime;
   metrics: Metrics;
   logger: Logger;
+  /**
+   * 默认地图引用，弃用别名——新代码一律经 `world.maps` / `world.defaultMapId`
+   * / `entityMapOf` 访问。保留仅为兼容既有消费方（始终指向 world.maps[defaultMapId]）。
+   * @deprecated 使用 world.maps[world.defaultMapId] 代替。
+   */
   map?: MapRuntime;
+
+  /** 全图运行时缓存：mapId → MapRuntime（惰性构建，开机构建仅默认图）。 */
+  maps: Record<string, MapRuntime>;
+  /** 当前激活（规则/系统常驻运行）的地图 id 集合；默认图在开机时激活。 */
+  activeMaps: Set<string>;
+  /** 默认地图 id（新玩家出生图）；无地图配置时为空串。 */
+
+  /** 默认地图 id（新玩家出生图）；无地图配置时为空串。 */
+  defaultMapId: string;
 
   gameDef: LoadedGameDefinition;
   archetypes: ArchetypeRegistry;
@@ -78,6 +92,9 @@ export function createGameWorld(fixedDtMs: number): GameWorld {
     },
     metrics: createMetrics(),
     logger: createLogger("world"),
+    maps: {},
+    activeMaps: new Set(),
+    defaultMapId: "",
     systemRuntimes: new Map(),
     nextNetworkId: 1,
     runtimeEvents: [],
