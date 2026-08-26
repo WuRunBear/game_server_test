@@ -3,7 +3,7 @@
  * 完整说明架构位置、玩家管理/输入处理/快照构建/持久化等职责，此处不重复）。
  */
 import { query } from "bitecs";
-import { NetworkId, Velocity, Inventory, Intent, Health } from "components";
+import { NetworkId, Velocity, Inventory, Intent, Health, entityMapOf } from "components";
 import { spawnEntity } from "framework/entities/spawn";
 import { destroyEntity } from "framework/entities/destroyEntity";
 import { createGameInstance, type GameInstance } from "framework/bootstrap/GameInstance";
@@ -21,7 +21,6 @@ import { deconstructEntity } from "framework/systems/gameplay/deconstructSystem"
 import { advanceDialogue } from "framework/systems/gameplay/dialogueSystem";
 import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
 import { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
-import { ensureMapActive } from "framework/map/switchMap";
 import type { Repository } from "framework/repository";
 import type { ServerRule } from "framework/config/schema/RuleSchema";
 import { computeInterest } from "./interest";
@@ -146,14 +145,8 @@ export class GameSimulation implements SimulationPort {
     this.repository = options?.repository;
     this.saveId = options?.saveId;
     if (options?.initialRecord) {
+      // 读档侧地图激活由 restoreWorld 按实体归属自行处理（todo 15）。
       this.orphanPlayerEids = restoreWorld(this.world, options.initialRecord);
-      // 读档地图还原：存档实体是用户状态，仅确保存档图已激活（不清场；清场只属于 portal 场景切换）
-      const savedMapId = options.initialRecord.mapId;
-      if (savedMapId && savedMapId !== this.world.map?.id) {
-        if (!ensureMapActive(this.world, savedMapId)) {
-          this.world.logger.warn("读档地图不存在，保持当前地图", { savedMapId });
-        }
-      }
     }
 
     const serverRules = this.world.gameDef.resolvedRules["server"] as ServerRule | undefined;
@@ -214,10 +207,14 @@ export class GameSimulation implements SimulationPort {
 
     this.maybeAutosave(dtMs);
 
-    let interest: Map<string, number[]> | undefined;
-    if (this.viewRadius !== undefined && this.playerEidBySessionId.size > 0) {
-      interest = computeInterest(this.world, this.playerEidBySessionId, snapshot, this.viewRadius);
-    }
+    // 恒计算 interest：客户端恒按 per-client 可见集同步（未配 viewRadius 时以
+    // 无穷半径视为全量可见；同图过滤由 todo 11 完成）。
+    const interest = computeInterest(
+      this.world,
+      this.playerEidBySessionId,
+      snapshot,
+      this.viewRadius ?? Number.POSITIVE_INFINITY,
+    );
 
     return {
       snapshot,
@@ -253,6 +250,7 @@ export class GameSimulation implements SimulationPort {
       eid = spawnEntity(this.world, archetype, this.componentRegistry, {
         x: playerSpawn.x,
         y: playerSpawn.y,
+        mapId: this.world.defaultMapId,
       });
     }
 
@@ -466,10 +464,14 @@ export class GameSimulation implements SimulationPort {
   private buildSnapshot(): TickSnapshot {
     const tick = this.world.time.tick;
     const entities = new Map<number, EntitySnapshot>();
+    const playerMaps = new Map<string, string>();
+    for (const [sessionId, eid] of this.playerEidBySessionId) {
+      playerMaps.set(sessionId, entityMapOf(this.world, eid));
+    }
 
     // 无同步配置 → 空快照（客户端看不到实体）
     if (this.netSyncFields.length === 0) {
-      return { tick, entities, timeOfDay: { ...this.world.time.timeOfDay }, mapId: this.world.map?.id };
+      return { tick, entities, timeOfDay: { ...this.world.time.timeOfDay }, playerMaps };
     }
     for (const field of this.netSyncFields) {
       const comp = this.componentRegistry.get(field.component) as
@@ -478,10 +480,10 @@ export class GameSimulation implements SimulationPort {
         | undefined;
       if (!comp) continue;
 
-      const ensure = (id: number): EntitySnapshot => {
+      const ensure = (id: number, eid: number): EntitySnapshot => {
         let snap = entities.get(id);
         if (!snap) {
-          snap = { values: {}, strings: {} };
+          snap = { values: {}, strings: {}, mapId: entityMapOf(this.world, eid) };
           entities.set(id, snap);
         }
         return snap;
@@ -492,7 +494,7 @@ export class GameSimulation implements SimulationPort {
         const adapter = getAosSyncAdapter(field.component);
         if (!adapter) continue;
         for (const eid of this.queryByTags(field.tags)) {
-          const snap = ensure(NetworkId.value[eid]);
+          const snap = ensure(NetworkId.value[eid], eid);
           const result = adapter(this.world, eid, field.fields);
           Object.assign(snap.values, result.numbers);
           Object.assign(snap.strings, result.strings);
@@ -503,7 +505,7 @@ export class GameSimulation implements SimulationPort {
       // SoA 组件：按该组件查询实体（含 NetworkId），读标量数值
       for (const eid of query(this.world, [NetworkId, comp as object])) {
         const id = NetworkId.value[eid];
-        const snap = ensure(id);
+        const snap = ensure(id, eid);
         for (const fname of field.fields) {
           const arr = (comp as Record<string, { [eid: number]: number }>)[fname];
           if (typeof arr === "object" && eid in arr) {
@@ -517,7 +519,7 @@ export class GameSimulation implements SimulationPort {
       tick,
       entities,
       timeOfDay: { ...this.world.time.timeOfDay },
-      mapId: this.world.map?.id,
+      playerMaps,
     };
   }
 

@@ -90,6 +90,11 @@ export interface EntitySnapshot {
   values: Record<string, number>;
   /** 字符串字段（AoS 适配器展平出的 kind / need 名等）。 */
   strings: Record<string, string>;
+  /**
+   * 实体所属地图 id（entityMapOf：实体无归属时回退世界默认图）。
+   * 传输层按玩家各自的地图过滤 per-client 可见实体（todo 11/13）。
+   */
+  mapId: string;
 }
 
 /**
@@ -118,10 +123,11 @@ export interface TickSnapshot {
    */
   timeOfDay?: { hour: number; phase: number };
   /**
-   * 当前地图 id（world.map.id，无地图时为 undefined）。
-   * 传输层据此同步 RoomState.mapId 并处理地图级缓存失效（如调试碰撞体）。
+   * 每玩家地图状态：sessionId → 该玩家当前所属地图 id。
+   * 房间级 mapId 已随 tick 快照移除——地图语义按玩家拆分（per-player maps）；
+   * 传输层据此同步各玩家协议并处理 per-client 缓存失效（todo 13）。
    */
-  mapId?: string;
+  playerMaps: Map<string, string>;
 }
 
 /**
@@ -171,4 +177,6 @@ export interface SimulationOptions {
 export interface DebugSnapshotOptions {
   /** 是否包含地图静态碰撞体（首次订阅时为 true，后续推送为 false） */
   includeMapBodies?: boolean;
+  /** 指定地图 id（缺省为世界默认图，见 getCollisionDebugSnapshot）。 */
+  mapId?: string;
 }

@@ -323,12 +323,7 @@ export class GameRoom extends Room<{ state: RoomState }> {
       this.state.hour = snapshot.timeOfDay.hour;
       this.state.phase = snapshot.timeOfDay.phase;
     }
-    // 地图切换：同步 mapId 并让已订阅调试的客户端重拉地图碰撞体
-    const nextMapId = snapshot.mapId ?? "";
-    if (nextMapId !== this.prevMapId) {
-      this.state.mapId = nextMapId;
-      this.onMapChanged();
-    }
+    // 房间级 mapId 检测随 TickSnapshot.mapId 移除（todo 10）；per-client 同步由 todo 13 完成。
 
     if (result.interest) {
       this.applyInterest(result);
