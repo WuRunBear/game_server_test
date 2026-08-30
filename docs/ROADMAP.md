@@ -1,8 +1,8 @@
 # 通用 2D 游戏框架系统路线图
 
 > 目标：将当前框架演进为通用 2D 游戏框架。
-> Phase 0（切片前止血）已完成 5 个框架级缺陷修复；Slice 1（生存循环）、Slice 2（战斗闭环）、Slice 3（合成与装备）、Slice 4（世界氛围）、Slice 5（联机完整度）、Slice 6（建造与场景切换）与 Slice 7（社交进度）已完成。
-> 现状：8 个内置核心系统 + Slice 1 新增 2 个生存系统（needDecay / gathering）+ Slice 2 新增 3 个系统（perception / death / respawn）+ Slice 3 新增 1 个系统（equipment）+ Slice 4 新增 1 个系统（dayNight）+ Slice 6 新增 1 个系统（portal）+ Slice 7 新增 1 个系统（quest），共 17 个内置系统；crafting / placeable / deconstruct / dialogue 为命令驱动的原子模块（无 tick 体，inventoryOps 先例）；persistence / interest / 输入校验为仿真层能力（定时存档 / 视野裁剪 / 输入拦截——异步 I/O 与输入校验不入 ECS tick 系统）。
+> Phase 0（切片前止血）已完成 5 个框架级缺陷修复；Slice 1（生存循环）、Slice 2（战斗闭环）、Slice 3（合成与装备）、Slice 4（世界氛围）、Slice 5（联机完整度）、Slice 6（建造与场景切换）、Slice 7（社交进度）、Slice 8（per-player 地图）与地图系统重设计（MapGeometry 五层架构）已完成。
+> 现状：16 个内置系统（spawningSystem 已退役——实体生产职责移交地图演化引擎，见下文地图系统重设计条目）；crafting / placeable / deconstruct / dialogue 为命令驱动的原子模块（无 tick 体，inventoryOps 先例）；persistence / interest / 输入校验为仿真层能力（定时存档 / 视野裁剪 / 输入拦截——异步 I/O 与输入校验不入 ECS tick 系统）。
 > 详见下文「已有系统状态」。
 
 ## 一、核心仿真
@@ -82,7 +82,7 @@
 
 ### ✅ 已有
 - physics、movement、collision、ai(BT 绑定 action + condition)
-- combat（Slice 2 重构：`attackTarget` 攻击原子（射程/冷却/友伤/公式），不再自动攻击；BT Attack 与玩家 attack 意图共用）、spawning（按 kind/多边形过滤已补齐，计数不限 NPC）
+- combat（Slice 2 重构：`attackTarget` 攻击原子（射程/冷却/友伤/公式），不再自动攻击；BT Attack 与玩家 attack 意图共用）、spawning（**已退役**——旧 spawningSystem 及其 SpawnRule 配置随地图系统重设计删除，实体生产职责移交地图演化引擎，见下文「地图系统重设计」）
 - perception（Slice 2：视野内最近敌对写黑板 `perception.target`，供 BT 决策）
 - death / respawn（Slice 2：统一死亡处理——LootTable 掷骰掉落 + 非玩家移除 + 玩家原地重生（标记→重置 Health/位置/Needs，同 networkId））
 - needDecay（Slice 1：按名衰减 Needs + 归零扣 Health；Slice 2 起不再自行移除，死亡统一归 deathSystem）
@@ -92,7 +92,7 @@
 - equipment（Slice 3：equipSlot 穿戴原子 + getEquipModifiers 加成读取（on-read，组件值不变）+ tick 体槽位引用卫生；加成经 ItemKindSchema.equip 声明）
 - crafting（Slice 3：craftRecipe 原子模块，PlayerCommand `craft` 驱动；站类型/距离校验、缺料/满包拒零副作用、dry-run 防满包丢产出；recipes 经 CraftingRuleSchema 校验 + validateIntegrity 引用检查）
 - dayNight（Slice 4：dayNightCycleSystem 推进 world.time.timeOfDay（hour/phase 二进制）；DayNightRuleSchema 校验；RoomState hour/phase 同步）
-- spawning condition（Slice 4：SpawnRuleJson 可选 `condition` 字段 → spawnConditions 注册表（isNight 内建）；condition 不满足不刷但不重置计时器；validateIntegrity 校验）
+- spawning condition（Slice 4：SpawnRuleJson 可选 `condition` 字段 → spawnConditions 注册表（isNight 内建）；condition 不满足不刷但不重置计时器；validateIntegrity 校验。**现状**：SpawnRule 已随 spawningSystem 退役删除，condition 门控机制由 EntityRule.condition 继承——经同一 spawnConditions 注册表求值，每 evolve 调用一次）
 - placeable（Slice 4：placeEntity 原子模块，PlayerCommand `place` 驱动；ItemKindSchema.place 声明目标 archetype；距离（rules/place.json）/实体重叠/地图阻挡校验零副作用 → 消耗 1 → spawn）
 - 光源机制（Slice 4）：LightSource（radius/fuelRemainingMs，≤0 熄灭）+ Placeable（footprintW/H/canCollide）；火光回避 = 感知侧通用约定（目标在有效光源半径内不可感知）
 - AoS 组件家族（Inventory / Kind / Needs / ResourceNode / ItemMeta / Intent / LootTable）+ spawn AoS 初始化钩子（Inventory/Needs/ResourceNode/LootTable 注册了钩子；ItemMeta/Intent/Kind 由运行时写入）
@@ -113,6 +113,13 @@
 - quest（Slice 7）：questSystem tick 体（collect 背包计数 / kill 击杀事件计数，ACTIVE→READY）+ accept/submit 原子（collect 消耗 + 奖励 dry-run + 好感 + DONE）；Quest AoS 组件挂玩家（持久入档）；game/dialogues/*.json + game/quests/*.json 配置段 + validateIntegrity 引用校验
 - relation（Slice 7）：Relation AoS 组件挂玩家（npcKind/value，持久入档）+ addRelation/getRelation 原子；任务提交/对话效果写入
 - PlayerInput.talk（Slice 7）：新对话意图（talk）→ interactionSystem 路由最近 NPC；GameRoom isPlayerInput/isPlayerCommand 白名单扩展
+- 地图系统重设计（MapGeometry 五层架构，详见「已有系统状态」）：
+  - geometry 数据层（MapGeometry 不可变几何 + walkableAt/regionOf/tileAt 纯函数查询 + serializeGeometry/deserializeGeometry 快照 + fnv1a32 内容指纹 version）
+  - generate 生成层（GeometryDraft/GenerationContext + buildMapGeometry(config, registry) 管道执行器 + validate 结构校验 + 生成积木注册表 + xmur3/mulberry32 种子派生；内置四积木 noise-terrain / climate-regions / room-corridor / tiled-source）
+  - evolution 演化层（EntityRule density/exact/template/condition + pickPoint 确定性选点（候选序列纯函数 + 32 次上限）+ evolve 补差引擎（槽绝对对齐、(from, to] 边界、只增不删早退、template 整组原子））
+  - runtime 运行时（bootMaps 开机唯一分支地 + 引用校验（含 portal 配对 Chebyshev ≤ 2）+ pickSpawnPosition 出生服务 + clock 离线折算 + evolveDeps 真实依赖装配）
+  - 持久化集成（WorldRecord.maps 地理快照与实体同盘 + 离线补差 computeOfflineTicks → 单次 evolve → advanceTickTo）
+  - 网络接口（/maps/meta + /maps/runtime 由 MapGeometry 提供数据，x-map-version 缓存头，未知图 404）
 - logger
 
 ### ❌ 缺口最大三类
@@ -138,11 +145,24 @@
 >
 > **Slice 5（联机完整度）已完成**：持久化（worldSerializer 世界快照 + Repository/WorldRecord 接口 + createFileRepository 真实现，postgres/redis 适配接口留 stub；GameSimulation 定时存档 saveIntervalMs + 读档恢复 + 玩家 addPlayer 复用绑定，networkId 保留）；兴趣管理（computeInterest 按 viewRadius 裁剪、own 恒可见；GameRoom 双路径——有规则写 per-client PlayerState.visibleEntities，无规则保留 RoomState.entities 全量广播兼容旧协议）；输入校验（maxMoveSpeed 超速拒 + maxCommandsPerSec 命令频率 tick 窗口限流，被拒记日志）。server 规则经 ServerRuleSchema 校验。审查修复：兴趣裁剪 per-client 用 schema 4 `$filter` 实例级过滤（VisibleEntities 子类 + client.view 挂 sessionId）、destroyEntity 统一实体销毁（AoS 残留清理防存档污染）、存档畸形防御与写盘串行化、频率窗口 off-by-one、NetworkId 入瞬态名单。验收 `pnpm test`（173 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空（blackboard 技术词除外）。核心 Demo 至此贯通。
 >
-> **Slice 6（建造与场景切换）已完成**：静态碰撞修复（无 Velocity 实体注册静态碰撞体——墙不被玩家顶走，建造前置）；建造闭环（placeEntity 扩展：gridSnap 网格对齐 + GridOccupancy 格组占用校验/写入 + Placeable.ownerNetworkId 所有权；deconstruct 拆除原子——仅放置者可拆，PlayerCommand `deconstruct` + target）；场景切换（Portal AoS 组件 + portalSystem tick + switchMap 原子 setWorldMap/enterMap——清场保留玩家内容 Player/Placeable/ItemMeta、按新图布置、传送玩家、地图相关缓存选择性重建；loadGameDefinition 多地图解析 resolvedMapSources；WorldRecord.mapId 存档 + 读档切回；TickSnapshot/RoomState.mapId + GameRoom 换图强制重拉碰撞体；SpawnRule.mapId 限定生效地图）。game：wall/floor/door/fence/furniture/portal/portal_back + 5 个 kit 物品与配方 + place.json gridSnap + cave 地图 + 分图 populations。审查修复：portal 触发死锁（严格小于触发判定与 SAT 分离互斥——portal 去 Collider + 接触判定 <= + 完整 tick 链集成用例）、换图缓存改选择性重建（保留 death 重生标记）、读档地图无效告警。验收 `pnpm test`（187 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空（blackboard 技术词除外）。
+> **Slice 6（建造与场景切换）已完成**：静态碰撞修复（无 Velocity 实体注册静态碰撞体——墙不被玩家顶走，建造前置）；建造闭环（placeEntity 扩展：gridSnap 网格对齐 + GridOccupancy 格组占用校验/写入 + Placeable.ownerNetworkId 所有权；deconstruct 拆除原子——仅放置者可拆，PlayerCommand `deconstruct` + target）；场景切换（Portal AoS 组件 + portalSystem tick + switchMap 原子 setWorldMap/enterMap——清场保留玩家内容 Player/Placeable/ItemMeta、按新图布置、传送玩家、地图相关缓存选择性重建；loadGameDefinition 多地图解析 resolvedMapSources；WorldRecord.mapId 存档 + 读档切回；TickSnapshot/RoomState.mapId + GameRoom 换图强制重拉碰撞体；SpawnRule.mapId 限定生效地图）。game：wall/floor/door/fence/furniture/portal/portal_back + 5 个 kit 物品与配方 + place.json gridSnap + cave 地图 + 分图 populations。审查修复：portal 触发死锁（严格小于触发判定与 SAT 分离互斥——portal 去 Collider + 接触判定 <= + 完整 tick 链集成用例）、换图缓存改选择性重建（保留 death 重生标记）、读档地图无效告警。验收 `pnpm test`（187 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空（blackboard 技术词除外）。（**状态注记**：本切片的房间级切图语义（setWorldMap/enterMap 全员换图）、SpawnRule.mapId、分图 populations 配置与 WorldRecord.mapId 回退，已被后续 Slice 8（per-player 化）与地图系统重设计**取代并删除**；静态碰撞、建造闭环与 portal per-player 触发保留至今。）
 >
 > **Slice 7（社交进度）已完成**：对话（dialogueSystem 原子模块——startDialogue/advanceDialogue + 选项效果 quest_accept/quest_submit/relation_delta，失败不推进；Dialogue AoS 瞬态会话组件挂玩家 + DialogueSource AoS 挂 NPC；PlayerInput.talk 新交互键 + interactionSystem talk 路由 + PlayerCommand `dialogue`）；任务（questSystem——collect 背包计数/kill 击杀事件计数两种目标形态，accept/submit 原子：collect 消耗 + 奖励 dry-run + 好感 + DONE；Quest AoS 持久组件挂玩家；game/dialogues + game/quests 配置段 + validateIntegrity 引用校验）；好感（Relation AoS 持久组件 + addRelation/getRelation）；帧内事件总线（world.runtimeEvents + emitEvent/consumeEvents，combatSystem 致命一击 emit killed 事件）。game：villager 对话树（接/交任务）+ quests.json（collect_axe/hunt_task）+ netSync 4 条。审查修复：对话选项 to 引用校验（validateIntegrity + 运行时先解析目标再执行效果，无效 to 停留不关会话）、AoS 适配器快照断言补强。faction/achievement/progression 记录不修（无真实需求牵引）。验收 `pnpm test`（199 项）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空（blackboard 技术词除外）。下一切片按需开启。
 >
 > **Slice 8（per-player 地图）已完成**：每玩家地图归属（EntityMap AoS 组件 + `entityMapOf(world, eid)` 回退默认图——实体按所属地图分区：同图互相可见/交互/共享生态，跨图不可见/不可碰撞/不可互伤/不可交互/不可拾取；世界保持单一共享 ECS，**非每玩家私有世界副本**）。常驻模拟（`world.activeMaps` 里的图即使无玩家也照常运行碰撞/刷怪系统；地图经 `world.maps` 惰性构建缓存 + `ensureMapActive` 激活，不开机预建全部图）。协议断代（`PlayerState.mapId` 同步玩家当前地图；`RoomState.mapId/entities` 移除、实体同步恒走 per-client `PlayerState.visibleEntities`——旧客户端不兼容）。持久化分图（实体地图按 `EntityMap` 入档/恢复，恢复后按实体归属激活各图；`WorldRecord.mapId` 降级为旧档迁移回退——新档实体归属以 `components["EntityMap"]` 为准）。portal 触发改 per-player（同图相交只移动触发玩家，无乒乓冷却——最小实现原则记录为已知行为）。验收 `pnpm test`（30 文件 330 项全通过——已含 16 个 per-player 新测试文件，房间级旧语义用例已翻转）+ `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空（blackboard 技术词除外）。
+>（**状态注记**：本切片的地图生命周期语义——`ensureMapActive` 惰性构建、`spawnInitialNpcs` 布置、`WorldRecord.mapId` 回退——已被下文「地图系统重设计」**取代并删除**；per-player 归属（EntityMap/entityMapOf）与协议断代语义保留至今。）
+>
+> **地图系统重设计（MapGeometry 五层架构）已完成**：旧地图系统（MapRuntime/buildRuntime/generatorRegistry 旧表/registerGenerator 公共 API/`game/spawns/populations.json`/spawningSystem）**全部删除**（393d058），替换为五层架构——
+> - **geometry 数据层**：不可变 `MapGeometry`（key/grid/tiles/walkable/regions/regionOfTile/version）；regions Map 插入序 = regionOfTile 索引序；`walkableAt/regionOf/tileAt` 纯函数查询（越界安全）；`serializeGeometry/deserializeGeometry` 纯 JSON 快照；`computeGeometryVersion` fnv1a32 内容指纹（8 位十六进制，key 与 version 不参与）。
+> - **generate 生成层**：`GeometryDraft`（可变草稿）→ 管道执行器 `buildMapGeometry(config, registry)`（每步从 seed+步骤序号派生独立随机流）→ `validateMapGeometry` 出口结构校验 → 冻结 + 指纹；生成积木注册表（名 → `(ctx: GenerationContext) => void`）；内置四积木：noise-terrain（bandLevel+groundPalette+nonWalkableSemantics）、climate-regions（names[] 序 = 区域索引序，隐式 wilderness）、room-corridor（地形级雕挖 + union-find 连通）、tiled-source（Tiled JSON 加载期内联降级为积木，积木无文件 I/O）。
+> - **evolution 演化层**：`EntityRule`（map/region/kind/max/every/mode=density|exact|template/condition/template/at）补差引擎——槽绝对对齐 timeSlot、(from, to] 槽边界、只增不删早退不变式、template 整组原子；`pickPoint` 候选序列是 (seed, mapKey, ruleId, timeSlot) 纯函数 + 32 次尝试上限。
+> - **runtime 运行时**：`bootMaps` 开机唯一分支地（有档按快照回填 / 无档生成 + 初始演化 0 → initialAgeTicks；全图常驻 activeMaps）+ 引用校验（规则 kind/region/map、exact 落点可走、portal 配对 Chebyshev ≤ 2）+ 首份 WorldRecord 装配；`pickSpawnPosition`（random/seededRandom/exact，像素坐标）；`clock.ts` 复用 world.time.tick + `computeOfflineTicks`；`evolveDeps.ts` 真实依赖装配（tile↔像素换算）。
+> - **核心切换**：`createGameSimulation` 改 async（BootDeps { loadRecord, saveRecord } 单一读档通道）；GameInstance.beforeSystems 演化钩子（tick 自增后、系统循环前，`evolve(tick-1, tick)`）；spawningSystem 退役（实体生产唯一路径 = 演化引擎，开机初始演化/每 tick 补差/离线补差共用同一引擎）；出生走规则服务并持久化出生点（SpawnPoint AoS 组件）；`game/maps/entity-rules.json` 新配置段（16 条规则，wolf isNight + 配对传送门）。
+> - **持久化**：`WorldRecord` 新增 `maps`（SerializedMapGeometry，地理快照与实体同盘），复用 savedAt/tick/timeOfDay，旧 `mapId` 字段删除；离线补差 = `computeOfflineTicks`（上限 `DEFAULT_MAX_OFFLINE_TICKS = 1,728,000` ≈ 24h@20tps，截断 + 告警）→ 单次 evolve → `advanceTickTo` 落边界；旧存档直接废弃，无兼容代码。
+> - **网络接口**：/maps/meta 与 /maps/runtime 由 MapGeometry 提供数据（`x-map-version` 缓存响应头，未知图 404，缺省回退默认图）。
+> - **工具链**：gen-map（管道 JSON 快照）/ export-map（真实开机 + JSON+PNG，色表为工具参数）/ validate（每图管道链 + 实体规则数）/ list-registries（「生成积木」段）；`registerGenerator`/`listRegisteredGenerators` 公共 API 删除，自定义积木经 `getRegistries().mapGeneratorRegistry.register()` 注册。
+> - **已知局限（潜在，未触发）**：template 规则锚点跨区域计数边界——spawnTemplate 只校验偏移格可走/未占（可落出 rule.region），而 countByKind 按区域计数，锚点落出区域时每次 evolve 调用会误判「低于 max」再补一组（跨调用无界增长）。当前游戏配置无 template 规则，触发前无影响；修复方向 = 锚点限定区域内或 template 锚计数改全图。
+> - 验证：最终验证波 F1–F4 全部 APPROVE；`pnpm test` 452/452 绿（41 文件，U1–U7/I1–I5 编号覆盖矩阵）+ `pnpm build` + `pnpm tools validate` 全绿；旧符号残留 grep（MapRuntime/ensureMapActive/spawnInitialNpcs/world.map 等）零命中。
 
 **切片内待补全（非框架缺陷）**：
 - （已补全）inventorySystem：堆叠/丢弃/使用已落地（Slice 1）

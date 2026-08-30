@@ -9,7 +9,7 @@ pnpm install
 pnpm dev      # tsx 热重载
 pnpm build    # tsc 编译
 pnpm start    # 运行 dist/src/index.js
-pnpm test     # 运行测试（vitest，43 个用例）
+pnpm test     # 运行测试（vitest，452 个用例）
 ```
 
 默认监听端口 **3000**（见 `framework/config/server.ts`），可通过 `.env` 中 `PORT` 覆盖。
@@ -17,11 +17,11 @@ pnpm test     # 运行测试（vitest，43 个用例）
 ## 工具
 
 ```bash
-pnpm tools validate                    # 校验 game/ 目录下所有配置
+pnpm tools validate                    # 校验 game/ 配置（输出含每图管道链与实体规则数）
 pnpm tools new-game --id my-game       # 生成 game/ + src/ 骨架
-pnpm tools list-registries             # 列出已注册的原型/动作/系统
-pnpm tools gen-map simple --out out/   # 调用生成器产出地图
-pnpm tools export-map --out out/       # 导出当前地图为 JSON + PNG
+pnpm tools list-registries             # 列出已注册的原型/动作/系统/生成积木
+pnpm tools gen-map island --out out/   # 生成地图（参数是地图 key：island/cave/tiled-demo）
+pnpm tools export-map island --out out/ [--palette <file>]  # 导出 JSON+PNG（色表为工具参数）
 ```
 
 ## 架构
@@ -46,21 +46,25 @@ framework/
   world.ts                  # GameWorld 类型 + createGameWorld
   bootstrap.ts              # bootstrapFramework() — 创建并填充所有 registry（模块单例）
   bootstrap/
-    GameInstance.ts         # createGameInstance(gameDef) → { world, systems, step, spawnInitialEntities }
-    loadGameDefinition.ts   # 加载 game.json + zod 校验 + 引用完整性检查
+    GameInstance.ts         # createGameInstance(gameDef) → { world, systems, step, beforeSystems }
+                            # （bootMaps 全量构建地图；step 内 tick 自增后、系统前跑演化钩子）
+    loadGameDefinition.ts   # 加载 game.json + zod 校验 + 引用完整性检查（含实体规则 kind/condition/region）
   simulation/               # 仿真抽象层 — 传输层与 ECS 的解耦接口
     SimulationPort.ts      # 接口: tick / addPlayer / removePlayer / submitInput / getDebugSnapshot
-    GameSimulation.ts       # 实现: 内部聚合 GameInstance + ECS（含定时存档/读档恢复/输入校验接线）
+    GameSimulation.ts       # 实现: 内部聚合 GameInstance + ECS（async 装配：BootDeps 单一读档通道、
+                            #   定时存档/读档恢复/离线补差/输入校验接线、beforeSystems 演化钩子注入）
     types.ts                # 纯数据 DTO: PlayerInput, TickSnapshot, TickResult, SimulationOptions
     interest.ts             # computeInterest — 视野半径裁剪（own 恒可见）
     inputValidation.ts      # 输入校验（anti-cheat）：移动速度上限 + 命令频率 tick 窗口限流
+    aosSyncAdapters.ts      # AoS 组件同步适配器（展平为 numbers/strings，按 tags 限定查询）
     index.ts                # 模块 barrel 导出
   persistence/              # 世界快照持久化
-    worldSerializer.ts      # serializeWorld / restoreWorld（SoA+AoS 全量，瞬态组件跳过，networkId 保真）
+    worldSerializer.ts      # serializeWorld / restoreWorld（SoA+AoS 全量 + 全部地图几何快照 maps 同盘，
+                            #   瞬态组件跳过，networkId 保真）
     fileRepository.ts       # createFileRepository — JSON 文件仓储（默认后端，原子写）
   components/               # ECS 组件 + componentRegistry
     componentRegistry.ts    # 组件注册表: 名 → defineComponent
-    registerBuiltin.ts      # 注册 40 个内置组件
+    registerBuiltin.ts      # 注册 41 个内置组件
     index.ts                # barrel 导出
     transform.ts, size.ts, physics.ts (Velocity/Acceleration/Collider/ColliderShape),
     combat.ts (Health/Attack/Defense/Team), ai.ts (AIState/Target/BlackboardRef),
@@ -69,17 +73,18 @@ framework/
     dialogue.ts / dialogueSource.ts / quest.ts / relation.ts (AoS 对话会话/对话源/任务/好感),
     inventory.ts (AoS 例外), network.ts (NetworkId/LastSynced),
     timer.ts (Cooldown/Duration), tags.ts (Player/Enemy/NPC/Item/Resource),
-    needs.ts / resourceNode.ts / loot.ts / intent.ts / kind.ts / itemMeta.ts / entityMap.ts (AoS 家族)
+    needs.ts / resourceNode.ts / loot.ts / intent.ts / kind.ts / itemMeta.ts / entityMap.ts / spawnPoint.ts (AoS 家族)
   systems/
     systemRegistry.ts       # 系统注册表 + buildSystems (拓扑排序, Kahn 算法)
-    registerBuiltinSystems.ts   # 注册 17 个内置系统
+    registerBuiltinSystems.ts   # 注册 16 个内置系统
     index.ts                # barrel 导出
     core/                   # physicsSystem, movementSystem, collisionSystem
-    gameplay/               # perceptionSystem, aiSystem, combatSystem, spawningSystem,
+    gameplay/               # perceptionSystem, aiSystem, combatSystem,
                             # inventorySystem, interactionSystem, needDecaySystem,
                             # gatheringSystem, deathSystem, respawnSystem, equipmentSystem,
-                            # dayNightCycleSystem
-                            # (craftingSystem / placeableSystem 为命令驱动的原子模块，无 tick 体，不注册为系统)
+                            # dayNightCycleSystem, portalSystem, questSystem
+                            # (craftingSystem / placeableSystem / deconstructSystem / dialogueSystem
+                            #  为命令驱动的原子模块，无 tick 体，不注册为系统)
   entities/
     archetypeRegistry.ts    # 原型注册表: kind → ArchetypeSpec
     registerBuiltinArchetypes.ts   # 注册 player, villager 2 个内置原型
@@ -93,34 +98,52 @@ framework/
     nodes/actions/          # idle.ts, wander.ts, chase.ts, flee.ts, attack.ts, sleep.ts
     nodes/conditions/       # isTargetInVision.ts, inAttackRange.ts, isNight.ts, isInLight.ts
     nodes/steer.ts          # 移动方向/边界钳制共用工具
-  map/
-    types.ts                # MapRuntime / MapSource / MapZone / Vec2
-    tiled.ts                # Tiled JSON 解析 (collision/objects/zones 三层)
-    buildRuntime.ts         # 纯函数: MapSource → MapRuntime
-    generatorRegistry.ts    # 生成器注册表: generatorId → MapGenerator
-    registerBuiltinGenerators.ts   # 注册 simple 默认生成器
-    generated/simple.ts     # 默认程序化地图生成器 (xorshift32 RNG)
-    exportGenerated.ts       # MapRuntime → JSON + PNG (手写 PNG 编码器)
-    index.ts                # barrel 导出
+  map/                      # 地图系统（五层，游戏无关）
+    geometry/               # 数据层 — 不可变 MapGeometry
+      types.ts              # MapGeometry / MapGeometryGrid / RegionMeta（regions Map 插入序 = regionOfTile 索引序）
+      query.ts              # walkableAt / regionOf / tileAt 纯函数查询（越界安全）
+      snapshot.ts           # serializeGeometry / deserializeGeometry（SerializedMapGeometry 纯 JSON 快照）
+      version.ts            # computeGeometryVersion（fnv1a32 内容指纹）+ describeGeometry（/maps/meta 元信息）
+    generate/               # 生成层 — 配置 → 几何的纯生产管线
+      types.ts              # GeometryDraft / GenerationContext / MapGenerator ((ctx) => void)
+      pipeline.ts           # buildMapGeometry(config, registry) — 管道执行 + 冻结 + 内容指纹
+      validate.ts           # validateMapGeometry 结构校验（硬错误抛错，软告警记日志）
+      generatorRegistry.ts  # 生成积木注册表: 名 → MapGenerator
+      rng.ts                # xmur3 + mulberry32 确定性随机流（deriveStream 按 seed+步骤序号派生）
+      registerBuiltin.ts    # registerBuiltinMapGenerators — 注册四个内置积木
+      blocks/               # 内置积木: noiseTerrain.ts（bandLevel+groundPalette+nonWalkableSemantics）、
+                            #   climateRegions.ts（names[] 序 = 区域索引序，隐式 wilderness）、
+                            #   roomCorridor.ts（地形级雕挖 + union-find 连通）、
+                            #   tiledSource.ts（Tiled JSON 降级为积木，无文件 I/O）
+    evolution/              # 演化层 — 实体规则补差引擎
+      schema.ts             # EntityRule（map/region/kind/max/every/mode=density|exact|template/condition/at）
+      placement.ts          # pickPoint 确定性选点（候选序列 = (seed, mapKey, ruleId, timeSlot) 纯函数，32 次上限）
+      engine.ts             # evolve 补差引擎（槽绝对对齐 timeSlot、(from, to] 边界、只增不删早退、template 整组原子）
+    runtime/                # 运行时 — 开机编排与真实依赖装配
+      boot.ts               # bootMaps 开机唯一分支地（快照回填 / 生成+初始演化）+ 引用校验 + 首份 WorldRecord
+      spawn.ts              # pickSpawnPosition（random/seededRandom/exact，返回像素坐标）
+      clock.ts              # advanceTickTo / computeOfflineTicks（复用 world.time.tick，离线上限截断告警）
+      evolveDeps.ts         # createMapEvolveDeps — 引擎依赖接到真实 ECS（tile↔像素换算）
+    switchMap.ts            # movePlayerToMap — per-player 换图 + 传送原子
+    exportGenerated.ts      # exportGeometryArtifacts — MapGeometry → JSON + PNG（色表为工具参数）
   config/
     server.ts               # .env → ServerConfig { port, wsPath, corsOrigins }，默认端口 3000
     game.ts                 # tickRate 静态配置
-    map.ts                  # 地图清单（registry.json）读取
     index.ts                # barrel 导出
-    schema/                 # zod schema: GameDefinition / Archetype / Behavior / / Spawn / MapRegistry / Rule
+    schema/                 # zod schema: GameDefinition / Archetype / Behavior / Rule（含 Server/Player）/ MapRegistry / ItemKind / Dialogue / Quest
   net/
     colyseus/
-      server.ts             # startColyseusServer — HTTP + WebSocket + /health /maps/runtime /debug/colliders
+      server.ts             # startColyseusServer — HTTP + WebSocket + /health /maps/meta /maps/runtime（x-map-version 缓存头） /debug/colliders
       rooms/GameRoom.ts     # 房间: 持有 SimulationPort，委托 tick（纯传输/输入/同步/调试，无 ECS 导入）
       state/                # RoomState, PlayerState, EntityState (Colyseus Schema, 字段按 netSync 配置映射)
     headless/
       HeadlessHost.ts       # runHeadless(sim, opts) — 无传输驱动 tick，返回 TickResult[]
   utils/                    # logger.ts (winston), timer.ts (clampMs)
   metrics.ts                # tick 性能指标 (EMA avg)
-  repository.ts             # Repository 接口 (持久化抽象，WorldRecord 世界快照)
+  repository.ts             # Repository 接口 (持久化抽象，WorldRecord 世界快照，含 maps 地理快照)
   postgres.ts, redis.ts     # 占位 stub（接口已对齐，等真实部署需求）
   bitecs-legacy.d.ts         # bitecs legacy API 手工类型声明
-  __tests__/framework.test.ts   # 43 个测试，20 个 describe 块
+  __tests__/                # 41 个测试文件 / 452 个用例（U1–U7/I1–I5 地图矩阵 + 各切片回归）
 
 src/
   index.ts                  # 入口: dotenv/config → main()
@@ -128,16 +151,14 @@ src/
   register.ts               # 扩展注册入口（当前仅调用 bootstrapFramework()，无自定义扩展）
 
 game/
-  game.json                 # GameDefinition 主入口：tickRate=20, 17 个系统, netSync 配置
+  game.json                 # GameDefinition 主入口：tickRate=20, 16 个系统, map.registry/entityRules/default, netSync 配置
   entities/                 # player, villager, boar, rabbit, berry_bush, tree, water_pool, item, rock, campfire, wolf, wall, floor, door, fence, furniture, portal, portal_back
   behaviors/                # wander-default, boar-hostile, rabbit-flee, wolf-night
-  rules/                    # combat.json, needs.json, respawn.json, crafting.json, daynight.json, place.json (gridSnap), server.json
-  maps/                     # registry.json（generated-map + cave 双地图）
-  spawns/                   # populations.json（wolf 规则带 condition: "isNight"；cave 规则带 mapId）
+  rules/                    # combat.json, needs.json, respawn.json, crafting.json, daynight.json, place.json (gridSnap), server.json, player.json (出生规则)
+  maps/                     # registry.json（island/cave/tiled-demo 三图）+ entity-rules.json（16 条实体演化规则）+ tiled-demo.json
   items/                    # berry, wood, water, raw_meat, stone, axe, stone_axe, spear, berry_pie, cooked_meat, campfire_kit, wall_kit, floor_kit, door_kit, fence_kit, furniture_kit (item kind 数据)
   dialogues/                # villager.json（对话树：接任务/交任务/好感选项）
   quests/                   # quests.json（collect_axe 收集型 / hunt_task 击杀型）
-  maps/                     # registry.json
 
 tools/
   cli.ts                    # 统一 CLI 入口
@@ -150,8 +171,8 @@ tools/
 
 由 `GameRoom.setSimulationInterval` 驱动，每 tick：
 1. 接收客户端输入 → Velocity
-2. `gameInstance.step(dtMs)`
-3. 系统按拓扑排序执行：DayNight → AI → Physics → Movement → Collision → Combat → Spawning → Inventory → Interaction → Equipment
+2. `gameInstance.step(dtMs)`：tick 自增后、系统循环前先跑 beforeSystems 演化钩子（对每张激活图 `evolve(tick-1, tick)` 补差实体）
+3. 系统按拓扑排序执行（game.json 启用序）：DayNight → Perception → AI → Physics → Movement → Collision → Combat → NeedDecay → Inventory → Gathering → Interaction → Equipment → Death → Respawn → Portal → Quest
 4. 同步 ECS 状态 → Colyseus RoomState
 
 ### 配置系统
@@ -166,14 +187,14 @@ Colyseus Schema 每 tick 同步。`EntityState` 的字段通过 `game.json` 的 
 
 由 `game/rules/server.json`（`ServerRuleSchema` 校验）驱动，全部经 `createGameSimulation(gameDef, options)` 注入：
 
-- **持久化**：`saveIntervalMs` + `saveId` 开启定时存档（`worldSerializer` 全量快照 → `createFileRepository` 写 `data/saves/`，可用 `SAVE_DIR` 覆盖目录）；`GameRoom.onCreate` 启动时读档恢复，玩家实体由 `addPlayer` 复用绑定（networkId/进度保留）。实体地图按 `EntityMap` 入档/恢复，恢复后按实体归属激活各图；`WorldRecord.mapId` 保留仅作旧档迁移回退（新档实体归属以 `components["EntityMap"]` 为准）。
+- **持久化**：`saveIntervalMs` + `saveId` 开启定时存档（`worldSerializer` 全量快照 → `createFileRepository` 写 `data/saves/`，可用 `SAVE_DIR` 覆盖目录）；`createGameSimulation` 是 async，装配处预载存档并经 `BootDeps { loadRecord, saveRecord }` 单一通道注入 bootMaps 与 restoreWorld。`WorldRecord` 含 `maps`（全部地图几何快照，与实体同盘）并复用 `savedAt/tick/timeOfDay`；读档时 bootMaps 按快照回填各图、restoreWorld 恢复实体与全局时刻，玩家实体由 `addPlayer` 复用绑定（networkId/进度保留）。实体地图归属唯一来源 = 各实体 `EntityMap`（旧 `WorldRecord.mapId` 字段已删除，旧存档直接废弃，无兼容代码）。读档后按墙钟离线补差：`computeOfflineTicks`（上限 `DEFAULT_MAX_OFFLINE_TICKS = 1,728,000` ≈ 24h@20tps，超限截断 + 告警）→ 单次 `evolve` → `advanceTickTo` 落边界。
 - **兴趣管理**：`interest` 恒计算（`computeInterest` 经 `GameSimulation.tick` 调用——先按玩家所属地图过滤，再可选按 `viewRadius` 半径裁剪；未配置 `viewRadius` 时同图全量）。每个客户端经 `PlayerState.visibleEntities` 收取本图可见实体（own 恒可见）；`PlayerState.mapId` 同步玩家当前地图；`RoomState.mapId/entities` 已移除（协议断代，旧客户端不兼容——实体同步恒走 per-client 可见表）。
 - **输入校验**：`maxMoveSpeed` 超速输入被拒（记日志）、`maxCommandsPerSec` 命令频率限流；未配置时不校验。
 
 ### 建造与场景切换
 
 - **建造**：`place` 命令（`ItemKindSchema.place` → `placeableSystem.placeEntity`）放置 Placeable 实体——`rules/place.json` 的 `gridSnap` 开启时占位矩形对齐地图网格（`GridOccupancy` 格组写入 + 同格重放被拒，墙/地板可无缝拼接）；`deconstruct` 命令（`deconstructSystem`）拆除，仅放置者可拆（`Placeable.ownerNetworkId`，0=世界物不可拆，不返还材料）。静态碰撞：无 `Velocity` 的实体（建筑/资源）注册为静态碰撞体，不会被推开。
-- **场景切换**：`Portal` 组件（AoS，声明 targetMap + 传送坐标）+ `portalSystem` tick 逐配对检测「玩家与 portal 同图（entityMapOf 相等）且 AABB 相交」→ `movePlayerToMap`（`framework/map/switchMap.ts`）只移动触发玩家（换图 + 传送，可省略 dest 缺省目标图出生点），不同玩家互不影响（per-player 语义：任一玩家触发只切换自身地图）。房间级语义（`enterMap`/`setWorldMap` 全员换图/清场）已移除；地图生命周期改为 `ensureMapActive`（`world.maps` 惰性构建缓存 + `world.activeMaps` 常驻激活）+ `spawnInitialNpcs`。存档记录 `mapId` 作旧档迁移回退——实体地图按 `EntityMap` 入档，读档按实体归属激活各图。刷怪规则带 `mapId` 限定生效地图（缺省作用于全部激活图）。玩家当前地图经 `PlayerState.mapId` 同步给客户端。
+- **场景切换**：`Portal` 组件（AoS，声明 targetMap + 传送坐标）+ `portalSystem` tick 逐配对检测「玩家与 portal 同图（entityMapOf 相等）且 AABB 相交」→ `movePlayerToMap`（`framework/map/switchMap.ts`）只移动触发玩家（换图 + 传送，可省略 dest 缺省目标图几何中心），不同玩家互不影响（per-player 语义：任一玩家触发只切换自身地图）。传送门实体由演化引擎 exact 规则布置（固定落点），开机 bootMaps 校验配对可达（落点指向对端门邻近格，Chebyshev ≤ 2）与目标图存在性。全部配置图开机即构建并常驻 `world.activeMaps`（空图也照常演化/碰撞）；玩家当前地图经 `PlayerState.mapId` 同步给客户端。
 
 ### 对话与任务（社交进度）
 
@@ -191,13 +212,39 @@ Colyseus Schema 每 tick 同步。`EntityState` 的字段通过 `game.json` 的 
 在 `src/register.ts` 中通过框架公共 API 注册：
 
 ```ts
-import { registerSystem, registerComponent, registerAction, registerGenerator, registerRuleModule } from "framework";
+import { registerSystem, registerComponent, registerAction, registerRuleModule } from "framework";
 
 registerComponent("Hunger", Hunger);
 registerSystem({ id: "hunger", factory: (world) => hungerSystem(world), after: ["combat"] });
 registerAction("Flee", createFleeAction);
-registerGenerator("dungeon", generateDungeon);
 registerRuleModule("damage-formula", customDamageFormula);
+```
+
+### 自定义生成积木
+
+地图内容由生成积木管道产出（`game/maps/registry.json` 的 `pipeline[].generator` 引用积木注册名）。框架内置四积木（noise-terrain / climate-regions / room-corridor / tiled-source）经 `framework/map/generate/registerBuiltin.ts` 的 `registerBuiltinMapGenerators` 接线；自定义积木实现 `MapGenerator` 签名并注册到同一注册表实例：
+
+```ts
+import type { GenerationContext } from "map/generate/types";
+import { getRegistries } from "framework";
+
+// 积木：向 ctx.geometry 草稿累积写入地理数据，无返回值
+function maze(ctx: GenerationContext): void {
+  // 首积木负责设定尺寸并分配缓冲；后续积木在其上改写
+  // ctx.rng 是本步骤的独立确定性随机流（同 seed 同产出）
+  // ctx.params 是该步骤在 registry.json 里声明的自有参数切片
+}
+
+// bootstrapFramework() 之后注册（幂等单例注册表）
+getRegistries().mapGeneratorRegistry.register("maze", maze);
+```
+
+然后在 `game/maps/registry.json` 的管道中引用：
+
+```json
+{ "kind": "pipeline", "seed": 7, "initialAgeTicks": 0,
+  "pipeline": [ { "generator": "noise-terrain", "params": { "width": 64, "height": 64, "tileWidth": 16, "tileHeight": 16, "bandLevel": 0.35, "groundPalette": { "1": 0.35, "2": 1 }, "nonWalkableSemantics": [1] } },
+                { "generator": "maze" } ] }
 ```
 
 ### 配置实体
