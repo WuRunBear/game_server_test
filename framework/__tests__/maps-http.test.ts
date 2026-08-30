@@ -1,14 +1,17 @@
 /**
- * 地图 HTTP 端点测试（framework/__tests__/maps-http.test.ts）。
+ * 地图 HTTP 端点测试（/maps/runtime 与 /maps/meta，MapGeometry 数据源）。
  *
- * 覆盖 /maps/runtime 与 /maps/meta 两个调试端点：
- * - ?mapId=cave 返回 cave 数据（32×32，chunks 解码后共 1024 字节）；
- * - 缺省 mapId 回退注册表默认图 generated-map（64×64）；
- * - 未知 mapId → 404 {error:"unknown map", available:[...]}；
- * - version 稳定性（同内容恒定、内容变化即变，直接测 computeMapVersion 纯函数）；
- * - /maps/meta 与 /maps/runtime 的 version 一致（两张图都验）；
- * - chunks 解码总字节数 = width×height；
- * - /maps/meta 响应形状（default / maps 字段）。
+ * 覆盖：
+ * - /maps/meta：列出全部配置图（island/cave/tiled-demo），字段
+ *   id/name/kind/width/height/tileWidth/tileHeight/version 齐全，kind 为
+ *   生成管道首积木注册名，default = game.json map.default；
+ * - /maps/runtime?mapId=<key>：响应体 = serializeGeometry 快照形状
+ *   （key/grid/tiles/walkable/regions/regionOfTile/version），与测试侧按
+ *   同一配置 + 同一积木注册表确定性重建的几何逐字段一致（即与仿真
+ *   world.maps 同源同内容）；x-map-version 响应头 = geometry.version；
+ * - version 稳定性：同图两次请求一致，且与 /maps/meta 一致；
+ * - 未知 mapId（含空串）→ 404 {error, available}，不静默顶替默认图；
+ * - 请求 key 决定响应：不同图数据互不串扰；缺省 mapId → 默认图。
  *
  * 服务器启动方式：vi.hoisted 先于本文件全部静态导入执行，把 PORT 置为 0
  * （config/server.ts 的 serverConfig 在模块导入时读取 process.env.PORT），
@@ -19,12 +22,17 @@ import http from "node:http";
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { bootstrapFramework } from "framework/index";
-import { MAP_CHUNK_SIZE } from "map";
+import { bootstrapFramework, getRegistries } from "framework/bootstrap";
+import { loadGameDefinition } from "framework/bootstrap/loadGameDefinition";
+import type { MapConfig } from "framework/config/schema/MapRegistrySchema";
+import { serverConfig } from "config";
+import { buildMapGeometry } from "map/generate/pipeline";
+import {
+  deserializeGeometry,
+  serializeGeometry,
+  type SerializedMapGeometry,
+} from "map/geometry/snapshot";
 import { computeGeometryVersion } from "map/geometry/version";
-import { getMapGeometryFromConfig, listMapIdsFromConfig, serverConfig } from "config";
-import type { MapChunk } from "map";
-import type { MapGeometry } from "map/geometry/types";
 import type { ColyseusServer } from "framework/net/colyseus/server";
 import type { Logger } from "utils/logger";
 
@@ -33,26 +41,15 @@ vi.hoisted(() => {
   process.env.PORT = "0";
 });
 
-/** /maps/runtime 响应形状（服务端契约）。 */
-interface RuntimeResponse {
-  id: string;
-  name: string;
-  grid: { width: number; height: number; tileWidth: number; tileHeight: number };
-  version: string;
-  chunks: MapChunk[];
-}
-
-/** /maps/meta 单图条目形状（generated kind 的 width/height/seed 等必在）。 */
+/** /maps/meta 单图条目形状（服务端契约，字段自本切片起定死）。 */
 interface MetaMapEntry {
   id: string;
   name: string;
   kind: string;
-  width?: number;
-  height?: number;
-  tileWidth?: number;
-  tileHeight?: number;
-  generatorId?: string;
-  seed?: number;
+  width: number;
+  height: number;
+  tileWidth: number;
+  tileHeight: number;
   version: string;
 }
 
@@ -77,6 +74,7 @@ const stubLogger: Logger = {
 
 let colyseus: ColyseusServer | undefined;
 let baseUrl = "";
+let gameDef: ReturnType<typeof loadGameDefinition>;
 
 /** 等待 http.Server 进入监听状态（启动已在 startColyseusServer 内异步发起）。 */
 function waitForListen(server: http.Server): Promise<void> {
@@ -95,24 +93,30 @@ function waitForListen(server: http.Server): Promise<void> {
   });
 }
 
-/** 解码单个块的 base64 data 为原始字节。 */
-function decodeChunk(chunk: MapChunk): Uint8Array {
-  return new Uint8Array(Buffer.from(chunk.data, "base64"));
+/**
+ * 测试侧按同一配置 + 同一积木注册表确定性重建几何并序列化——与端点数据源
+ * （服务端同配置重建）及仿真 world.maps（bootMaps 同配置构建）同源同内容。
+ */
+function expectedSnapshot(config: MapConfig): SerializedMapGeometry {
+  return serializeGeometry(buildMapGeometry(config, getRegistries().mapGeneratorRegistry));
 }
 
-/** 解码全部块并求和字节数（契约：总字节数 = width×height）。 */
-function totalChunkBytes(chunks: MapChunk[]): number {
-  return chunks.reduce((sum, chunk) => sum + decodeChunk(chunk).length, 0);
-}
-
-/** 请求 /maps/runtime（mapId 省略则不拼查询参数）。 */
-async function getRuntime(mapId?: string): Promise<{ status: number; body: RuntimeResponse }> {
+/** 请求 /maps/runtime（mapId 省略则不拼查询参数），附 x-map-version 响应头。 */
+async function getRuntime(mapId?: string): Promise<{
+  status: number;
+  body: SerializedMapGeometry;
+  versionHeader: string | null;
+}> {
   const url =
     mapId === undefined
       ? `${baseUrl}/maps/runtime`
       : `${baseUrl}/maps/runtime?mapId=${encodeURIComponent(mapId)}`;
   const res = await fetch(url);
-  return { status: res.status, body: (await res.json()) as RuntimeResponse };
+  return {
+    status: res.status,
+    body: (await res.json()) as SerializedMapGeometry,
+    versionHeader: res.headers.get("x-map-version"),
+  };
 }
 
 /** 请求 /maps/meta。 */
@@ -123,11 +127,14 @@ async function getMeta(): Promise<MetaResponse> {
 }
 
 beforeAll(async () => {
-  // 全局引导一次：注册表是幂等单例，/maps/runtime 的 buildMapRuntime 依赖内置生成器
+  // 全局引导一次：注册表是幂等单例，端点几何重建依赖内置积木注册表
   bootstrapFramework();
 
   // PORT=0 已在文件顶部（vi.hoisted）生效——此处断言防静默回退到 3000 端口冲突
   expect(serverConfig.port).toBe(0);
+
+  // 测试侧独立加载同一份配置，作为端点响应的期望值来源
+  gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
 
   // 动态导入 server 模块：serverConfig 的固化发生在导入求值时，必须在 PORT 就位之后
   const serverModule = await import("framework/net/colyseus/server");
@@ -157,60 +164,82 @@ afterAll(async () => {
 });
 
 describe("地图 HTTP 端点（/maps/runtime 与 /maps/meta）", () => {
-  it("/maps/runtime?mapId=cave：200 返回 cave 数据（64×64，chunks 解码共 4096 字节）", async () => {
-    const { status, body } = await getRuntime("cave");
-    expect(status).toBe(200);
-    expect(body.id).toBe("cave");
-    expect(typeof body.name).toBe("string");
-    expect(body.grid).toEqual({ width: 64, height: 64, tileWidth: 16, tileHeight: 16 });
-    expect(body.version).toMatch(/^[0-9a-f]{8}$/);
-
-    // 64×64 → 4×4 = 16 块；行主序（cy 外层、cx 内层）
-    expect(body.chunks).toHaveLength(16);
-    expect(body.chunks.map((c) => [c.cx, c.cy])).toEqual([
-      [0, 0], [1, 0], [2, 0], [3, 0],
-      [0, 1], [1, 1], [2, 1], [3, 1],
-      [0, 2], [1, 2], [2, 2], [3, 2],
-      [0, 3], [1, 3], [2, 3], [3, 3],
-    ]);
-    // 每块满 16×16 = 256 字节；总字节数 = 64×64 = 4096
-    for (const chunk of body.chunks) {
-      expect(decodeChunk(chunk)).toHaveLength(MAP_CHUNK_SIZE * MAP_CHUNK_SIZE);
-    }
-    expect(totalChunkBytes(body.chunks)).toBe(64 * 64);
-  });
-
-  it("/maps/runtime 缺省 mapId：回退注册表首图 island（96×96）", async () => {
-    const { status, body } = await getRuntime();
-    expect(status).toBe(200);
-    expect(body.id).toBe("island");
-    expect(body.grid).toEqual({ width: 96, height: 96, tileWidth: 16, tileHeight: 16 });
-    // 96×96 → 6×6 = 36 块，总字节数 = 9216
-    expect(body.chunks).toHaveLength(36);
-    expect(totalChunkBytes(body.chunks)).toBe(96 * 96);
-    expect(body.version).toMatch(/^[0-9a-f]{8}$/);
-  });
-
-  it("/maps/runtime?mapId=tiled-demo：200，chunks 非空，meta 已列出", async () => {
-    const { status, body } = await getRuntime("tiled-demo");
-    expect(status).toBe(200);
-    expect(body.id).toBe("tiled-demo");
-    expect(body.grid).toEqual({ width: 8, height: 8, tileWidth: 16, tileHeight: 16 });
-    expect(body.chunks.length).toBeGreaterThan(0);
-    expect(body.version).toMatch(/^[0-9a-f]{8}$/);
+  it("/maps/meta：列出全部配置图，字段齐全，kind 为管道首积木名", async () => {
     const meta = await getMeta();
-    expect(meta.maps.some((m) => m.id === "tiled-demo")).toBe(true);
+    expect(meta.default).toBe("island");
+    expect(meta.maps.map((m) => m.id)).toEqual(["island", "cave", "tiled-demo"]);
+    expect(meta.maps).toHaveLength(gameDef.resolvedMapConfigs.length);
+
+    // 与测试侧重建几何逐字段一致（顺序 = 配置声明序）
+    meta.maps.forEach((entry, i) => {
+      const config = gameDef.resolvedMapConfigs[i];
+      const expected = expectedSnapshot(config);
+      expect(entry.id).toBe(config.key);
+      expect(entry.name).toBe(config.key);
+      expect(entry.kind).toBe(config.pipeline[0].generator);
+      expect(entry.width).toBe(expected.grid.width);
+      expect(entry.height).toBe(expected.grid.height);
+      expect(entry.tileWidth).toBe(expected.grid.tileWidth);
+      expect(entry.tileHeight).toBe(expected.grid.tileHeight);
+      expect(entry.version).toBe(expected.version);
+      expect(entry.version).toMatch(/^[0-9a-f]{8}$/);
+    });
+
+    // 真实配置的已知尺寸与 kind 钉死
+    expect(meta.maps.find((m) => m.id === "island")).toMatchObject({
+      kind: "noise-terrain",
+      width: 96,
+      height: 96,
+      tileWidth: 16,
+      tileHeight: 16,
+    });
+    expect(meta.maps.find((m) => m.id === "cave")).toMatchObject({
+      kind: "noise-terrain",
+      width: 64,
+      height: 64,
+      tileWidth: 16,
+      tileHeight: 16,
+    });
+    expect(meta.maps.find((m) => m.id === "tiled-demo")).toMatchObject({
+      kind: "tiled-source",
+      width: 8,
+      height: 8,
+      tileWidth: 16,
+      tileHeight: 16,
+    });
   });
 
-  it("未知 mapId → 404 {error, available}（含空串 mapId）", async () => {
+  it("/maps/runtime?mapId=<key>：响应体 = 同配置重建几何的 serializeGeometry 快照，x-map-version 头 = version", async () => {
+    for (const config of gameDef.resolvedMapConfigs) {
+      const { status, body, versionHeader } = await getRuntime(config.key);
+      expect(status).toBe(200);
+      expect(body.key).toBe(config.key);
+      // 全快照深相等：key/grid/tiles/walkable/regions/regionOfTile/version
+      expect(body).toEqual(expectedSnapshot(config));
+      expect(versionHeader).toBe(body.version);
+    }
+  });
+
+  it("version 稳定：同图两次请求一致，且与 /maps/meta 一致", async () => {
+    const first = await getRuntime("island");
+    const second = await getRuntime("island");
+    expect(second.status).toBe(200);
+    expect(second.body.version).toBe(first.body.version);
+    expect(second.body).toEqual(first.body);
+
+    const meta = await getMeta();
+    for (const entry of meta.maps) {
+      const { body } = await getRuntime(entry.id);
+      expect(body.version).toBe(entry.version);
+    }
+  });
+
+  it("未知 mapId → 404 {error, available}（含空串），不静默顶替默认图", async () => {
     const res = await fetch(`${baseUrl}/maps/runtime?mapId=does-not-exist`);
     expect(res.status).toBe(404);
     const body = (await res.json()) as ErrorBody;
     expect(body.error).toBe("unknown map");
-    expect(body.available).toEqual(listMapIdsFromConfig());
-    expect(body.available).toContain("island");
-    expect(body.available).toContain("cave");
-    expect(body.available).toContain("tiled-demo");
+    expect(body.available).toEqual(["island", "cave", "tiled-demo"]);
 
     // 空串视为显式 id（清单中不存在）→ 同样 404
     const empty = await fetch(`${baseUrl}/maps/runtime?mapId=`);
@@ -219,95 +248,36 @@ describe("地图 HTTP 端点（/maps/runtime 与 /maps/meta）", () => {
     expect(emptyBody.error).toBe("unknown map");
   });
 
-  it("geometry version：同内容恒定，内容变化即变（纯函数直测）", () => {
-    const geometry = getMapGeometryFromConfig("cave");
-    expect(geometry).not.toBeNull();
+  it("请求 key 决定响应：不同图数据互不串扰；缺省 mapId → 默认图", async () => {
+    const island = await getRuntime("island");
+    const cave = await getRuntime("cave");
+    expect(island.body.key).toBe("island");
+    expect(island.body.grid).toEqual({ width: 96, height: 96, tileWidth: 16, tileHeight: 16 });
+    expect(cave.body.key).toBe("cave");
+    expect(cave.body.grid).toEqual({ width: 64, height: 64, tileWidth: 16, tileHeight: 16 });
+    expect(island.body.version).not.toBe(cave.body.version);
+    expect(island.body.tiles).not.toEqual(cave.body.tiles);
 
-    const v1 = geometry!.version;
-    expect(v1).toMatch(/^[0-9a-f]{8}$/);
-
-    // 确定性管道（固定 seed）重建 → 内容一致 → 版本一致
-    const rebuilt = getMapGeometryFromConfig("cave");
-    expect(rebuilt!.version).toBe(v1);
-
-    // 内容变化（翻转一个通行字节）→ 版本变化
-    const modified: MapGeometry = { ...geometry!, walkable: geometry!.walkable.slice() };
-    modified.walkable[0] = modified.walkable[0] === 1 ? 0 : 1;
-    const modifiedVersion = computeGeometryVersion(modified);
-    expect(modifiedVersion).not.toBe(v1);
-    expect(modifiedVersion).toMatch(/^[0-9a-f]{8}$/);
+    // 缺省 mapId → 默认图（game.json map.default = island）
+    const fallback = await getRuntime();
+    expect(fallback.status).toBe(200);
+    expect(fallback.body.key).toBe("island");
   });
 
-  it("/maps/meta 与 /maps/runtime 的 version 一致（两张图都验）", async () => {
-    const meta = await getMeta();
-    expect(meta.maps).toHaveLength(3);
+  it("geometry version：同配置重建恒定，内容变化即变（纯函数直测）", () => {
+    for (const config of gameDef.resolvedMapConfigs) {
+      const snapshot = expectedSnapshot(config);
+      expect(snapshot.version).toMatch(/^[0-9a-f]{8}$/);
 
-    for (const entry of meta.maps) {
-      const { status, body } = await getRuntime(entry.id);
-      expect(status).toBe(200);
-      expect(body.id).toBe(entry.id);
-      // meta 每次现算（不缓存），runtime 走服务端缓存——两侧结果必须一致
-      expect(body.version).toBe(entry.version);
-    }
-  });
+      // 确定性管道（固定 seed）重建 → 内容一致 → 版本一致
+      expect(expectedSnapshot(config).version).toBe(snapshot.version);
 
-  it("chunks 解码总字节数 = width×height，块尺寸符合 16×16 约定（两张图都验）", async () => {
-    const meta = await getMeta();
-    for (const entry of meta.maps) {
-      const { status, body } = await getRuntime(entry.id);
-      expect(status).toBe(200);
-
-      const { width, height } = body.grid;
-      const expectedChunkCount =
-        Math.ceil(width / MAP_CHUNK_SIZE) * Math.ceil(height / MAP_CHUNK_SIZE);
-      expect(body.chunks).toHaveLength(expectedChunkCount);
-      expect(totalChunkBytes(body.chunks)).toBe(width * height);
-
-      // 每块尺寸 = min(16, 剩余列数) × min(16, 剩余行数)
-      for (const chunk of body.chunks) {
-        const expectW = Math.min(MAP_CHUNK_SIZE, width - chunk.cx * MAP_CHUNK_SIZE);
-        const expectH = Math.min(MAP_CHUNK_SIZE, height - chunk.cy * MAP_CHUNK_SIZE);
-        expect(decodeChunk(chunk)).toHaveLength(expectW * expectH);
-      }
-    }
-  });
-
-  it("/maps/meta 响应形状：default=island，三张图字段齐全", async () => {
-    const meta = await getMeta();
-    expect(meta.default).toBe("island");
-    expect(meta.maps).toHaveLength(3);
-
-    const island = meta.maps.find((m) => m.id === "island");
-    const cave = meta.maps.find((m) => m.id === "cave");
-    expect(island).toBeDefined();
-    expect(cave).toBeDefined();
-
-    const tiledDemo = meta.maps.find((m) => m.id === "tiled-demo");
-    expect(tiledDemo).toBeDefined();
-    expect(tiledDemo).toMatchObject({ kind: "geometry", width: 8, height: 8, tileWidth: 16, tileHeight: 16 });
-
-    expect(island).toMatchObject({
-      kind: "geometry",
-      width: 96,
-      height: 96,
-      tileWidth: 16,
-      tileHeight: 16,
-    });
-    expect(cave).toMatchObject({
-      kind: "geometry",
-      width: 64,
-      height: 64,
-      tileWidth: 16,
-      tileHeight: 16,
-    });
-
-    // 每张图：id/name 非空字符串，version 为 8 位小写十六进制
-    for (const entry of meta.maps) {
-      expect(typeof entry.id).toBe("string");
-      expect(entry.id.length).toBeGreaterThan(0);
-      expect(typeof entry.name).toBe("string");
-      expect(entry.name.length).toBeGreaterThan(0);
-      expect(entry.version).toMatch(/^[0-9a-f]{8}$/);
+      // 内容变化（翻转一个通行字节）→ 版本变化
+      const modified: SerializedMapGeometry = { ...snapshot, walkable: snapshot.walkable.slice() };
+      modified.walkable[0] = modified.walkable[0] === 1 ? 0 : 1;
+      const modifiedVersion = computeGeometryVersion(deserializeGeometry(modified));
+      expect(modifiedVersion).not.toBe(snapshot.version);
+      expect(modifiedVersion).toMatch(/^[0-9a-f]{8}$/);
     }
   });
 });

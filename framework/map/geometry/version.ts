@@ -82,3 +82,50 @@ export function computeGeometryVersion(geometry: GeometryVersionInput): string {
 
   return fnv1a32Hex(new TextEncoder().encode(JSON.stringify(canonical)));
 }
+
+/**
+ * /maps/meta 单图元信息（响应字段自地图系统重构起定死，前端按此消费）。
+ */
+export interface GeometryMetaInfo {
+  /** 地图 key（registry 稳定标识，/maps/runtime 的 mapId 参数值）。 */
+  id: string;
+  /** 展示名（当前与 key 同值；MapConfig 未声明独立名称）。 */
+  name: string;
+  /** 来源标识：生成管道首积木注册名（如 "noise-terrain" / "tiled-source"）。 */
+  kind: string;
+  /** 宽度（tile 数）。 */
+  width: number;
+  /** 高度（tile 数）。 */
+  height: number;
+  /** 单 tile 宽度（像素）。 */
+  tileWidth: number;
+  /** 单 tile 高度（像素）。 */
+  tileHeight: number;
+  /** 内容指纹（与 /maps/runtime 响应体及 x-map-version 响应头同值）。 */
+  version: string;
+}
+
+/**
+ * 从 MapGeometry 提取 /maps/meta 所需元信息（geometry 侧描述符）。
+ *
+ * 迁移自 framework/map/version.ts 的 describeMapSource（旧 MapSource 描述符，
+ * 旧文件保留至清理 todo，新路径不再消费）。与旧版差异：几何自带内容指纹，
+ * version 直接取 geometry.version，无需调用方补算；kind 由调用方传入
+ * （几何不携带管道信息，取 MapConfig 管道首积木注册名）。
+ *
+ * @param geometry 地图几何数据
+ * @param kind 来源标识（生成管道首积木注册名）
+ * @returns 元信息
+ */
+export function describeGeometry(geometry: MapGeometry, kind: string): GeometryMetaInfo {
+  return {
+    id: geometry.key,
+    name: geometry.key,
+    kind,
+    width: geometry.grid.width,
+    height: geometry.grid.height,
+    tileWidth: geometry.grid.tileWidth,
+    tileHeight: geometry.grid.tileHeight,
+    version: geometry.version,
+  };
+}

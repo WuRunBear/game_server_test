@@ -9,8 +9,13 @@ import http from "node:http";
 import { Server, matchMaker } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 
-import { getMapGeometryFromConfig, listMapIdsFromConfig, serverConfig } from "config";
-import { buildMapChunks } from "map";
+import { getRegistries } from "framework/bootstrap";
+import { loadGameDefinition } from "framework/bootstrap/loadGameDefinition";
+import type { MapConfig } from "framework/config/schema/MapRegistrySchema";
+import { serverConfig } from "config";
+import { buildMapGeometry } from "map/generate/pipeline";
+import { serializeGeometry } from "map/geometry/snapshot";
+import { describeGeometry } from "map/geometry/version";
 import type { MapGeometry } from "map/geometry/types";
 import { GameRoom } from "network/colyseus/rooms/GameRoom";
 import type { Logger } from "utils/logger";
@@ -26,21 +31,6 @@ export interface ColyseusServer {
   httpServer: http.Server;
   gameServer: Server;
   stop(): Promise<void>;
-}
-
-/** MapGeometry → /maps/runtime 响应（blocked 位图由 walkable 取反派生）。 */
-function geometryToJson(geometry: MapGeometry) {
-  const blocked = new Uint8Array(geometry.walkable.length);
-  for (let i = 0; i < geometry.walkable.length; i++) {
-    blocked[i] = geometry.walkable[i] === 0 ? 1 : 0;
-  }
-  return {
-    id: geometry.key,
-    name: geometry.key,
-    grid: geometry.grid,
-    version: geometry.version,
-    chunks: buildMapChunks(blocked, geometry.grid),
-  };
 }
 
 /**
@@ -65,7 +55,22 @@ export interface StartColyseusServerOptions {
  */
 export function startColyseusServer(options: StartColyseusServerOptions): ColyseusServer {
   const transport = new WebSocketTransport();
-  const mapRuntimeCache = new Map<string, unknown>();
+
+  // /maps/* 端点数据源：加载期游戏定义（resolvedMapConfigs）按固定 seed
+  // 确定性重建几何，与仿真 world.maps 同源同内容（bootMaps 用同一配置与
+  // 同一积木注册表构建）。几何不可变，按 key 惰性构建并缓存快照。
+  const gameDef = loadGameDefinition({ gameJsonPath: options.gameJsonPath });
+  const geometryCache = new Map<string, MapGeometry>();
+  const mapIds = gameDef.resolvedMapConfigs.map((config) => config.key);
+  const defaultMapId = gameDef.map?.default ?? mapIds[0] ?? "";
+  const geometryOf = (config: MapConfig): MapGeometry => {
+    const cached = geometryCache.get(config.key);
+    if (cached) return cached;
+    const geometry = buildMapGeometry(config, getRegistries().mapGeneratorRegistry);
+    geometryCache.set(config.key, geometry);
+    return geometry;
+  };
+
   let persistentRoomId: string | undefined;
 
   const gameServer = new Server({
@@ -105,38 +110,27 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
       app.get("/maps/runtime", (req: any, res: any) => {
         const rawMapId = req.query?.mapId;
         const mapId = typeof rawMapId === "string" ? rawMapId : undefined;
-        const geometry = mapId !== undefined ? getMapGeometryFromConfig(mapId) : getMapGeometryFromConfig();
+        // 缺省 mapId → 默认图；显式未知 key（含空串）→ 404，不静默顶替默认图
+        const config = gameDef.resolvedMapConfigs.find(
+          (c) => c.key === (mapId !== undefined ? mapId : defaultMapId),
+        );
 
-        if (!geometry) {
-          res.status(404).json({ error: "unknown map", available: listMapIdsFromConfig() });
+        if (!config) {
+          res.status(404).json({ error: "unknown map", available: mapIds });
           return;
         }
 
-        let runtimeJson = mapRuntimeCache.get(geometry.key);
-        if (!runtimeJson) {
-          runtimeJson = geometryToJson(geometry);
-          mapRuntimeCache.set(geometry.key, runtimeJson);
-        }
-
-        res.status(200).json(runtimeJson);
+        const snapshot = serializeGeometry(geometryOf(config));
+        res.setHeader("x-map-version", snapshot.version);
+        res.status(200).json(snapshot);
       });
 
       app.get("/maps/meta", (_req: any, res: any) => {
-        const maps = listMapIdsFromConfig()
-          .map((mapId) => getMapGeometryFromConfig(mapId))
-          .filter((geometry): geometry is MapGeometry => geometry !== null)
-          .map((geometry) => ({
-            id: geometry.key,
-            name: geometry.key,
-            kind: "geometry",
-            width: geometry.grid.width,
-            height: geometry.grid.height,
-            tileWidth: geometry.grid.tileWidth,
-            tileHeight: geometry.grid.tileHeight,
-            version: geometry.version,
-          }));
+        const maps = gameDef.resolvedMapConfigs.map((config) =>
+          describeGeometry(geometryOf(config), config.pipeline[0].generator),
+        );
 
-        res.status(200).json({ default: listMapIdsFromConfig()[0] ?? "", maps });
+        res.status(200).json({ default: defaultMapId, maps });
       });
 
       app.get("/debug/colliders", (req: any, res: any) => {
