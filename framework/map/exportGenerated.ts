@@ -1,27 +1,33 @@
 /**
- * 生成地图导出工具：把 MapRuntime 落盘为 JSON 与 PNG 预览图。
+ * 地图几何导出工具：把 MapGeometry 落盘为 JSON 快照与 PNG 预览图。
  *
- * 用途（tools 命令 gen-map / export-map）：生成完成后保存产物，
- * 供人工检查与后续复用。PNG 用纯 Node 实现（zlib deflate + 手写 crc32），
- * 不依赖任何图片库。
+ * 用途（tools 命令 export-map）：导出产物供人工检查与前端对照。
+ * PNG 用纯 Node 实现（zlib deflate + 手写 crc32），不依赖任何图片库。
+ * 上色依据 tiles 的数值语义 id，色表由调用方（工具层）以参数传入——
+ * 框架不解释语义含义；色表未覆盖的语义 id 用中性灰兜底。
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { deflateSync } from "node:zlib";
-import type { MapRuntime } from "map/types";
+import type { MapGeometry } from "map/geometry/types";
+import { serializeGeometry } from "map/geometry/snapshot";
 
 /** RGBA 颜色值（固定四元组）。 */
 type Rgba = readonly [number, number, number, number];
+
+/**
+ * 语义 id → RGBA 色表（工具层参数；键为 tiles 中的数值语义 id）。
+ * 语义 id 的含义命名映射在 game 配置侧，框架与色表本身都不解释。
+ */
+export type TilePalette = Readonly<Record<number, Rgba>>;
 
 /** PNG 文件头签名（固定 8 字节魔数）。 */
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
 /** 网格线颜色（浅灰）。 */
 const COLOR_GRID: Rgba = [210, 210, 210, 255];
-/** 可走格子颜色（白）。 */
-const COLOR_WALKABLE: Rgba = [255, 255, 255, 255];
-/** 阻挡格子颜色（黑）。 */
-const COLOR_BLOCKED: Rgba = [0, 0, 0, 255];
+/** 色表未覆盖语义 id 的兜底色（中性灰）。 */
+const COLOR_FALLBACK: Rgba = [153, 153, 153, 255];
 
 /** 计算 PNG chunk 的 CRC32 校验和（标准 0xedb88320 反射多项式）。 */
 function crc32(buf: Uint8Array): number {
@@ -79,12 +85,12 @@ function encodePngRgba(width: number, height: number, rgba: Uint8Array): Buffer 
 }
 
 /**
- * 把阻挡网格渲染为格子预览图（每格 cellSize 像素，叠加浅灰网格线；
- * 黑 = 阻挡，白 = 可走）。
+ * 把 tiles 语义网格渲染为预览图（每格 cellSize 像素，叠加浅灰网格线；
+ * 颜色 = 色表[语义 id]，未覆盖的语义 id 用中性灰兜底）。
  */
-function renderBlockedGridPng(runtime: MapRuntime, cellSize: number): Buffer {
-  const gridW = runtime.grid.width;
-  const gridH = runtime.grid.height;
+function renderTileGridPng(geometry: MapGeometry, palette: TilePalette, cellSize: number): Buffer {
+  const gridW = geometry.grid.width;
+  const gridH = geometry.grid.height;
 
   const width = gridW * cellSize + 1;
   const height = gridH * cellSize + 1;
@@ -101,7 +107,7 @@ function renderBlockedGridPng(runtime: MapRuntime, cellSize: number): Buffer {
         const tx = Math.floor(x / cellSize);
         const ty = Math.floor(y / cellSize);
         const idx = ty * gridW + tx;
-        color = runtime.blocked[idx] === 1 ? COLOR_BLOCKED : COLOR_WALKABLE;
+        color = palette[geometry.tiles[idx]] ?? COLOR_FALLBACK;
       }
 
       const p = (y * width + x) * 4;
@@ -115,39 +121,39 @@ function renderBlockedGridPng(runtime: MapRuntime, cellSize: number): Buffer {
   return encodePngRgba(width, height, rgba);
 }
 
-/** 把 MapRuntime 转为可 JSON 序列化的结构（blocked 由 Uint8Array 转 number[]）。 */
-function mapRuntimeToJsonSerializable(runtime: MapRuntime) {
-  return {
-    ...runtime,
-    blocked: Array.from(runtime.blocked),
-  };
+/** 导出选项：输出目录 / 语义色表 / 每格像素尺寸。 */
+export interface GeometryExportOptions {
+  /** 输出目录（缺省当前工作目录）。 */
+  outDir?: string;
+  /** 语义 id → RGBA 色表（缺省空表——全部语义走兜底灰）。 */
+  palette?: TilePalette;
+  /** PNG 每格像素尺寸（缺省 8）。 */
+  cellSize?: number;
 }
 
 /**
- * 将“程序生成”后的运行时地图导出到本地文件（JSON + PNG）。
+ * 将地图几何导出到本地文件（JSON 快照 + PNG 预览图）。
  *
- * - JSON：完整 MapRuntime，但会把 blocked 从 Uint8Array 转成 number[]
- * - PNG：以格子图展示 blocked（黑=阻挡，白=可走），并叠加细网格线
+ * - JSON：serializeGeometry 快照（tiles/walkable/regions/regionOfTile/version，
+ *   类型化数组编码为 number[]，与 /maps/runtime 应答同形状）
+ * - PNG：以格子图展示 tiles 语义上色（色表为参数），并叠加细网格线
  *
- * @param runtime 生成后的 MapRuntime
+ * @param geometry 生成后的 MapGeometry
  * @returns 导出的 json/png 绝对路径
  */
-export function exportGeneratedMapArtifacts(runtime: MapRuntime, outDir?: string): {
-  jsonPath: string;
-  pngPath: string;
-} {
-  const dir = outDir ?? resolve(process.cwd(), "config/maps/exports");
+export function exportGeometryArtifacts(
+  geometry: MapGeometry,
+  options: GeometryExportOptions = {},
+): { jsonPath: string; pngPath: string } {
+  const dir = resolve(options.outDir ?? process.cwd());
   mkdirSync(dir, { recursive: true });
 
-  const base = runtime.id;
+  const base = geometry.key;
   const jsonPath = resolve(dir, `${base}.json`);
   const pngPath = resolve(dir, `${base}.png`);
 
-  const json = JSON.stringify(mapRuntimeToJsonSerializable(runtime), null, 2);
-  writeFileSync(jsonPath, json, "utf8");
-
-  const png = renderBlockedGridPng(runtime, 8);
-  writeFileSync(pngPath, png);
+  writeFileSync(jsonPath, JSON.stringify(serializeGeometry(geometry), null, 2), "utf8");
+  writeFileSync(pngPath, renderTileGridPng(geometry, options.palette ?? {}, options.cellSize ?? 8));
 
   return { jsonPath, pngPath };
 }

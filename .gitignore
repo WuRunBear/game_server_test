@@ -9,3 +9,4 @@ config/maps/exports/*
 logs
 data/saves
 .omo
+out/

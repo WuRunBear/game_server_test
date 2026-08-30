@@ -20,6 +20,7 @@ import type { SystemRegistry, SystemSpec } from "framework/systems/systemRegistr
 import type { ActionRegistry, ActionFactory, ActionEntry } from "framework/ai/actionRegistry";
 import type { ArchetypeRegistry, ArchetypeSpec } from "framework/entities/archetypeRegistry";
 import type { GeneratorRegistry, MapGenerator, GeneratorEntry } from "framework/map/generatorRegistry";
+import type { GeneratorEntry as MapBlockEntry } from "map/generate/generatorRegistry";
 import type { GameDefinition } from "framework/config/schema/GameDefinitionSchema";
 import { GameDefinitionSchema } from "framework/config/schema/GameDefinitionSchema";
 
@@ -114,6 +115,11 @@ export function listRegisteredGenerators(): GeneratorEntry[] {
   return getRegistries().generatorRegistry.all();
 }
 
+/** 列出全部已注册生成积木（map/generate 层注册表；地图管道的 generator 名在此查找）。 */
+export function listRegisteredMapGenerators(): MapBlockEntry[] {
+  return getRegistries().mapGeneratorRegistry.all();
+}
+
 /**
  * 校验一份游戏配置是否符合 GameDefinitionSchema（类型守卫）。
  * 用于 tools validate 与加载前置检查：合法返回 true 且收窄类型。
@@ -123,4 +129,3 @@ export function validateGameDefinition(gameDef: unknown): gameDef is GameDefinit
 }
 
 export { buildMapRuntime } from "framework/map/buildRuntime";
-export { exportGeneratedMapArtifacts as exportMapRuntime } from "framework/map/exportGenerated";

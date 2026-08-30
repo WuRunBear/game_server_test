@@ -11,9 +11,10 @@ const USAGE = `用法: pnpm tools <子命令> [参数]
   new-game [id] [--name <n>] [--out <dir>] [--tick-rate <n>]
                                    生成 game/ + src/ 脚手架
   list-registries                  列出框架已注册的原型/动作/系统/组件/生成器
-  gen-map <generatorId> [--seed <n>] [--width <n>] [--height <n>] [--out <dir>]
-                                   调用生成器产出地图 JSON + PNG
-  export-map <mapId> [--out <dir>] 把 MapRuntime 导出为 JSON + PNG`;
+  gen-map <mapKey> [--out <dir>]
+                                    按地图配置运行生成管道，产出 MapGeometry 快照 JSON
+  export-map [mapKey] [--out <dir>] [--palette <file>]
+                                    把已构建世界的地图几何导出为 JSON + PNG（色表经 JSON 文件覆盖）`;
 
 function main(): void {
   const subcommand = process.argv[2];

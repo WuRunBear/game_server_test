@@ -12,6 +12,12 @@ export { createGameWorld, type GameWorld, type EntityId, type Tick, type System,
 export type { MapRuntime, MapSource, MapGrid, MapZone, MapSpawns, Vec2 } from "framework/map/types";
 export { buildMapChunks, computeMapVersion, describeMapSource, MAP_CHUNK_SIZE, type MapChunk, type MapMetaInfo } from "framework/map/version";
 
+// 新地图系统公共面（geometry 数据层 + generate 生成层 + 几何导出）
+export type { MapGeometry, MapGeometryGrid, RegionMeta } from "map/geometry/types";
+export { serializeGeometry, type SerializedMapGeometry } from "map/geometry/snapshot";
+export { buildMapGeometry, validateMapGeometry } from "map/generate";
+export { exportGeometryArtifacts, type GeometryExportOptions, type TilePalette } from "framework/map/exportGenerated";
+
 export { createComponentRegistry, type ComponentRegistry } from "framework/components/componentRegistry";
 export { createSystemRegistry, type SystemRegistry, type SystemSpec, buildSystems } from "framework/systems/systemRegistry";
 export { createActionRegistry, type ActionRegistry, type ActionFactory, type ActionEntry } from "framework/ai/actionRegistry";
@@ -69,8 +75,8 @@ export {
   listRegisteredActions,
   listRegisteredComponents,
   listRegisteredGenerators,
+  listRegisteredMapGenerators,
   validateGameDefinition,
   buildMapRuntime,
-  exportMapRuntime,
   type RuleModule,
 } from "framework/api";

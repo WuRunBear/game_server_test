@@ -2,15 +2,16 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   bootstrapFramework,
-  buildMapRuntime,
-  exportMapRuntime,
+  buildMapGeometry,
+  getRegistries,
+  loadGameDefinition,
+  serializeGeometry,
 } from "framework";
-import type { GeneratedMapSource } from "framework/map/types";
 
 export function genMap(argv: string[]): void {
-  const generatorId = argv[0];
-  if (!generatorId) {
-    console.error("用法: pnpm tools gen-map <generatorId> [--seed <n>] [--width <n>] [--height <n>] [--out <dir>]");
+  const mapKey = argv[0];
+  if (!mapKey) {
+    console.error("用法: pnpm tools gen-map <mapKey> [--out <dir>]");
     process.exit(1);
   }
 
@@ -23,30 +24,25 @@ export function genMap(argv: string[]): void {
 
   bootstrapFramework();
 
-  const source: GeneratedMapSource = {
-    kind: "generated",
-    generatorId,
-    id: generatorId,
-    name: generatorId,
-    seed: Number(args.seed) || 1,
-    width: Number(args.width) || 64,
-    height: Number(args.height) || 64,
-    tileWidth: 16,
-    tileHeight: 16,
-  };
-
   try {
-    const runtime = buildMapRuntime(source);
-
-    if (args.out) {
-      const outDir = resolve(process.cwd(), args.out);
-      mkdirSync(outDir, { recursive: true });
-      const { jsonPath, pngPath } = exportMapRuntime(runtime, outDir);
-      console.log(`地图已导出: ${jsonPath}, ${pngPath}`);
-    } else {
-      const { jsonPath, pngPath } = exportMapRuntime(runtime);
-      console.log(`地图已导出: ${jsonPath}, ${pngPath}`);
+    const gameDef = loadGameDefinition();
+    const configs = gameDef.resolvedMapConfigs;
+    const config = configs.find((c) => c.key === mapKey);
+    if (!config) {
+      const available = configs.map((c) => c.key).join(", ") || "无";
+      throw new Error(`地图 "${mapKey}" 未在配置中找到。可用: ${available}`);
     }
+
+    const geometry = buildMapGeometry(config, getRegistries().mapGeneratorRegistry);
+    const snapshot = serializeGeometry(geometry);
+
+    const outDir = resolve(process.cwd(), args.out ?? "out");
+    mkdirSync(outDir, { recursive: true });
+    const jsonPath = resolve(outDir, `${geometry.key}.json`);
+    writeFileSync(jsonPath, JSON.stringify(snapshot, null, 2), "utf8");
+
+    console.log(`地图几何快照已导出: ${jsonPath}`);
+    console.log(`  version: ${geometry.version}, grid: ${geometry.grid.width}x${geometry.grid.height}, regions: ${[...geometry.regions.keys()].join(", ")}`);
   } catch (err) {
     console.error("地图生成失败:", err instanceof Error ? err.message : String(err));
     process.exit(1);
