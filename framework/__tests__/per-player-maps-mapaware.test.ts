@@ -11,6 +11,7 @@
  * 地图运行时手工构造直写 world.maps（同 slice6 attachTestMap 的手工 MapRuntime
  * 思路，几何完全可控），实体统一经 spawnEntity overrides.mapId（T4）归属地图。
  */
+import { makeTestGeometry } from "./helpers/mapGeometry";
 import { describe, it, expect, beforeAll } from "vitest";
 import { query } from "bitecs";
 import {
@@ -79,24 +80,20 @@ function ensureRuntimeArchetypes(world: GameWorld): void {
   });
 }
 
-/** 手工构造 MapRuntime 直写 world.maps（几何完全可控：尺寸/出生点/单格阻挡）。 */
+/** 手工构造 MapGeometry 直写 world.maps（几何完全可控：尺寸/单格阻挡）。 */
 function installMap(
   world: GameWorld,
   id: string,
   opts: { width: number; height: number; player: { x: number; y: number }; blockedCell?: number },
 ): void {
-  const blocked = new Uint8Array(opts.width * opts.height);
-  if (opts.blockedCell !== undefined) {
-    blocked[opts.blockedCell] = 1;
-  }
-  world.maps[id] = {
-    id,
-    name: `map-${id}`,
-    grid: { width: opts.width, height: opts.height, tileWidth: 16, tileHeight: 16 },
-    blocked,
-    spawns: { player: opts.player, npcs: [] },
-    zones: [],
-  };
+  const blockedCol = opts.blockedCell !== undefined ? opts.blockedCell % opts.width : -1;
+  const blockedRow = opts.blockedCell !== undefined ? Math.floor(opts.blockedCell / opts.width) : -1;
+  world.maps[id] = makeTestGeometry({
+    key: id,
+    width: opts.width,
+    height: opts.height,
+    blocked: (tx, ty) => tx === blockedCol && ty === blockedRow,
+  });
   world.activeMaps.add(id);
 }
 
@@ -151,13 +148,14 @@ function spawn(
 }
 
 describe("map-aware", () => {
-  it("a) 玩家死亡重生回自己图出生点（非他图出生点、非 (0,0)）", () => {
+  it("a) 玩家死亡重生回自己图几何中心（非他图中心、非 (0,0)）", () => {
     const world = createBareWorld();
     clearEntityMap();
     ensureRuntimeArchetypes(world);
-    // a/b 出生点刻意不同（10,12）与（200,222），且均非 (0,0)
+    // a/b 中心刻意不同（8×8 → 64,64；12×12 → 96,96），且均非 (0,0)
+    // （出生服务归后续 todo；当前重生占位 = 所在图几何中心）
     installMap(world, "a", { width: 8, height: 8, player: { x: 10, y: 12 } });
-    installMap(world, "b", { width: 8, height: 8, player: { x: 200, y: 222 } });
+    installMap(world, "b", { width: 12, height: 12, player: { x: 200, y: 222 } });
     world.gameDef.resolvedRules["respawn"] = { delayMs: 0 };
 
     const player = spawn(world, "t9-player", { x: 50, y: 50, mapId: "a" });
@@ -166,11 +164,11 @@ describe("map-aware", () => {
     respawnSystem(world);
 
     expect(Health.current[player]).toBe(100);
-    expect(Transform.x[player]).toBe(10);
-    expect(Transform.y[player]).toBe(12);
-    // 不是 b 图出生点，也不是 (0,0)
-    expect(Transform.x[player]).not.toBe(200);
-    expect(Transform.y[player]).not.toBe(222);
+    expect(Transform.x[player]).toBe(64);
+    expect(Transform.y[player]).toBe(64);
+    // 不是 b 图中心，也不是 (0,0)
+    expect(Transform.x[player]).not.toBe(96);
+    expect(Transform.y[player]).not.toBe(96);
   });
 
   it("b1) 放置校验用放置者所在图：同格 A 挡 B 不挡，产物归放置者图", () => {

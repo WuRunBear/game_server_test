@@ -14,7 +14,6 @@ import { createGameSimulation, type SimulationPort } from "simulation";
 import type { PlayerInput, PlayerCommand, TickResult, EntitySnapshot } from "simulation/types";
 import { loadGameDefinition } from "framework/bootstrap/loadGameDefinition";
 import { createFileRepository } from "framework/persistence/fileRepository";
-import type { Repository, WorldRecord } from "framework/repository";
 import type { ServerRule } from "framework/config/schema/RuleSchema";
 import { EntityState } from "network/colyseus/state/EntityState";
 import { RoomState } from "network/colyseus/state/RoomState";
@@ -162,20 +161,17 @@ export class GameRoom extends Room<{ state: RoomState }> {
     // 计算固定步长（如 tickRate=20 → fixedDtMs=50）
     const fixedDtMs = Math.max(1, Math.floor(1000 / gameDef.tickRate));
 
-    // 读档恢复：server 规则配置 saveId 时接文件仓储，加载世界快照作为初始状态
+    // 读档预载已移入 createGameSimulation 装配处（repository + saveId 注入，
+    // 快照经 BootDeps 单一通道进 bootMaps/restoreWorld——读档通道唯一化）
     const serverRules = gameDef.resolvedRules["server"] as ServerRule | undefined;
-    let repository: Repository | undefined;
-    let initialRecord: WorldRecord | null = null;
-    if (serverRules?.saveId) {
-      repository = createFileRepository(process.env.SAVE_DIR ?? "data/saves");
-      initialRecord = await repository.loadWorld(serverRules.saveId);
-    }
+    const repository = serverRules?.saveId
+      ? createFileRepository(process.env.SAVE_DIR ?? "data/saves")
+      : undefined;
 
     // 创建仿真实例——从这里开始，所有 ECS 操作都走 sim 接口
-    this.sim = createGameSimulation(gameDef, {
+    this.sim = await createGameSimulation(gameDef, {
       repository,
       saveId: serverRules?.saveId,
-      initialRecord: initialRecord ?? undefined,
     });
 
     // RoomState 是 Colyseus Schema——客户端通过 WebSocket 增量同步

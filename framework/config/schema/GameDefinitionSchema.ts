@@ -1,9 +1,11 @@
 import { z } from "zod";
-import type { MapSource } from "framework/map/types";
 import type { ArchetypeSpec } from "framework/entities/archetypeRegistry";
 import type { ItemKindSpec } from "framework/config/schema/ItemKindSchema";
 import type { DialogueTreeJson } from "framework/config/schema/DialogueSchema";
 import type { QuestDefinitionJson } from "framework/config/schema/QuestSchema";
+import type { MapConfig } from "framework/config/schema/MapRegistrySchema";
+import type { EntityRule } from "map/evolution/schema";
+import type { PlayerRule } from "framework/config/schema/PlayerRuleSchema";
 
 /**
  * 游戏定义（game/game.json）配置 schema——「配置驱动」框架的入口配置。
@@ -61,7 +63,10 @@ export const GameDefinitionSchema = z.object({
   tickRate: z.number().min(1),
   map: z.object({
     registry: z.string(),
+    /** 默认地图 key（maps/registry.json 的 maps 表键；新玩家出生图）。 */
     default: z.string().optional(),
+    /** 实体演化规则文件路径（maps/entity-rules.json，补差引擎的规则源）。 */
+    entityRules: z.string().optional(),
   }).optional(),
   systems: z.array(SystemEnableEntrySchema).optional(),
   entities: z.string().optional(),
@@ -104,11 +109,12 @@ export interface BehaviorDefinition {
 
 /** 加载完成后的游戏定义：game.json 校验结果 + 各内容文件解析结果。 */
 export interface LoadedGameDefinition extends GameDefinition {
-  resolvedMapSource?: MapSource;
-  /** 全部地图来源（maps/registry.json 的 maps 表，key=地图 id）——portal 场景切换用。 */
-  resolvedMapSources?: Record<string, MapSource>;
-  /** 默认地图（game.json 的 map.default，缺省 registry 首项）的 REGISTRY KEY（runtime 命名空间键）。 */
-  resolvedDefaultMapId?: string;
+  /** 全部地图生成配置（maps/registry.json 解析；Tiled 条目已内联 JSON）。 */
+  resolvedMapConfigs: MapConfig[];
+  /** 实体演化规则表（maps/entity-rules.json，补差引擎规则源）。 */
+  resolvedEntityRules: EntityRule[];
+  /** 玩家规则（rules/player.json；缺省未配置）。 */
+  resolvedPlayerRule?: PlayerRule;
   /** 实体原型定义表（来自 game/entities/*.json）。 */
   resolvedEntities: ArchetypeSpec[];
   /** 行为树定义表（来自 game/behaviors/*.json）。 */

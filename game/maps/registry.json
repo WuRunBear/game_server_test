@@ -1,33 +1,80 @@
 {
-  "default": "generated-map",
   "maps": {
-    "generated-map": {
-      "kind": "generated",
-      "generatorId": "simple",
-      "name": "生成地图",
-      "seed": 1,
-      "width": 64,
-      "height": 64,
-      "tileWidth": 16,
-      "tileHeight": 16,
-      "npcSpawns": [
-        { "kind": "villager", "offsetTiles": [2, 0], "zoneId": 1 }
+    "island": {
+      "kind": "pipeline",
+      "seed": 1337,
+      "initialAgeTicks": 155520000,
+      "pipeline": [
+        {
+          "generator": "noise-terrain",
+          "params": {
+            "width": 96,
+            "height": 96,
+            "tileWidth": 16,
+            "tileHeight": 16,
+            "bandLevel": 0.35,
+            "groundPalette": {
+              "1": 0.35,
+              "2": 0.5,
+              "3": 0.62,
+              "4": 0.8,
+              "5": 1
+            },
+            "nonWalkableSemantics": [1, 2]
+          }
+        },
+        {
+          "generator": "climate-regions",
+          "params": {
+            "names": ["beach", "plain", "forest", "mountain"],
+            "style": "noise"
+          }
+        }
       ]
     },
     "cave": {
-      "kind": "generated",
-      "generatorId": "cave",
-      "name": "洞穴",
-      "seed": 2,
-      "width": 32,
-      "height": 32,
-      "tileWidth": 16,
-      "tileHeight": 16
+      "kind": "pipeline",
+      "seed": 4242,
+      "initialAgeTicks": 51840000,
+      "pipeline": [
+        {
+          "generator": "noise-terrain",
+          "params": {
+            "width": 64,
+            "height": 64,
+            "tileWidth": 16,
+            "tileHeight": 16,
+            "bandLevel": 1,
+            "groundPalette": {
+              "1": 1
+            },
+            "nonWalkableSemantics": [1]
+          }
+        },
+        {
+          "generator": "room-corridor",
+          "params": {
+            "roomCount": 10,
+            "minRoomSize": 4,
+            "maxRoomSize": 9,
+            "corridorWidth": 1,
+            "floorTile": 2,
+            "solidTile": 1
+          }
+        },
+        {
+          "generator": "climate-regions",
+          "params": {
+            "names": ["plain"],
+            "style": "noise"
+          }
+        }
+      ]
     },
     "tiled-demo": {
       "kind": "tiled",
-      "name": "Tiled 演示图",
-      "path": "tiled-demo.json"
+      "path": "tiled-demo.json",
+      "initialAgeTicks": 0
     }
   }
 }

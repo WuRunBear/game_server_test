@@ -1,0 +1,142 @@
+{
+  "rules": [
+    {
+      "map": "island",
+      "region": "plain",
+      "kind": "villager",
+      "max": 5,
+      "every": 600,
+      "mode": "density"
+    },
+    {
+      "map": "island",
+      "region": "plain",
+      "kind": "berry_bush",
+      "max": 8,
+      "every": 20,
+      "mode": "density"
+    },
+    {
+      "map": "island",
+      "region": "plain",
+      "kind": "tree",
+      "max": 6,
+      "every": 20,
+      "mode": "density"
+    },
+    {
+      "map": "island",
+      "region": "plain",
+      "kind": "water_pool",
+      "max": 2,
+      "every": 20,
+      "mode": "density"
+    },
+    {
+      "map": "island",
+      "region": "plain",
+      "kind": "boar",
+      "max": 3,
+      "every": 400,
+      "mode": "density"
+    },
+    {
+      "map": "island",
+      "region": "plain",
+      "kind": "rabbit",
+      "max": 4,
+      "every": 300,
+      "mode": "density"
+    },
+    {
+      "map": "island",
+      "region": "plain",
+      "kind": "rock",
+      "max": 6,
+      "every": 20,
+      "mode": "density"
+    },
+    {
+      "map": "island",
+      "region": "plain",
+      "kind": "campfire",
+      "max": 1,
+      "every": 20,
+      "mode": "density"
+    },
+    {
+      "map": "island",
+      "region": "plain",
+      "kind": "wolf",
+      "max": 2,
+      "every": 300,
+      "mode": "density",
+      "condition": "isNight"
+    },
+    {
+      "map": "island",
+      "region": "plain",
+      "kind": "portal",
+      "max": 1,
+      "every": 20,
+      "mode": "exact",
+      "at": {
+        "x": 54,
+        "y": 42
+      }
+    },
+    {
+      "map": "cave",
+      "region": "plain",
+      "kind": "berry_bush",
+      "max": 3,
+      "every": 20,
+      "mode": "density"
+    },
+    {
+      "map": "cave",
+      "region": "plain",
+      "kind": "tree",
+      "max": 2,
+      "every": 20,
+      "mode": "density"
+    },
+    {
+      "map": "cave",
+      "region": "plain",
+      "kind": "rock",
+      "max": 8,
+      "every": 20,
+      "mode": "density"
+    },
+    {
+      "map": "cave",
+      "region": "plain",
+      "kind": "boar",
+      "max": 3,
+      "every": 300,
+      "mode": "density"
+    },
+    {
+      "map": "cave",
+      "region": "plain",
+      "kind": "wolf",
+      "max": 4,
+      "every": 240,
+      "mode": "density",
+      "condition": "isNight"
+    },
+    {
+      "map": "cave",
+      "region": "plain",
+      "kind": "portal_back",
+      "max": 1,
+      "every": 20,
+      "mode": "exact",
+      "at": {
+        "x": 32,
+        "y": 32
+      }
+    }
+  ]
+}

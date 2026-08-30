@@ -6,6 +6,7 @@ import {
   DayNightRuleSchema,
   ServerRuleSchema,
 } from "framework/config/schema/RuleSchema";
+import { PlayerRuleSchema } from "framework/config/schema/PlayerRuleSchema";
 
 /**
  * 通用规则 schema 注册表。
@@ -46,4 +47,5 @@ export function registerBuiltinRuleSchemas(): void {
   registerRuleSchema("crafting", CraftingRuleSchema);
   registerRuleSchema("daynight", DayNightRuleSchema);
   registerRuleSchema("server", ServerRuleSchema);
+  registerRuleSchema("player", PlayerRuleSchema);
 }

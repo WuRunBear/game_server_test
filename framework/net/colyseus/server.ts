@@ -9,14 +9,9 @@ import http from "node:http";
 import { Server, matchMaker } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 
-import { getMapSourceFromConfig, listMapIdsFromConfig, serverConfig } from "config";
-import {
-  buildMapChunks,
-  buildMapRuntime,
-  computeMapVersion,
-  describeMapSource,
-} from "map";
-import type { MapSource } from "map";
+import { getMapGeometryFromConfig, listMapIdsFromConfig, serverConfig } from "config";
+import { buildMapChunks } from "map";
+import type { MapGeometry } from "map/geometry/types";
 import { GameRoom } from "network/colyseus/rooms/GameRoom";
 import type { Logger } from "utils/logger";
 
@@ -31,6 +26,21 @@ export interface ColyseusServer {
   httpServer: http.Server;
   gameServer: Server;
   stop(): Promise<void>;
+}
+
+/** MapGeometry → /maps/runtime 响应（blocked 位图由 walkable 取反派生）。 */
+function geometryToJson(geometry: MapGeometry) {
+  const blocked = new Uint8Array(geometry.walkable.length);
+  for (let i = 0; i < geometry.walkable.length; i++) {
+    blocked[i] = geometry.walkable[i] === 0 ? 1 : 0;
+  }
+  return {
+    id: geometry.key,
+    name: geometry.key,
+    grid: geometry.grid,
+    version: geometry.version,
+    chunks: buildMapChunks(blocked, geometry.grid),
+  };
 }
 
 /**
@@ -95,40 +105,38 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
       app.get("/maps/runtime", (req: any, res: any) => {
         const rawMapId = req.query?.mapId;
         const mapId = typeof rawMapId === "string" ? rawMapId : undefined;
-        const source = mapId !== undefined ? getMapSourceFromConfig(mapId) : getMapSourceFromConfig();
+        const geometry = mapId !== undefined ? getMapGeometryFromConfig(mapId) : getMapGeometryFromConfig();
 
-        if (!source) {
+        if (!geometry) {
           res.status(404).json({ error: "unknown map", available: listMapIdsFromConfig() });
           return;
         }
 
-        let runtimeJson = mapRuntimeCache.get(source.id);
+        let runtimeJson = mapRuntimeCache.get(geometry.key);
         if (!runtimeJson) {
-          const runtime = buildMapRuntime(source);
-          runtimeJson = {
-            id: runtime.id,
-            name: runtime.name,
-            grid: runtime.grid,
-            version: computeMapVersion(runtime),
-            chunks: buildMapChunks(runtime.blocked, runtime.grid),
-          };
-          mapRuntimeCache.set(source.id, runtimeJson);
+          runtimeJson = geometryToJson(geometry);
+          mapRuntimeCache.set(geometry.key, runtimeJson);
         }
 
         res.status(200).json(runtimeJson);
       });
 
       app.get("/maps/meta", (_req: any, res: any) => {
-        const defaultSource = getMapSourceFromConfig();
         const maps = listMapIdsFromConfig()
-          .map((mapId) => getMapSourceFromConfig(mapId))
-          .filter((source): source is MapSource => source !== null)
-          .map((source) => ({
-            ...describeMapSource(source),
-            version: computeMapVersion(buildMapRuntime(source)),
+          .map((mapId) => getMapGeometryFromConfig(mapId))
+          .filter((geometry): geometry is MapGeometry => geometry !== null)
+          .map((geometry) => ({
+            id: geometry.key,
+            name: geometry.key,
+            kind: "geometry",
+            width: geometry.grid.width,
+            height: geometry.grid.height,
+            tileWidth: geometry.grid.tileWidth,
+            tileHeight: geometry.grid.tileHeight,
+            version: geometry.version,
           }));
 
-        res.status(200).json({ default: defaultSource.id, maps });
+        res.status(200).json({ default: listMapIdsFromConfig()[0] ?? "", maps });
       });
 
       app.get("/debug/colliders", (req: any, res: any) => {

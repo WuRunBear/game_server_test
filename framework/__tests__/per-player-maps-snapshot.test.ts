@@ -14,6 +14,7 @@
  * 经 options 注入；world 经私有访问器取出），地图归属全部经 spawnEntity
  * overrides.mapId（todo 4）。
  */
+import type { SimulationPort } from "simulation";
 import { describe, it, expect, beforeAll } from "vitest";
 import { query } from "bitecs";
 import {
@@ -28,7 +29,7 @@ import { NetworkId } from "framework/components/network";
 import { Player } from "framework/components/tags";
 import { EntityMap, entityMapOf } from "framework/components/entityMap";
 import type { GameWorld } from "framework/world";
-import type { WorldRecord } from "framework/repository";
+import type { WorldRecord, Repository } from "framework/repository";
 
 beforeAll(() => {
   // 全局引导一次：注册表是幂等单例，所有用例共享同一套内置实现
@@ -36,7 +37,7 @@ beforeAll(() => {
 });
 
 /** 取仿真内部的 GameWorld（镜像 slice5 simWorld 私有访问器）。 */
-function simWorld(sim: ReturnType<typeof createGameSimulation>): GameWorld {
+function simWorld(sim: SimulationPort): GameWorld {
   return (sim as unknown as { world: GameWorld }).world;
 }
 
@@ -46,9 +47,9 @@ function clearEntityMap(): void {
 }
 
 describe("snapshot", () => {
-  it("a) snapshot 每实体 mapId === entityMapOf（显式 overrides.mapId 生效）", () => {
+  it("a) snapshot 每实体 mapId === entityMapOf（显式 overrides.mapId 生效）", async () => {
     clearEntityMap();
-    const sim = createGameSimulation(createDefaultGameDefinition());
+    const sim = await createGameSimulation(createDefaultGameDefinition());
     const world = simWorld(sim);
     sim.addPlayer("s1");
 
@@ -69,9 +70,9 @@ describe("snapshot", () => {
     expect(snapshot.entities.get(NetworkId.value[custom])!.mapId).toBe("custom-map");
   });
 
-  it("b) snapshot.playerMaps：sessionId → 该玩家实体的地图", () => {
+  it("b) snapshot.playerMaps：sessionId → 该玩家实体的地图", async () => {
     clearEntityMap();
-    const sim = createGameSimulation(createDefaultGameDefinition());
+    const sim = await createGameSimulation(createDefaultGameDefinition());
     const world = simWorld(sim);
     sim.addPlayer("s1");
     const [p1] = query(world, [Player]);
@@ -85,9 +86,9 @@ describe("snapshot", () => {
     expect(snapshot.playerMaps.get("s1")).toBe("");
   });
 
-  it("c) 无 viewRadius（无 server 规则）也产出 interest：存在且至少含 own 玩家实体", () => {
+  it("c) 无 viewRadius（无 server 规则）也产出 interest：存在且至少含 own 玩家实体", async () => {
     clearEntityMap();
-    const sim = createGameSimulation(createDefaultGameDefinition());
+    const sim = await createGameSimulation(createDefaultGameDefinition());
     const world = simWorld(sim);
     sim.addPlayer("s1");
     const [p1] = query(world, [Player]);
@@ -97,7 +98,7 @@ describe("snapshot", () => {
     expect(interest!.get("s1")).toContain(NetworkId.value[p1]);
   });
 
-  it("d) orphan 玩家复用后保留存档图（EntityMap 不被重置为默认图）", () => {
+  it("d) orphan 玩家复用后保留存档图（EntityMap 不被重置为默认图）", async () => {
     clearEntityMap();
     const def = createDefaultGameDefinition();
     const record: WorldRecord = {
@@ -107,7 +108,11 @@ describe("snapshot", () => {
       nextNetworkId: 100,
       entities: [{ networkId: 7, kind: "player", components: { EntityMap: "cave1" } }],
     };
-    const sim = createGameSimulation(def, { initialRecord: record });
+    const repo: Repository = {
+      saveWorld: async () => {},
+      loadWorld: async () => record,
+    };
+    const sim = await createGameSimulation(def, { repository: repo, saveId: "s1" });
     const world = simWorld(sim);
 
     const { networkId } = sim.addPlayer("s1");

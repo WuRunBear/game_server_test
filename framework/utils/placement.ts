@@ -9,19 +9,21 @@
  */
 import { query } from "bitecs";
 import { Collider, ColliderShape, GridOccupancy, Transform, entityMapOf } from "components";
-import type { MapRuntime } from "framework/map/types";
+import type { MapGeometry } from "map/geometry/types";
 import type { GameWorld } from "world";
 
 /**
- * 取某地图的 MapRuntime（网格/阻挡来源）。
- * 优先用 world.maps[mapId]；地图 id 未落到任何已缓存图（无 map 配置路径的 world.map
- * 手工赋值，或 EntityMap 残留导致 mapId 无法解析）时回退世界默认图别名 world.map，
- * 与碰撞系统同款约定，保持既有单图用例行为。
+ * 取某地图的几何（网格/阻挡来源）。空串归属（无图配置世界的哨兵）返回
+ * undefined；非空 mapId 解析不到已构建图即抛含 mapId 的显式错误（归属异常
+ * 是配置/存档 bug，不允许静默回退默认图）。
  */
-function mapRuntimeOf(world: GameWorld, mapId: string): MapRuntime | undefined {
-  const cached = world.maps[mapId];
-  if (cached) return cached;
-  return world.map ?? undefined;
+function mapGeometryOf(world: GameWorld, mapId: string): MapGeometry | undefined {
+  if (mapId === "") return undefined;
+  const geometry = world.maps[mapId];
+  if (!geometry) {
+    throw new Error(`placement: map "${mapId}" is not present in world.maps`);
+  }
+  return geometry;
 }
 
 /** 以 (x, y) 为中心、w×h 的矩形是否与 mapId 图上任何带 Collider 实体重叠（圆按包围盒近似）。 */
@@ -66,7 +68,7 @@ export function snapToGrid(
   w: number,
   h: number,
 ): { x: number; y: number; cellX: number; cellY: number; cellW: number; cellH: number } {
-  const map = mapRuntimeOf(world, mapId);
+  const map = mapGeometryOf(world, mapId);
   if (!map) {
     return { x, y, cellX: 0, cellY: 0, cellW: 0, cellH: 0 };
   }
@@ -111,7 +113,7 @@ export function overlapsOccupiedGrid(
   return false;
 }
 
-/** 以 (x, y) 为中心、w×h 的矩形是否压到 mapId 图的地图阻挡格。图不可解析视为不阻挡。 */
+/** 以 (x, y) 为中心、w×h 的矩形是否压到 mapId 图的地图阻挡格。 */
 export function overlapsMapBlocked(
   world: GameWorld,
   mapId: string,
@@ -120,7 +122,7 @@ export function overlapsMapBlocked(
   w: number,
   h: number,
 ): boolean {
-  const map = mapRuntimeOf(world, mapId);
+  const map = mapGeometryOf(world, mapId);
   if (!map) return false;
 
   const { width, height, tileWidth, tileHeight } = map.grid;
@@ -131,7 +133,8 @@ export function overlapsMapBlocked(
 
   for (let ty = Math.max(0, minTy); ty <= Math.min(height - 1, maxTy); ty += 1) {
     for (let tx = Math.max(0, minTx); tx <= Math.min(width - 1, maxTx); tx += 1) {
-      if (map.blocked[ty * width + tx] === 1) return true;
+      // walkable=0 即阻挡格（MapGeometry 通行位图语义，与旧 blocked 取反等价）
+      if (map.walkable[ty * width + tx] === 0) return true;
     }
   }
 

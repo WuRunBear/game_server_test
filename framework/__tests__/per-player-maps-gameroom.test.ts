@@ -44,7 +44,7 @@ beforeAll(() => {
 });
 
 /** 取仿真内部的 GameWorld（镜像 slice5 simWorld 私有访问器）。 */
-function simWorld(sim: ReturnType<typeof createGameSimulation>): GameWorld {
+function simWorld(sim: SimulationPort): GameWorld {
   return (sim as unknown as { world: GameWorld }).world;
 }
 
@@ -131,8 +131,8 @@ function reach(room: GameRoom): GameRoomTestAccess {
 }
 
 /** 造两玩家两图的真实仿真（两玩家 EntityMap 分属 map-a / map-b，各自图上放一个 item）。 */
-function twoMapSim() {
-  const sim = createGameSimulation(createDefaultGameDefinition());
+async function twoMapSim() {
+  const sim = await createGameSimulation(createDefaultGameDefinition());
   const world = simWorld(sim);
   const join1 = sim.addPlayer("s1");
   const join2 = sim.addPlayer("s2");
@@ -151,9 +151,9 @@ function twoMapSim() {
 }
 
 describe("gameroom", () => {
-  it("a) applySnapshot 写每玩家 PlayerState.mapId（playerMaps）；可见表只含本图实体", () => {
+  it("a) applySnapshot 写每玩家 PlayerState.mapId（playerMaps）；可见表只含本图实体", async () => {
     clearEntityMap();
-    const { sim, networkIds } = twoMapSim();
+    const { sim, networkIds } = await twoMapSim();
     const { room, playerStates } = makeWiredRoom([
       { sessionId: "s1", networkId: networkIds.join1 },
       { sessionId: "s2", networkId: networkIds.join2 },
@@ -178,9 +178,9 @@ describe("gameroom", () => {
     expect(s2.visibleEntities.has(String(networkIds.join2))).toBe(true);
   });
 
-  it("b) 两玩家不同图：visibleEntities 无交集（无跨图泄漏）", () => {
+  it("b) 两玩家不同图：visibleEntities 无交集（无跨图泄漏）", async () => {
     clearEntityMap();
-    const { sim, world, networkIds } = twoMapSim();
+    const { sim, world, networkIds } = await twoMapSim();
     const { room, playerStates } = makeWiredRoom([
       { sessionId: "s1", networkId: networkIds.join1 },
       { sessionId: "s2", networkId: networkIds.join2 },

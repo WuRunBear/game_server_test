@@ -28,7 +28,7 @@ export const SpawnRuleSchema = z.object({
   condition: z.string().optional(),
   /**
    * 可选：限定生效的地图 id（maps/registry.json 的 maps 键）。
-   * 缺省全部地图生效；portal 场景切换后 world.map 变化，规则随之切换作用图。
+   * 缺省全部地图生效（该字段随刷怪系统退役，仅保留类型兼容）。
    */
   mapId: z.string().optional(),
 });

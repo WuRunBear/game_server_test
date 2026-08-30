@@ -10,6 +10,7 @@
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { resolve, dirname, basename } from "node:path";
+import { z } from "zod";
 import {
   GameDefinitionSchema,
   type LoadedGameDefinition,
@@ -22,11 +23,12 @@ import { SpawnRuleSchema, SpawnRegistrySchema } from "framework/config/schema/Sp
 import { ItemKindSchema, type ItemKindSpec } from "framework/config/schema/ItemKindSchema";
 import { DialogueRegistrySchema, type DialogueTreeJson } from "framework/config/schema/DialogueSchema";
 import { QuestRegistrySchema, type QuestDefinitionJson } from "framework/config/schema/QuestSchema";
-import { MapRegistrySchema, type GeneratedMapEntryJson, type TiledMapEntryJson } from "framework/config/schema/MapRegistrySchema";
+import { MapRegistrySchema, type MapConfig } from "framework/config/schema/MapRegistrySchema";
+import { EntityRuleSchema, type EntityRule } from "map/evolution/schema";
+import type { PlayerRule } from "framework/config/schema/PlayerRuleSchema";
 import { getRuleSchema } from "framework/config/schema/ruleSchemas";
 import { hasSpawnCondition } from "framework/systems/gameplay/spawnConditions";
 import { getRegistries } from "framework/bootstrap";
-import type { MapSource } from "framework/map/types";
 import type { ArchetypeSpec } from "framework/entities/archetypeRegistry";
 
 export interface LoadGameDefinitionOptions {
@@ -172,57 +174,60 @@ function loadQuestsFile(baseDir: string, pattern?: string): QuestDefinitionJson[
 }
 
 /**
- * 解析地图注册表：返回全部地图来源（key=地图 id）与默认地图来源。
- * 单条解析逻辑与历史 resolveMapSource 一致；无注册表/无地图时返回空。
+ * 解析地图注册表：返回全部地图生成配置（key = 地图 registry key）。
+ * Tiled 条目在此读取其 JSON 文件并内联进 tiled-source 积木参数——缺文件/
+ * 解析失败在此处报错（积木本身不做文件 I/O）；无注册表/无地图时返回空。
  */
-function resolveMapSources(
-  baseDir: string,
-  mapRegistryPath?: string,
-): { sources: Record<string, MapSource>; defaultSource?: MapSource; defaultKey?: string } {
-  if (!mapRegistryPath) return { sources: {} };
+function resolveMapConfigs(baseDir: string, mapRegistryPath?: string): MapConfig[] {
+  if (!mapRegistryPath) return [];
   const fullPath = resolve(baseDir, mapRegistryPath);
-  if (!existsSync(fullPath)) return { sources: {} };
+  if (!existsSync(fullPath)) return [];
 
   const raw = readJsonFile(fullPath);
   const registry = MapRegistrySchema.parse(raw);
-  const sources: Record<string, MapSource> = {};
-  let defaultSource: MapSource | undefined;
-  let defaultKey: string | undefined;
+  const configs: MapConfig[] = [];
 
   for (const [key, entry] of Object.entries(registry.maps)) {
-    let source: MapSource;
     if (entry.kind === "tiled") {
-      const tiledEntry = entry as TiledMapEntryJson;
-      const tiledPath = resolve(dirname(fullPath), tiledEntry.path);
-      source = {
-        kind: "tiled" as const,
-        id: tiledEntry.id ?? key,
-        name: tiledEntry.name ?? key,
-        json: readJsonFile(tiledPath),
-      };
+      const tiledPath = resolve(dirname(fullPath), entry.path);
+      let tiledJson: unknown;
+      try {
+        tiledJson = readJsonFile(tiledPath);
+      } catch (err) {
+        throw new Error(
+          `map "${key}": tiled source "${entry.path}" failed to load: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+      configs.push({
+        key,
+        seed: 0,
+        initialAgeTicks: entry.initialAgeTicks,
+        pipeline: [{ generator: "tiled-source", params: { tiled: tiledJson } }],
+      });
     } else {
-      const genEntry = entry as GeneratedMapEntryJson;
-      source = {
-        kind: "generated" as const,
-        generatorId: genEntry.generatorId ?? "simple",
-        id: genEntry.id ?? key,
-        name: genEntry.name ?? key,
-        seed: genEntry.seed ?? 1,
-        width: genEntry.width ?? 64,
-        height: genEntry.height ?? 64,
-        tileWidth: genEntry.tileWidth ?? 16,
-        tileHeight: genEntry.tileHeight ?? 16,
-        npcSpawns: genEntry.npcSpawns,
-      };
-    }
-    sources[key] = source;
-    if (key === (registry.default ?? Object.keys(registry.maps)[0])) {
-      defaultSource = source;
-      defaultKey = key;
+      configs.push({
+        key,
+        seed: entry.seed,
+        initialAgeTicks: entry.initialAgeTicks,
+        pipeline: entry.pipeline,
+      });
     }
   }
 
-  return { sources, defaultSource, defaultKey };
+  return configs;
+}
+
+/** 加载实体演化规则文件（{ rules: EntityRule[] }），逐条 zod 校验。 */
+function loadEntityRules(baseDir: string, entityRulesPath?: string): EntityRule[] {
+  if (!entityRulesPath) return [];
+  const fullPath = resolve(baseDir, entityRulesPath);
+  if (!existsSync(fullPath)) return [];
+
+  const raw = readJsonFile(fullPath);
+  const parsed = z.object({ rules: z.array(EntityRuleSchema) }).parse(raw);
+  return parsed.rules;
 }
 
 /**
@@ -277,11 +282,6 @@ function validateIntegrity(data: LoadedGameDefinition): void {
       if (spawn.condition && !hasSpawnCondition(spawn.condition)) {
         throw new Error(
           `Spawn rule for "${spawn.kind}" references unknown condition "${spawn.condition}"`,
-        );
-      }
-      if (spawn.mapId && !data.resolvedMapSources?.[spawn.mapId]) {
-        throw new Error(
-          `Spawn rule for "${spawn.kind}" references unknown map "${spawn.mapId}"`,
         );
       }
     }
@@ -444,9 +444,11 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
   const resolvedItems = loadItemsFile(baseDir, gameDef.items);
   const resolvedDialogues = loadDialoguesFile(baseDir, gameDef.dialogues);
   const resolvedQuests = loadQuestsFile(baseDir, gameDef.quests);
-  const mapResult = resolveMapSources(baseDir, gameDef.map?.registry);
+  const resolvedMapConfigs = resolveMapConfigs(baseDir, gameDef.map?.registry);
+  const resolvedEntityRules = loadEntityRules(baseDir, gameDef.map?.entityRules);
+  const resolvedPlayerRule = resolvedRules["player"] as PlayerRule | undefined;
 
-  // 合并为最终定义：主配置字段 + 各 resolved* 资源数据 + 地图来源（默认/全量）
+  // 合并为最终定义：主配置字段 + 各 resolved* 资源数据 + 地图生成配置
   const loaded: LoadedGameDefinition = {
     ...gameDef,
     resolvedEntities,
@@ -456,9 +458,9 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
     resolvedItems,
     resolvedDialogues,
     resolvedQuests,
-    resolvedMapSource: mapResult.defaultSource,
-    resolvedMapSources: mapResult.sources,
-    resolvedDefaultMapId: mapResult.defaultKey,
+    resolvedMapConfigs,
+    resolvedEntityRules,
+    resolvedPlayerRule,
   };
 
   validateIntegrity(loaded);
@@ -496,8 +498,7 @@ export function createDefaultGameDefinition(): LoadedGameDefinition {
     resolvedItems: [],
     resolvedDialogues: [],
     resolvedQuests: [],
-    resolvedMapSource: undefined,
-    resolvedMapSources: {},
-    resolvedDefaultMapId: undefined,
+    resolvedMapConfigs: [],
+    resolvedEntityRules: [],
   };
 }

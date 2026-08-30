@@ -20,9 +20,11 @@ import http from "node:http";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { bootstrapFramework } from "framework/index";
-import { buildMapRuntime, computeMapVersion, MAP_CHUNK_SIZE } from "map";
-import { getMapSourceFromConfig, listMapIdsFromConfig, serverConfig } from "config";
-import type { MapChunk, MapRuntime } from "map";
+import { MAP_CHUNK_SIZE } from "map";
+import { computeGeometryVersion } from "map/geometry/version";
+import { getMapGeometryFromConfig, listMapIdsFromConfig, serverConfig } from "config";
+import type { MapChunk } from "map";
+import type { MapGeometry } from "map/geometry/types";
 import type { ColyseusServer } from "framework/net/colyseus/server";
 import type { Logger } from "utils/logger";
 
@@ -155,37 +157,37 @@ afterAll(async () => {
 });
 
 describe("地图 HTTP 端点（/maps/runtime 与 /maps/meta）", () => {
-  it("/maps/runtime?mapId=cave：200 返回 cave 数据（32×32，chunks 解码共 1024 字节）", async () => {
+  it("/maps/runtime?mapId=cave：200 返回 cave 数据（64×64，chunks 解码共 4096 字节）", async () => {
     const { status, body } = await getRuntime("cave");
     expect(status).toBe(200);
     expect(body.id).toBe("cave");
     expect(typeof body.name).toBe("string");
-    expect(body.grid).toEqual({ width: 32, height: 32, tileWidth: 16, tileHeight: 16 });
+    expect(body.grid).toEqual({ width: 64, height: 64, tileWidth: 16, tileHeight: 16 });
     expect(body.version).toMatch(/^[0-9a-f]{8}$/);
 
-    // 32×32 → 2×2 = 4 块；行主序（cy 外层、cx 内层）
-    expect(body.chunks).toHaveLength(4);
+    // 64×64 → 4×4 = 16 块；行主序（cy 外层、cx 内层）
+    expect(body.chunks).toHaveLength(16);
     expect(body.chunks.map((c) => [c.cx, c.cy])).toEqual([
-      [0, 0],
-      [1, 0],
-      [0, 1],
-      [1, 1],
+      [0, 0], [1, 0], [2, 0], [3, 0],
+      [0, 1], [1, 1], [2, 1], [3, 1],
+      [0, 2], [1, 2], [2, 2], [3, 2],
+      [0, 3], [1, 3], [2, 3], [3, 3],
     ]);
-    // 每块满 16×16 = 256 字节；总字节数 = 32×32 = 1024
+    // 每块满 16×16 = 256 字节；总字节数 = 64×64 = 4096
     for (const chunk of body.chunks) {
       expect(decodeChunk(chunk)).toHaveLength(MAP_CHUNK_SIZE * MAP_CHUNK_SIZE);
     }
-    expect(totalChunkBytes(body.chunks)).toBe(32 * 32);
+    expect(totalChunkBytes(body.chunks)).toBe(64 * 64);
   });
 
-  it("/maps/runtime 缺省 mapId：回退注册表默认图 generated-map（64×64）", async () => {
+  it("/maps/runtime 缺省 mapId：回退注册表首图 island（96×96）", async () => {
     const { status, body } = await getRuntime();
     expect(status).toBe(200);
-    expect(body.id).toBe("generated-map");
-    expect(body.grid).toEqual({ width: 64, height: 64, tileWidth: 16, tileHeight: 16 });
-    // 64×64 → 4×4 = 16 块，总字节数 = 4096
-    expect(body.chunks).toHaveLength(16);
-    expect(totalChunkBytes(body.chunks)).toBe(64 * 64);
+    expect(body.id).toBe("island");
+    expect(body.grid).toEqual({ width: 96, height: 96, tileWidth: 16, tileHeight: 16 });
+    // 96×96 → 6×6 = 36 块，总字节数 = 9216
+    expect(body.chunks).toHaveLength(36);
+    expect(totalChunkBytes(body.chunks)).toBe(96 * 96);
     expect(body.version).toMatch(/^[0-9a-f]{8}$/);
   });
 
@@ -206,7 +208,7 @@ describe("地图 HTTP 端点（/maps/runtime 与 /maps/meta）", () => {
     const body = (await res.json()) as ErrorBody;
     expect(body.error).toBe("unknown map");
     expect(body.available).toEqual(listMapIdsFromConfig());
-    expect(body.available).toContain("generated-map");
+    expect(body.available).toContain("island");
     expect(body.available).toContain("cave");
     expect(body.available).toContain("tiled-demo");
 
@@ -217,23 +219,23 @@ describe("地图 HTTP 端点（/maps/runtime 与 /maps/meta）", () => {
     expect(emptyBody.error).toBe("unknown map");
   });
 
-  it("computeMapVersion：同内容恒定，内容变化即变（纯函数直测）", () => {
-    const source = getMapSourceFromConfig("cave");
-    expect(source).not.toBeNull();
-    const runtime = buildMapRuntime(source!);
+  it("geometry version：同内容恒定，内容变化即变（纯函数直测）", () => {
+    const geometry = getMapGeometryFromConfig("cave");
+    expect(geometry).not.toBeNull();
 
-    const v1 = computeMapVersion(runtime);
+    const v1 = geometry!.version;
     expect(v1).toMatch(/^[0-9a-f]{8}$/);
 
-    // 确定性生成器（seed=2）重建同一来源 → 内容一致 → 版本一致
-    const rebuilt = buildMapRuntime(getMapSourceFromConfig("cave")!);
-    expect(computeMapVersion(rebuilt)).toBe(v1);
+    // 确定性管道（固定 seed）重建 → 内容一致 → 版本一致
+    const rebuilt = getMapGeometryFromConfig("cave");
+    expect(rebuilt!.version).toBe(v1);
 
-    // 内容变化（翻转一个阻挡字节）→ 版本变化
-    const modified: MapRuntime = { ...runtime, blocked: runtime.blocked.slice() };
-    modified.blocked[0] = modified.blocked[0] === 1 ? 0 : 1;
-    expect(computeMapVersion(modified)).not.toBe(v1);
-    expect(computeMapVersion(modified)).toMatch(/^[0-9a-f]{8}$/);
+    // 内容变化（翻转一个通行字节）→ 版本变化
+    const modified: MapGeometry = { ...geometry!, walkable: geometry!.walkable.slice() };
+    modified.walkable[0] = modified.walkable[0] === 1 ? 0 : 1;
+    const modifiedVersion = computeGeometryVersion(modified);
+    expect(modifiedVersion).not.toBe(v1);
+    expect(modifiedVersion).toMatch(/^[0-9a-f]{8}$/);
   });
 
   it("/maps/meta 与 /maps/runtime 的 version 一致（两张图都验）", async () => {
@@ -270,37 +272,33 @@ describe("地图 HTTP 端点（/maps/runtime 与 /maps/meta）", () => {
     }
   });
 
-  it("/maps/meta 响应形状：default=generated-map，两张图字段齐全", async () => {
+  it("/maps/meta 响应形状：default=island，三张图字段齐全", async () => {
     const meta = await getMeta();
-    expect(meta.default).toBe("generated-map");
+    expect(meta.default).toBe("island");
     expect(meta.maps).toHaveLength(3);
 
-    const generatedMap = meta.maps.find((m) => m.id === "generated-map");
+    const island = meta.maps.find((m) => m.id === "island");
     const cave = meta.maps.find((m) => m.id === "cave");
-    expect(generatedMap).toBeDefined();
+    expect(island).toBeDefined();
     expect(cave).toBeDefined();
 
     const tiledDemo = meta.maps.find((m) => m.id === "tiled-demo");
     expect(tiledDemo).toBeDefined();
-    expect(tiledDemo).toMatchObject({ kind: "tiled", width: 8, height: 8, tileWidth: 16, tileHeight: 16 });
+    expect(tiledDemo).toMatchObject({ kind: "geometry", width: 8, height: 8, tileWidth: 16, tileHeight: 16 });
 
-    expect(generatedMap).toMatchObject({
-      kind: "generated",
+    expect(island).toMatchObject({
+      kind: "geometry",
+      width: 96,
+      height: 96,
+      tileWidth: 16,
+      tileHeight: 16,
+    });
+    expect(cave).toMatchObject({
+      kind: "geometry",
       width: 64,
       height: 64,
       tileWidth: 16,
       tileHeight: 16,
-      generatorId: "simple",
-      seed: 1,
-    });
-    expect(cave).toMatchObject({
-      kind: "generated",
-      width: 32,
-      height: 32,
-      tileWidth: 16,
-      tileHeight: 16,
-      generatorId: "cave",
-      seed: 2,
     });
 
     // 每张图：id/name 非空字符串，version 为 8 位小写十六进制

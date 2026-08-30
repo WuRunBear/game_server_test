@@ -42,7 +42,8 @@ import { Collider } from "framework/components/physics";
 import { Size } from "framework/components/size";
 import { Inventory, type InventoryEntry } from "framework/components/inventory";
 import { ItemMeta } from "framework/components/itemMeta";
-import type { MapRuntime } from "framework/map";
+import { makeTestGeometry } from "./helpers/mapGeometry";
+import { EntityMap } from "framework/components/entityMap";
 import type { GameWorld } from "framework/world";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
@@ -80,6 +81,8 @@ function spawnCustomEntity(world: GameWorld, kind: string, components: Record<st
   }
   NetworkId.value[eid] = world.nextNetworkId++;
   setEntityKind(world, eid, kind);
+  // EntityMap 是模块级 AoS 单例：eid 跨 world 复用时会命中上一 world 的残留归属
+  EntityMap[eid] = world.defaultMapId;
   return eid;
 }
 
@@ -152,9 +155,9 @@ describe("archetypeRegistry", () => {
 // 无头仿真：GameSimulation 不依赖网络即可推进 tick（测试/单机共用路径）
 describe("GameSimulation headless", () => {
   // 连跑 5 tick 不抛错，第 5 帧 tick 号为 5
-  it("should run ticks without error", () => {
+  it("should run ticks without error", async () => {
     const gameDef = createDefaultGameDefinition();
-    const sim = createGameSimulation(gameDef);
+    const sim = await createGameSimulation(gameDef);
 
     const results = runHeadless(sim, { tickCount: 5 });
     expect(results[4].tick).toBe(5);
@@ -188,18 +191,19 @@ describe("loadGameDefinition (Item 1: sub-config loading)", () => {
     expect(combatRules.friendlyFire).toBe(false);
   });
 
-  // 刷怪：resolvedSpawns 按配置解析（含 kind/zoneId/max 等）
-  it("should load spawns from game/ directory", () => {
+  // 演化规则：旧 spawns 规则已迁入 maps/entity-rules.json（resolvedEntityRules）
+  it("should load entity rules from game/ directory", () => {
     const gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
-    expect(gameDef.resolvedSpawns.length).toBeGreaterThan(0);
-    expect(gameDef.resolvedSpawns[0].kind).toBe("villager");
+    expect(gameDef.resolvedEntityRules.length).toBeGreaterThan(0);
+    expect(gameDef.resolvedEntityRules[0].kind).toBe("villager");
+    expect(gameDef.resolvedSpawns.length).toBe(0);
   });
 
-  // 地图源：按 maps/registry.json 解析出生成式地图源
-  it("should resolve map source from registry", () => {
+  // 地图配置：按 maps/registry.json 解析出管道生成配置
+  it("should resolve map configs from registry", () => {
     const gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
-    expect(gameDef.resolvedMapSource).toBeDefined();
-    expect(gameDef.resolvedMapSource!.kind).toBe("generated");
+    expect(gameDef.resolvedMapConfigs.length).toBeGreaterThan(0);
+    expect(gameDef.resolvedMapConfigs.map((c) => c.key)).toContain("island");
   });
 });
 
@@ -324,72 +328,31 @@ describe("spawningSystem (Item 4)", () => {
   it("should run without error with empty spawn rules", () => {
     const gameDef = createDefaultGameDefinition();
     const instance = createGameInstance(gameDef);
+    const tickBefore = instance.world.time.tick;
     instance.step(50);
-    expect(instance.world.time.tick).toBe(1);
+    expect(instance.world.time.tick).toBe(tickBefore + 1);
   });
 });
 
-// Defect 2 回归：区域计数按 kind 分别统计、按多边形内判定，跨 kind 配额互不挤占
-describe("spawningSystem countInZone (Defect 2)", () => {
-  // 同 zone 两条规则各刷各的：a 规则 6+1=7（1 只在区外不计入）、b 规则 5 上限下只刷出 1
-  it("should filter by kind and zone polygon; cross-kind quotas do not挤占", () => {
+// 刷怪系统已退役（实体生产唯一路径 = 演化引擎）：系统体恒 no-op
+describe("spawningSystem retired (core switch)", () => {
+  it("should not produce entities even with legacy spawn rules present", () => {
     const { archetypeRegistry } = getRegistries();
     archetypeRegistry.register({ kind: "count-zone-a", components: {}, tags: ["NPC"] });
-    archetypeRegistry.register({ kind: "count-zone-b", components: {}, tags: ["NPC"] });
 
     const gameDef = createDefaultGameDefinition();
     const instance = createGameInstance(gameDef);
     const world = instance.world;
-
-    const testMap: MapRuntime = {
-      id: "test",
-      name: "test",
-      grid: { width: 1, height: 1, tileWidth: 1, tileHeight: 1 },
-      blocked: new Uint8Array(1),
-      spawns: { player: null, npcs: [] },
-      zones: [
-        {
-          id: 1,
-          name: "z",
-          polygon: [
-            { x: 0, y: 0 },
-            { x: 100, y: 0 },
-            { x: 100, y: 100 },
-            { x: 0, y: 100 },
-          ],
-        },
-      ],
-    };
-    world.map = testMap;
+    world.maps["test"] = makeTestGeometry({ key: "test", width: 4, height: 4 });
     world.gameDef.resolvedSpawns = [
       { kind: "count-zone-a", zoneId: 1, max: 6, respawnMs: 0 },
-      { kind: "count-zone-b", zoneId: 1, max: 5, respawnMs: 0 },
     ];
-
-    const insidePositions = [
-      { x: 10, y: 10 },
-      { x: 20, y: 20 },
-      { x: 30, y: 30 },
-      { x: 40, y: 40 },
-      { x: 50, y: 50 },
-    ];
-    for (const pos of insidePositions) {
-      spawnCustomEntity(world, "count-zone-a", { NPC: {}, Transform: pos });
-    }
-    spawnCustomEntity(world, "count-zone-a", { NPC: {}, Transform: { x: 200, y: 200 } });
 
     spawningSystem(world);
 
-    let countA = 0;
-    let countB = 0;
-    for (const eid of query(world, [NPC])) {
-      const k = Kind[eid];
-      if (k === "count-zone-a") countA++;
-      else if (k === "count-zone-b") countB++;
-    }
-
-    expect(countA).toBe(7);
-    expect(countB).toBe(1);
+    let count = 0;
+    for (const _eid of query(world, [NPC])) count++;
+    expect(count).toBe(0);
   });
 });
 
@@ -407,14 +370,15 @@ describe("aiSystem with behavior loading (Item 8)", () => {
     const wanderDef = gameDef.resolvedBehaviors.find((b) => b.id === "wander-default");
     expect(wanderDef).toBeDefined();
 
+    const tickBefore = instance.world.time.tick;
     instance.step(50);
-    expect(instance.world.time.tick).toBe(1);
+    expect(instance.world.time.tick).toBe(tickBefore + 1);
   });
 });
 
 // 真实 game 配置实例：配置中的原型注册进 archetypeRegistry，且地图已构建
 describe("GameInstance with game config", () => {
-  // 加载 game/game.json 后：player/villager 原型可用、world.map 已生成
+  // 加载 game/game.json 后：player/villager 原型可用、world.maps 已全量构建
   it("should register loaded entities into archetypeRegistry", () => {
     const gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
     const instance = createGameInstance(gameDef);
@@ -422,7 +386,7 @@ describe("GameInstance with game config", () => {
     const { archetypeRegistry } = getRegistries();
     expect(archetypeRegistry.has("player")).toBe(true);
     expect(archetypeRegistry.has("villager")).toBe(true);
-    expect(instance.world.map).toBeDefined();
+    expect(Object.keys(instance.world.maps).length).toBeGreaterThan(0);
   });
 });
 
@@ -449,9 +413,10 @@ describe("inventorySystem (Item 5)", () => {
     Transform.x[item] = 12;
     Transform.y[item] = 12;
 
+    const tickBefore = instance.world.time.tick;
     instance.step(50);
 
-    expect(instance.world.time.tick).toBe(1);
+    expect(instance.world.time.tick).toBe(tickBefore + 1);
   });
 
   // Defect 3 回归：满包不吞物品——前 4 个入包后消失，第 5 个因满包仍留在地面
@@ -515,9 +480,10 @@ describe("interactionSystem (Item 5)", () => {
     Transform.x[npc] = 20;
     Transform.y[npc] = 20;
 
+    const tickBefore = instance.world.time.tick;
     instance.step(50);
 
-    expect(instance.world.time.tick).toBe(1);
+    expect(instance.world.time.tick).toBe(tickBefore + 1);
   });
 });
 
@@ -529,20 +495,15 @@ describe("collisionSystem separation (Defect: 碰撞系统无效)", () => {
     const instance = createGameInstance(gameDef);
     const world = instance.world;
 
-    const testMap: MapRuntime = {
-      id: "test",
-      name: "test",
-      grid: { width: 4, height: 4, tileWidth: 32, tileHeight: 32 },
-      blocked: new Uint8Array([
-        0, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 0, 0,
-        0, 0, 0, 0,
-      ]),
-      spawns: { player: null, npcs: [] },
-      zones: [],
-    };
-    world.map = testMap;
+    world.maps["test"] = makeTestGeometry({
+      key: "test",
+      width: 4,
+      height: 4,
+      tileWidth: 32,
+      tileHeight: 32,
+      blocked: (tx, ty) => tx === 1 && ty === 1,
+    });
+    world.defaultMapId = "test";
 
     const eid = spawnCustomEntity(world, "test-collider", {
       Transform: { x: 28, y: 28 },
@@ -565,15 +526,8 @@ describe("collisionSystem separation (Defect: 碰撞系统无效)", () => {
     const instance = createGameInstance(gameDef);
     const world = instance.world;
 
-    const testMap: MapRuntime = {
-      id: "test2",
-      name: "test2",
-      grid: { width: 4, height: 4, tileWidth: 32, tileHeight: 32 },
-      blocked: new Uint8Array(16),
-      spawns: { player: null, npcs: [] },
-      zones: [],
-    };
-    world.map = testMap;
+    world.maps["test2"] = makeTestGeometry({ key: "test2", width: 4, height: 4, tileWidth: 32, tileHeight: 32 });
+    world.defaultMapId = "test2";
 
     const eid = spawnCustomEntity(world, "test-collider", {
       Transform: { x: 100, y: 100 },
@@ -873,9 +827,9 @@ describe("GameInstance.step snapshot test", () => {
 // 输入处理：输入逐帧消费——无新输入时速度归零、新输入只作用一帧
 describe("GameSimulation input handling", () => {
   // 无新输入：连续两帧位置不变（速度已消费，不再推进）
-  it("should stop player velocity when no new input is submitted", () => {
+  it("should stop player velocity when no new input is submitted", async () => {
     const gameDef = createDefaultGameDefinition();
-    const sim = createGameSimulation(gameDef);
+    const sim = await createGameSimulation(gameDef);
 
     const { networkId } = sim.addPlayer("session-1");
     sim.submitInput("session-1", { seq: 1, moveX: 100, moveY: 0 });
@@ -892,9 +846,9 @@ describe("GameSimulation input handling", () => {
   });
 
   // 新输入只作用一帧：x 仅第一帧移动、y 仅第二帧移动（输入按帧消耗）
-  it("should apply fresh input after previous input has been consumed", () => {
+  it("should apply fresh input after previous input has been consumed", async () => {
     const gameDef = createDefaultGameDefinition();
-    const sim = createGameSimulation(gameDef);
+    const sim = await createGameSimulation(gameDef);
 
     const { networkId } = sim.addPlayer("session-1");
 
@@ -964,7 +918,7 @@ describe("GameInstance step dtMs clamping", () => {
 // tick 异常隔离：某系统抛错不中断仿真（仍产出有效快照），保证联机运行稳定
 describe("GameSimulation tick error isolation", () => {
   // 注册一个必然抛错的系统后，sim.tick 不抛且返回有效结果
-  it("should not throw when a system throws inside step", () => {
+  it("should not throw when a system throws inside step", async () => {
     registerSystem({
       id: "test-thrower",
       factory: () => (world) => {
@@ -975,7 +929,7 @@ describe("GameSimulation tick error isolation", () => {
 
     const gameDef = createDefaultGameDefinition();
     gameDef.systems!.push({ id: "test-thrower" });
-    const sim = createGameSimulation(gameDef);
+    const sim = await createGameSimulation(gameDef);
 
     expect(() => sim.tick(50)).not.toThrow();
 

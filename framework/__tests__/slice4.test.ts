@@ -5,6 +5,7 @@
  * （IsNight/Sleep/IsInLight）、夜间敌对与火光回避集成、placeEntity 放置原子、
  * GameSimulation place 命令与 timeOfDay 快照，以及真实 game 配置集成。
  */
+import { makeTestGeometry } from "./helpers/mapGeometry";
 import { describe, it, expect, beforeAll } from "vitest";
 import { addComponent, addEntity, query } from "bitecs";
 import { State } from "mistreevous";
@@ -73,27 +74,11 @@ function ensureArchetype(world: GameWorld, spec: Parameters<typeof world.archety
   }
 }
 
-/** 给裸 world 挂一块 8×8 测试地图（128×128 像素，含 zone 1）。 */
+/** 给裸 world 挂一块 8×8 测试地图（128×128 像素，全可走，常驻激活）。 */
 function attachTestMap(world: GameWorld): void {
-  world.map = {
-    id: "test",
-    name: "test",
-    grid: { width: 8, height: 8, tileWidth: 16, tileHeight: 16 },
-    blocked: new Uint8Array(64),
-    spawns: { player: { x: 0, y: 0 }, npcs: [] },
-    zones: [
-      {
-        id: 1,
-        name: "z1",
-        polygon: [
-          { x: 0, y: 0 },
-          { x: 128, y: 0 },
-          { x: 128, y: 128 },
-          { x: 0, y: 128 },
-        ],
-      },
-    ],
-  };
+  world.maps["test"] = makeTestGeometry({ key: "test", width: 8, height: 8 });
+  world.activeMaps.add("test");
+  world.defaultMapId = "test";
 }
 
 interface PlayerOpts {
@@ -259,7 +244,7 @@ describe("Slice 4：spawn condition（条件刷怪）", () => {
     expect(cond(world)).toBe(true);
   });
 
-  it("spawningSystem：白天不刷、夜晚按规则刷出，max 上限生效", () => {
+  it("spawningSystem 已退役：条件刷怪规则注入也不产出实体（条件语义归演化引擎）", () => {
     const world = createBareWorld();
     attachTestMap(world);
     ensureArchetype(world, { kind: "sw1", components: {} });
@@ -269,35 +254,17 @@ describe("Slice 4：spawn condition（条件刷怪）", () => {
 
     const countWolves = () => query(world, [Transform]).filter((e) => Kind[e] === "sw1").length;
 
-    // 白天 → 不刷
-    world.time.timeOfDay.phase = PHASE_DAY;
-    spawningSystem(world);
-    expect(countWolves()).toBe(0);
-
-    // 夜晚 → 连刷到 max
     world.time.timeOfDay.phase = PHASE_NIGHT;
     spawningSystem(world);
     spawningSystem(world);
-    expect(countWolves()).toBe(2);
-
-    // 再次运行不再增加（max 上限）
-    spawningSystem(world);
-    expect(countWolves()).toBe(2);
-
-    // 回白天 → 不再刷
-    world.time.timeOfDay.phase = PHASE_DAY;
-    spawningSystem(world);
-    expect(countWolves()).toBe(2);
+    expect(countWolves()).toBe(0);
   });
 
-  it("未注册的 condition → 系统抛错", () => {
+  it("未注册的 condition → 演化引擎求值时抛错（条件校验随引擎走）", () => {
     const world = createBareWorld();
     attachTestMap(world);
     ensureArchetype(world, { kind: "sw2", components: {} });
-    world.gameDef.resolvedSpawns = [
-      { kind: "sw2", zoneId: 1, max: 1, respawnMs: 0, condition: "nope" },
-    ];
-    expect(() => spawningSystem(world)).toThrow(/unknown condition "nope"/);
+    expect(() => getSpawnCondition("nope")).toThrow(/not registered|unknown/i);
   });
 });
 
@@ -544,8 +511,14 @@ describe("Slice 4：placeEntity 放置原子", () => {
 
   it("压地图阻挡格拒绝", () => {
     const world = createBareWorld();
-    attachTestMap(world);
-    world.map!.blocked[1 * 8 + 1] = 1; // 阻挡 (1,1) 格
+    world.maps["test"] = makeTestGeometry({
+      key: "test",
+      width: 8,
+      height: 8,
+      blocked: (tx, ty) => tx === 1 && ty === 1,
+    });
+    world.activeMaps.add("test");
+    world.defaultMapId = "test";
     setupPlaceable(world);
     const player = spawnTestPlayer(world, { x: 0, y: 0 });
     fillInventory(Inventory[player]!, [{ kind: "k1", count: 1 }]);
@@ -574,9 +547,9 @@ describe("Slice 4：placeEntity 放置原子", () => {
 
 // GameSimulation 命令路由：place 命令从传输层进入世界并落位；timeOfDay 进入快照可同步给客户端
 describe("Slice 4：GameSimulation place 命令 + timeOfDay 快照", () => {
-  it("submitCommand place 生效；死亡窗口拒绝", () => {
+  it("submitCommand place 生效；死亡窗口拒绝", async () => {
     const gameDef = createDefaultGameDefinition();
-    const sim = createGameSimulation(gameDef);
+    const sim = await createGameSimulation(gameDef);
     const world = (sim as unknown as { world: GameWorld }).world;
     ensureArchetype(world, {
       kind: "plc",
@@ -597,9 +570,9 @@ describe("Slice 4：GameSimulation place 命令 + timeOfDay 快照", () => {
     expect(sim.submitCommand("s1", { type: "place", slot: 0, x: 40, y: 0 })).toBe(false);
   });
 
-  it("tick 快照携带 world 级 timeOfDay", () => {
+  it("tick 快照携带 world 级 timeOfDay", async () => {
     const gameDef = createDefaultGameDefinition();
-    const sim = createGameSimulation(gameDef);
+    const sim = await createGameSimulation(gameDef);
     sim.addPlayer("s1");
     const { snapshot } = sim.tick(50);
 
@@ -617,8 +590,8 @@ describe("Slice 4：真实 game 配置（昼夜 + 条件刷怪 + 光源 + 放置
     const daynight = def.resolvedRules["daynight"] as { cycleLengthSec: number };
     expect(daynight.cycleLengthSec).toBe(600);
 
-    // 存在引用 isNight 条件刷怪规则（真实配置加载即校验通过）
-    const conditioned = def.resolvedSpawns.filter((s) => s.condition === "isNight");
+    // 存在引用 isNight 条件的演化规则（真实配置加载即校验通过）
+    const conditioned = def.resolvedEntityRules.filter((r) => r.condition === "isNight");
     expect(conditioned.length).toBeGreaterThan(0);
 
     const kit = def.resolvedItems.find((i) => i.kind === "campfire_kit");
@@ -636,7 +609,7 @@ describe("Slice 4：真实 game 配置（昼夜 + 条件刷怪 + 光源 + 放置
     expect(Placeable.footprintW[campfire]).toBe(24);
   });
 
-  it("demo 主线：合成火堆套件（通用配方覆写）→ 放置真实 campfire → 站点合成可用", () => {
+  it("demo 主线：合成火堆套件（通用配方覆写）→ 放置真实 campfire → 站点合成可用", async () => {
     const def = loadGameDefinition({ gameJsonPath: "game/game.json" });
     def.resolvedSpawns = [];
     def.resolvedRules["crafting"] = {
@@ -646,7 +619,7 @@ describe("Slice 4：真实 game 配置（昼夜 + 条件刷怪 + 光源 + 放置
       ],
       stationRange: 64,
     };
-    const sim = createGameSimulation(def);
+    const sim = await createGameSimulation(def);
     const world = (sim as unknown as { world: GameWorld }).world;
     setItemKind(world, { kind: "m1", maxStack: 50 });
     setItemKind(world, { kind: "m2", maxStack: 50 });
@@ -678,20 +651,23 @@ describe("Slice 4：真实 game 配置（昼夜 + 条件刷怪 + 光源 + 放置
     }
     expect(placed).toBe(true);
 
-    const fire = query(world, [LightSource]);
-    expect(fire.length).toBeGreaterThanOrEqual(1);
-    const fireDist = Math.hypot(Transform.x[fire[0]] - Transform.x[playerEid], Transform.y[fire[0]] - Transform.y[playerEid]);
-    expect(fireDist).toBeLessThanOrEqual(64);
+    const fires = query(world, [LightSource]);
+    expect(fires.length).toBeGreaterThanOrEqual(1);
+    // 开机演化可能已铺放远处 campfire——只要求玩家附近存在本次放置的火堆
+    const nearFire = fires.some(
+      (f) => Math.hypot(Transform.x[f] - Transform.x[playerEid], Transform.y[f] - Transform.y[playerEid]) <= 96,
+    );
+    expect(nearFire).toBe(true);
 
     // 放在火堆旁 → 站点合成可用（stationType=1 匹配真实 campfire）
     expect(sim.submitCommand("s1", { type: "craft", recipe: "cook" })).toBe(true);
     expect(inv.slots.some((s) => s?.kind === "m4")).toBe(true);
   });
 
-  it("真实 netSync 接线：LightSource/Placeable 字段与 timeOfDay 进入快照", () => {
+  it("真实 netSync 接线：LightSource/Placeable 字段与 timeOfDay 进入快照", async () => {
     const def = loadGameDefinition({ gameJsonPath: "game/game.json" });
     def.resolvedSpawns = [];
-    const sim = createGameSimulation(def);
+    const sim = await createGameSimulation(def);
     const world = (sim as unknown as { world: GameWorld }).world;
     const { componentRegistry, archetypeRegistry } = getRegistries();
     spawnEntity(world, archetypeRegistry.get("campfire"), componentRegistry, { x: 10, y: 10 });

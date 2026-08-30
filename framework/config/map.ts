@@ -1,213 +1,75 @@
+/**
+ * 地图几何解析（framework/config/map.ts）。
+ *
+ * 从地图清单（game/maps/registry.json）按新管道配置构建运行时 MapGeometry：
+ * - kind = "pipeline"：按 seed + 积木管道生成（积木注册表本模块自建并注册内置积木）；
+ * - kind = "tiled"：path 指向的 Tiled JSON 已由 loadGameDefinition 在加载期内联，
+ *   本模块同样内联后经 tiled-source 积木产出几何。
+ *
+ * 几何由固定 seed 确定性产出，按 key 缓存；被 /maps/runtime、/maps/meta
+ * 调试端点消费（与仿真 world.maps 同源同内容）。
+ */
 import fs from "node:fs";
 import { dirname, resolve } from "node:path";
 
-import type { MapSource, NpcSpawnSpec } from "map/types";
+import { createGeneratorRegistry, type GeneratorRegistry } from "map/generate/generatorRegistry";
+import { registerBuiltinMapGenerators } from "map/generate/registerBuiltin";
+import { buildMapGeometry } from "map/generate/pipeline";
+import { MapRegistrySchema, type MapConfig } from "framework/config/schema/MapRegistrySchema";
+import type { MapGeometry } from "map/geometry/types";
 
-/**
- * 地图来源解析（framework/config/map.ts）。
- *
- * 从地图清单（game/maps/registry.json）解析出运行时可用的 MapSource：
- * - kind = "tiled"：读取外部 Tiled JSON 瓦片地图文件，内容内联进 MapSource.json
- * - kind = "generated"：声明生成器（generatorId）与种子/尺寸，由地图生成器程序化产出
- *
- * 与 schema/MapRegistrySchema.ts（纯配置校验）不同，本文件面向地图运行时
- * （framework/map），采用手工解析而非 zod；被 bootstrapFramework 用于装配世界地图。
- */
+/** 地图清单路径（与 loadGameDefinition 的 game.json map.registry 默认值一致）。 */
+const REGISTRY_PATH = "game/maps/registry.json";
 
-/**
- * 读取并解析 JSON 文件。
- *
- * @param filePath 文件路径
- * @returns 解析后的 JSON 值
- * @throws Error 当文件读取失败或 JSON 解析失败时抛出
- */
-function readJsonFile(filePath: string): unknown {
-  const text = fs.readFileSync(filePath, "utf-8");
-  return JSON.parse(text) as unknown;
-}
+/** 内置积木注册表（模块级惰性单例；积木为纯函数，多实例无状态差异）。 */
+let blockRegistry: GeneratorRegistry | undefined;
 
-/**
- * 判断值是否为普通对象（Record）。
- *
- * @param value 任意值
- * @returns 是否为对象且非数组
- */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * 把 unknown 转为 number（有限数）或返回 null。
- *
- * @param value 任意值
- * @returns number 或 null
- */
-function asNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-/**
- * 把 unknown 转为 string 或返回 null。
- *
- * @param value 任意值
- * @returns string 或 null
- */
-function asString(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
-
-/**
- * 从配置对象中按候选键读取 number，找不到则返回默认值。
- *
- * @param entry 配置对象
- * @param keys 候选键列表（按优先级顺序）
- * @param fallback 默认值
- * @returns 读取到的 number
- */
-function getNumber(entry: Record<string, unknown>, keys: string[], fallback: number): number {
-  for (const key of keys) {
-    const v = asNumber(entry[key]);
-    if (v !== null) return v;
+function getBlockRegistry(): GeneratorRegistry {
+  if (!blockRegistry) {
+    blockRegistry = createGeneratorRegistry();
+    registerBuiltinMapGenerators(blockRegistry);
   }
-  return fallback;
+  return blockRegistry;
 }
 
-/**
- * 从配置对象读取 string 字段。
- *
- * @param entry 配置对象
- * @param key 字段名
- * @returns string 或 null
- */
-function getString(entry: Record<string, unknown>, key: string): string | null {
-  return asString(entry[key]);
-}
-
-/**
- * 从配置对象解析单个 NPC 出生点配置项；格式非法时返回 null。
- */
-function asNpcSpawnSpec(value: unknown): NpcSpawnSpec | null {
-  if (!isRecord(value)) return null;
-  const kind = asString(value.kind);
-  if (kind === null) return null;
-  const offset = value.offsetTiles;
-  if (!Array.isArray(offset) || offset.length !== 2) return null;
-  const x = asNumber(offset[0]);
-  const y = asNumber(offset[1]);
-  if (x === null || y === null) return null;
-  const zoneId = asNumber(value.zoneId);
-  return zoneId === null ? { kind, offsetTiles: [x, y] } : { kind, offsetTiles: [x, y], zoneId };
-}
-
-/**
- * 从配置对象解析可选的 npcSpawns 数组；缺省或非法时返回 undefined（省略该字段）。
- */
-function parseNpcSpawns(value: unknown): NpcSpawnSpec[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const result: NpcSpawnSpec[] = [];
-  for (const item of value) {
-    const spec = asNpcSpawnSpec(item);
-    if (spec === null) return undefined;
-    result.push(spec);
+/** 读清单并解析为 MapConfig[]（Tiled 条目内联 JSON）。 */
+function loadMapConfigs(): MapConfig[] {
+  const raw: unknown = JSON.parse(fs.readFileSync(REGISTRY_PATH, "utf-8"));
+  const registry = MapRegistrySchema.parse(raw);
+  const configs: MapConfig[] = [];
+  for (const [key, entry] of Object.entries(registry.maps)) {
+    if (entry.kind === "tiled") {
+      const tiledJson: unknown = JSON.parse(
+        fs.readFileSync(resolve(dirname(REGISTRY_PATH), entry.path), "utf-8"),
+      );
+      configs.push({
+        key,
+        seed: 0,
+        initialAgeTicks: entry.initialAgeTicks,
+        pipeline: [{ generator: "tiled-source", params: { tiled: tiledJson } }],
+      });
+    } else {
+      configs.push({ key, seed: entry.seed, initialAgeTicks: entry.initialAgeTicks, pipeline: entry.pipeline });
+    }
   }
-  return result;
+  return configs;
 }
 
-/**
- * 从地图清单文件中解析出 MapSource。
- *
- * @param registryPath 地图清单路径
- * @param mapId 指定 mapId；为 null 则按 default/第一个可用 mapId 选择
- * @returns MapSource；显式指定 mapId 且清单中不存在该 id 时返回 null
- * @throws Error 当清单格式错误或无法选择地图时抛出
- */
-function mapSourceFromRegistryFile(
-  registryPath: string,
-  mapId: string | null,
-): MapSource | null {
-  const raw = readJsonFile(registryPath);
-  if (!isRecord(raw)) throw new Error("地图清单格式错误：根节点必须是对象");
-
-  const defaultId = asString(raw.default) ?? null;
-  const mapsRaw = raw.maps;
-  if (!isRecord(mapsRaw)) throw new Error("地图清单格式错误：maps 必须是对象（mapId -> 配置）");
-
-  const availableIds = Object.keys(mapsRaw);
-  if (mapId !== null && !(mapId in mapsRaw)) return null;
-
-  const selectedId = mapId ?? defaultId ?? availableIds[0] ?? null;
-  if (!selectedId) throw new Error("地图清单为空：至少需要一个 mapId");
-
-  const entryRaw = mapsRaw[selectedId];
-  if (!isRecord(entryRaw)) throw new Error(`地图清单格式错误：maps.${selectedId} 不是对象`);
-
-  const kind = getString(entryRaw, "kind");
-  const id = getString(entryRaw, "id") ?? selectedId;
-  const name = getString(entryRaw, "name") ?? selectedId;
-
-  if (kind === "tiled") {
-    const path = getString(entryRaw, "path");
-    if (!path) throw new Error(`地图清单缺少字段：maps.${selectedId}.path`);
-
-    return {
-      kind: "tiled",
-      id,
-      name,
-      json: readJsonFile(resolve(dirname(registryPath), path)),
-    };
-  }
-
-  if (kind === "generated") {
-    return {
-      kind: "generated",
-      generatorId: asString(entryRaw.generatorId) ?? "simple",
-      id,
-      name,
-      seed: getNumber(entryRaw, ["seed"], 1),
-      width: getNumber(entryRaw, ["width"], 64),
-      height: getNumber(entryRaw, ["height"], 64),
-      tileWidth: getNumber(entryRaw, ["tileWidth", "tileW"], 16),
-      tileHeight: getNumber(entryRaw, ["tileHeight", "tileH"], 16),
-      npcSpawns: parseNpcSpawns(entryRaw.npcSpawns),
-    };
-  }
-
-  throw new Error(`地图清单 kind 不支持：maps.${selectedId}.kind=${String(kind)}`);
-}
-
-/**
- * 从项目配置读取地图来源（MapSource）。
- *
- * 未指定 mapId 时返回默认地图（清单 default 项或第一个地图，永不返回 null）；
- * 显式指定 mapId 且清单中不存在该 id 时返回 null，由调用方转换为 404。
- *
- * @param mapId 可选的地图 id；省略则使用默认地图
- * @returns MapSource（未指定 mapId 时）；显式 mapId 不存在于清单时返回 null
- * @throws Error 当地图清单读取或解析失败时抛出
- */
-export function getMapSourceFromConfig(): MapSource;
-export function getMapSourceFromConfig(mapId: string): MapSource | null;
-export function getMapSourceFromConfig(mapId?: string): MapSource | null {
-  const registryPath = "game/maps/registry.json";
-  return mapSourceFromRegistryFile(registryPath, mapId ?? null);
-}
-
-/**
- * 列出项目配置中注册的全部地图 id（清单 maps 的键，按声明顺序）。
- *
- * 与 getMapSourceFromConfig 一样，本函数持有「地图清单路径」知识；
- * 供 /maps/runtime 的 404 available 列表与 /maps/meta 的地图遍历使用。
- *
- * @returns 地图 id 列表
- * @throws Error 当地图清单读取或解析失败时抛出
- */
+/** 列出配置中注册的全部地图 id（清单 maps 的键，按声明顺序）。 */
 export function listMapIdsFromConfig(): string[] {
-  const registryPath = "game/maps/registry.json";
-  const raw = readJsonFile(registryPath);
-  if (!isRecord(raw)) throw new Error("地图清单格式错误：根节点必须是对象");
+  return loadMapConfigs().map((config) => config.key);
+}
 
-  const mapsRaw = raw.maps;
-  if (!isRecord(mapsRaw)) throw new Error("地图清单格式错误：maps 必须是对象（mapId -> 配置）");
-
-  return Object.keys(mapsRaw);
+/**
+ * 从项目配置构建地图几何。
+ *
+ * @param mapId 指定地图 key；省略则取首个地图（与 world.defaultMapId 的
+ *   game.json map.default 缺省序一致）
+ * @returns MapGeometry；显式指定 key 且清单中不存在时返回 null
+ */
+export function getMapGeometryFromConfig(mapId?: string): MapGeometry | null {
+  const configs = loadMapConfigs();
+  const config = mapId === undefined ? configs[0] : configs.find((c) => c.key === mapId);
+  if (!config) return null;
+  return buildMapGeometry(config, getBlockRegistry());
 }

@@ -2,7 +2,7 @@
  * Portal 组件：场景传送点（AoS 结构）。
  *
  * 挂载该组件的实体为传送门：玩家与其 AABB 相交时触发场景切换
- * （见 portalSystem）——world.map 切换为 targetMap（引用 maps/registry.json
+ * （见 portalSystem）——玩家归属图切换为 targetMap（引用 maps/registry.json
  * 的地图 id），玩家传送至目标坐标 (x, y)。
  *
  * targetMap 为字符串引用，故组件为 AoS 形态：由 spawn 的 AoS 初始化钩子

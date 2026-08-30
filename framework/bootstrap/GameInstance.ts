@@ -2,19 +2,19 @@
  * 游戏实例——单个世界（ECS）的持有者与推进器。
  *
  * 职责：
- * - **组装**：创建 GameWorld，把各注册表（组件/系统/原型/动作/生成器）挂到 world，
+ * - **组装**：创建 GameWorld，把各注册表（组件/系统/原型/动作/生成积木）挂到 world，
  *   建立 gameDef 的运行时索引（itemsByKind / dialoguesByKind / questsByKind），
  *   并用 game 配置覆盖内建原型
- * - **初始化**：构建地图运行时 + 生成初始实体（spawnInitialEntities）
- * - **推进**：step(dtMs) 自增 tick、写入本帧 dtMs（限幅）、清空事件队列、按序执行全部系统
+ * - **开机**：调 bootMaps 全量构建地图（含初始演化；读档通道由 GameSimulation 注入）
+ * - **推进**：step(dtMs) 自增 tick、写入本帧 dtMs（限幅）、清空事件队列、
+ *   调用系统循环前钩子（演化接线点）、按序执行全部系统
  *
  * 上游是 GameSimulation（调用 step 并读取 world 派生快照）；本文件不涉及网络/传输概念。
  */
 import type { GameWorld, System } from "framework/world";
 import { createGameWorld } from "framework/world";
 import { buildSystems } from "framework/systems/systemRegistry";
-import { buildMapRuntime } from "framework/map/buildRuntime";
-import { spawnInitialNpcs } from "framework/map/switchMap";
+import { bootMaps, noopBootDeps, type BootDeps } from "map/runtime/boot";
 import { getRegistries } from "framework/bootstrap";
 import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
 
@@ -26,18 +26,26 @@ export interface GameInstance {
   world: GameWorld;
   /** 按拓扑序排列的系统列表（step 时依次执行）。 */
   systems: System[];
-  /** 推进一个逻辑帧：tick+1 → 设 dtMs（限幅）→ 清空事件队列 → 跑全部系统。 */
+  /**
+   * 系统循环前钩子（GameSimulation 注入，用于逐图 evolve）。
+   * 调用时机位于 tick 自增**之后**、系统拓扑序**之前**——演化跨度为
+   * (world.time.tick - 1, world.time.tick)，开机初始 tick 已由 boot 推进到
+   * initialAge，首个运行 tick 恰好衔接、无重复铺放。
+   */
+  beforeSystems?: (world: GameWorld) => void;
+  /** 推进一个逻辑帧：tick+1 → 设 dtMs（限幅）→ 清空事件队列 → 演化钩子 → 跑全部系统。 */
   step(dtMs: number): void;
-  /** 生成地图初始实体（如初始 NPC/资源点）。 */
+  /** 空操作：初始实体全由 bootMaps 的初始演化产生（唯一实体生产路径）。 */
   spawnInitialEntities(): void;
 }
 
 /**
  * 创建游戏实例（一条完整的世界初始化管线）。
  * @param gameDef 已加载并校验的游戏配置（loadGameDefinition 的输出）
+ * @param bootDeps 开机读档通道（GameSimulation 装配处注入；缺省无档不落盘）
  */
-export function createGameInstance(gameDef: LoadedGameDefinition): GameInstance {
-  const { componentRegistry, systemRegistry, archetypeRegistry, actionRegistry, generatorRegistry } = getRegistries();
+export function createGameInstance(gameDef: LoadedGameDefinition, bootDeps: BootDeps = noopBootDeps): GameInstance {
+  const { componentRegistry, systemRegistry, archetypeRegistry, actionRegistry, mapGeneratorRegistry } = getRegistries();
 
   // 固定步长（毫秒）：由 tickRate 换算；负载尖峰时 dtMs 被 clamp 到其 4 倍以内
   const fixedDtMs = Math.max(1, Math.floor(1000 / gameDef.tickRate));
@@ -49,7 +57,7 @@ export function createGameInstance(gameDef: LoadedGameDefinition): GameInstance 
   world.systems_registry = systemRegistry;
   world.archetypes = archetypeRegistry;
   world.actions = actionRegistry;
-  world.generators = generatorRegistry;
+  world.generators = mapGeneratorRegistry;
 
   // 构建 item kind 索引，供采集/消耗等系统按 kind 字符串查表
   gameDef.itemsByKind = new Map(gameDef.resolvedItems.map((i) => [i.kind, i]));
@@ -65,20 +73,6 @@ export function createGameInstance(gameDef: LoadedGameDefinition): GameInstance 
 
   const systems = buildSystems(world, gameDef.systems ?? [], systemRegistry);
 
-  // 开机仅构建并激活默认地图（world.map 为弃用别名，与 world.maps[defaultId] 同对象）；
-  // 其余地图由 ensureMapActive 按需惰性构建（不在此处全量构建）。
-  // 默认图键取 REGISTRY KEY（resolvedDefaultMapId，runtime 命名空间键）而非 source.id——
-  // 显式 id ≠ registry key 时 world.maps/activeMaps/defaultMapId 必须以 registry key 为键。
-  // 无地图配置（createDefaultGameDefinition 兜底路径）时三者保持默认值，行为与旧版一致。
-  const defaultMapId = gameDef.resolvedDefaultMapId;
-  if (gameDef.resolvedMapSource && defaultMapId !== undefined) {
-    const mapBuilt = buildMapRuntime(gameDef.resolvedMapSource);
-    world.map = mapBuilt;
-    world.maps[defaultMapId] = mapBuilt;
-    world.activeMaps.add(defaultMapId);
-    world.defaultMapId = defaultMapId;
-  }
-
   const instance: GameInstance = {
     world,
     systems,
@@ -93,17 +87,21 @@ export function createGameInstance(gameDef: LoadedGameDefinition): GameInstance 
       // 帧首清空事件队列：事件只在产生它的那一帧有效（未消费不跨帧堆积）
       world.runtimeEvents = [];
 
+      // 演化钩子：位于 tick 自增与系统拓扑序之间（step 之前调会得到 (n→n)
+      // 零跨度空转，step 之后调则系统已跑完——见计划 todo 9⑦）
+      instance.beforeSystems?.(world);
+
       for (const system of systems) {
         system(world);
       }
     },
 
     spawnInitialEntities() {
-      spawnInitialNpcs(world, world.defaultMapId);
+      // 初始实体全由 bootMaps 的初始演化产生；本方法保留为空操作（兼容旧调用面）。
     },
   };
 
-  instance.spawnInitialEntities();
+  bootMaps(world, gameDef, bootDeps);
 
   return instance;
 }

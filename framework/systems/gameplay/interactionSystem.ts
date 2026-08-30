@@ -12,12 +12,18 @@ interface SystemConfig {
 const DEFAULT_RANGE = 24;
 
 /**
- * 路由判定的实体地图 id：存储的 mapId 在本世界无对应图（跨 world 残留或未知 id）
- * → 按世界默认图处理（单图世界行为与无地图标记一致）。
+ * 路由判定的实体地图 id：mapId 解析不到已构建图（归属异常 = 配置/存档 bug）
+ * 时**不改写归属**——记 error 并原样返回，与任何真实图比较即自然跳过该实体
+ * （全量常驻后不允许静默踢回默认图的旧纠偏行为）。
  */
 function effectiveMapOf(world: GameWorld, eid: number): string {
   const m = entityMapOf(world, eid);
-  if (m !== "" && !world.maps[m] && world.map?.id !== m) return world.defaultMapId;
+  if (m !== "" && !world.maps[m]) {
+    world.logger.error("entity mapId does not resolve to a known map; entity skipped", {
+      eid,
+      mapId: m,
+    });
+  }
   return m;
 }
 

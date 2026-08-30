@@ -6,6 +6,7 @@
  * 分图语义（per-player：仅触发玩家切图，他人不动）、spawningSystem 按 mapId 过滤、
  * 存档记录/恢复（实体级 EntityMap 归属），以及真实 game 配置集成（墙放置→拆除全链路）。
  */
+import { makeTestGeometry } from "./helpers/mapGeometry";
 import { describe, it, expect, beforeAll } from "vitest";
 import { addComponent, addEntity, query } from "bitecs";
 import {
@@ -16,7 +17,6 @@ import {
   loadGameDefinition,
   spawnEntity,
   getRegistries,
-  ensureMapActive,
   movePlayerToMap,
   serializeWorld,
 } from "framework/index";
@@ -41,6 +41,7 @@ import { spawningSystem } from "framework/systems/gameplay/spawningSystem";
 import { setEntityKind } from "framework/systems/gameplay/aiSystem";
 import type { GameWorld } from "framework/world";
 import type { ItemKindSpec } from "framework/config/schema/ItemKindSchema";
+import type { Repository } from "framework/repository";
 
 beforeAll(() => {
   // 全局引导一次：注册表是幂等单例，所有用例共享同一套内置实现
@@ -67,42 +68,21 @@ function ensureArchetype(world: GameWorld, spec: Parameters<typeof world.archety
   }
 }
 
-/** 给裸 world 挂一块 8×8 测试地图（128×128 像素，含 zone 1）。 */
+/** 给裸 world 挂一块 8×8 测试地图（128×128 像素，全可走，常驻激活）。 */
 function attachTestMap(world: GameWorld, id = "test"): void {
-  world.map = {
-    id,
-    name: id,
-    grid: { width: 8, height: 8, tileWidth: 16, tileHeight: 16 },
-    blocked: new Uint8Array(64),
-    spawns: { player: { x: 64, y: 64 }, npcs: [] },
-    zones: [
-      {
-        id: 1,
-        name: "z1",
-        polygon: [
-          { x: 0, y: 0 },
-          { x: 128, y: 0 },
-          { x: 128, y: 128 },
-          { x: 0, y: 128 },
-        ],
-      },
-    ],
-  };
+  world.maps[id] = makeTestGeometry({ key: id, width: 8, height: 8 });
+  world.activeMaps.add(id);
+  world.defaultMapId = id;
 }
 
-/** 挂两张生成图（a/b），供 setWorldMap/enterMap/portal 测试。 */
+/** 挂两张已构建图（a/b，全部常驻激活——核心切换后无惰性构建）。 */
 function attachTwoMaps(world: GameWorld): void {
-  world.gameDef.resolvedMapSources = {
-    a: {
-      kind: "generated", generatorId: "simple", id: "a", name: "a",
-      seed: 1, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
-    },
-    b: {
-      kind: "generated", generatorId: "simple", id: "b", name: "b",
-      seed: 2, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
-    },
+  world.maps = {
+    a: makeTestGeometry({ key: "a", width: 8, height: 8 }),
+    b: makeTestGeometry({ key: "b", width: 8, height: 8 }),
   };
-  world.map = undefined;
+  world.activeMaps = new Set(["a", "b"]);
+  world.defaultMapId = "a";
 }
 
 /** 清空 EntityMap 模块级单例残留（AoS 数组跨 world 复用 eid，防跨用例串扰）。 */
@@ -322,8 +302,7 @@ describe("Slice 6：portal 场景切换", () => {
     clearEntityMap();
     clearPortal();
     attachTwoMaps(world);
-    expect(ensureMapActive(world, "a")).toBe(true);
-    expect(world.maps["a"].id).toBe("a");
+    expect(world.maps["a"].key).toBe("a");
     expect(world.activeMaps.has("a")).toBe(true);
 
     const player = spawnTestPlayer(world, { x: 10, y: 10 });
@@ -343,8 +322,8 @@ describe("Slice 6：portal 场景切换", () => {
     expect(Transform.x[other]).toBe(50);
     expect(Transform.y[other]).toBe(50);
     expect(Transform.x[scene]).toBe(20);
-    // 目标图被惰性构建并激活
-    expect(world.maps["b"].id).toBe("b");
+    // 目标图已在激活集中（常驻语义）
+    expect(world.maps["b"].key).toBe("b");
     expect(world.activeMaps.has("b")).toBe(true);
   });
 
@@ -405,9 +384,9 @@ describe("Slice 6：portal 场景切换", () => {
     expect(EntityMap[player]).toBe("a");
     expect(Transform.x[player]).toBe(10);
     expect(Transform.y[player]).toBe(10);
-    // 未触发：无任何图被构建/激活
-    expect(world.maps).toEqual({});
-    expect(world.activeMaps.size).toBe(0);
+    // 未触发：世界状态不变（图已由 boot 全量构建并激活）
+    expect(Object.keys(world.maps).sort()).toEqual(["a", "b"]);
+    expect(world.activeMaps).toEqual(new Set(["a", "b"]));
   });
 
   it("portalSystem：完整 tick 链（movement+collision 分离到接触距离）后仍可触发", () => {
@@ -415,14 +394,8 @@ describe("Slice 6：portal 场景切换", () => {
     clearEntityMap();
     clearPortal();
     attachTwoMaps(world);
-    // 覆盖为无阻挡手工图（生成器随机障碍会干扰碰撞链；resolvedMapSources 保留供触发后激活目标图）
-    world.map = {
-      id: "a", name: "a",
-      grid: { width: 8, height: 8, tileWidth: 16, tileHeight: 16 },
-      blocked: new Uint8Array(64),
-      spawns: { player: { x: 0, y: 0 }, npcs: [] },
-      zones: [],
-    };
+    // 覆盖为无阻挡手工图（生成器随机障碍会干扰碰撞链）
+    world.maps["a"] = makeTestGeometry({ key: "a", width: 8, height: 8 });
     // portal 带阻挡 Collider（静态体）：玩家被碰撞系统分离到恰接触距离
     // （|dx| = 8+16 = 24）——接触判定（<=）保证分离后仍触发（严格小于会死锁）
     ensureArchetype(world, {
@@ -458,43 +431,20 @@ describe("Slice 6：portal 场景切换", () => {
     expect(Transform.x[other]).toBe(500);
   });
 
-  it("ensureMapActive：首次激活构建运行时+布置 NPC；二次幂等；未知图返回 false", () => {
+  it("地图常驻激活：boot 后全部配置图在 world.maps/activeMaps（ensureMapActive 已消亡）", () => {
     const world = createBareWorld();
     clearEntityMap();
     clearPortal();
     attachTwoMaps(world);
-    // 给图 a 补初始 NPC 出生点（本用例专属：验证首次激活布置、二次不重复）
-    world.gameDef.resolvedMapSources!["a"] = {
-      kind: "generated", generatorId: "simple", id: "a", name: "a",
-      seed: 1, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
-      npcSpawns: [
-        { kind: "npc1", offsetTiles: [1, 0] },
-        { kind: "npc1", offsetTiles: [0, 1] },
-      ],
-    };
     ensureArchetype(world, { kind: "npc1", components: {} });
 
-    expect(ensureMapActive(world, "a")).toBe(true);
     expect(world.maps["a"]).toBeDefined();
-    expect(world.maps["a"].id).toBe("a");
+    expect(world.maps["a"].key).toBe("a");
     expect(world.activeMaps.has("a")).toBe(true);
-    // 首次激活按 npcSpawns 布置并归属该图
-    const npcs = query(world, [Transform]);
-    expect(npcs.length).toBe(2);
-    for (const eid of npcs) {
-      expect(EntityMap[eid]).toBe("a");
-    }
-    // 幂等：二次激活不重复布置 NPC
-    expect(ensureMapActive(world, "a")).toBe(true);
-    expect(query(world, [Transform]).length).toBe(2);
-
-    // 未知图（未注册）：返回 false，不构建不激活
-    expect(ensureMapActive(world, "nope")).toBe(false);
-    expect(world.maps["nope"]).toBeUndefined();
     expect(world.activeMaps.has("nope")).toBe(false);
   });
 
-  it("spawningSystem 按 mapId 过滤：只刷当前图规则", () => {
+  it("spawningSystem 已退役：注入 mapId 过滤规则也不产出实体", () => {
     const world = createBareWorld();
     attachTestMap(world, "a");
     ensureArchetype(world, { kind: "w1", components: {} });
@@ -502,30 +452,23 @@ describe("Slice 6：portal 场景切换", () => {
       { kind: "w1", zoneId: 1, max: 2, respawnMs: 0, mapId: "a" },
       { kind: "w1", zoneId: 1, max: 2, respawnMs: 0, mapId: "b" },
     ];
-    world.time.tick = 0;
-    world.time.fixedDtMs = 50;
     spawningSystem(world);
     spawningSystem(world);
-    // 每 tick 每规则最多刷 1：两 tick 刷满 a 规则 max 2；b 规则始终被过滤
-    expect(query(world, [Transform]).length).toBe(2);
-    for (const eid of query(world, [Transform])) {
-      expect(Kind[eid]).toBe("w1");
-    }
+    expect(query(world, [Transform]).length).toBe(0);
   });
 
-  it("serializeWorld 写 defaultMapId；initialRecord 恢复按实体 EntityMap 归属并激活玩家图", () => {
+  it("serializeWorld 写 defaultMapId；initialRecord 恢复按实体 EntityMap 归属并激活玩家图", async () => {
     const world = createBareWorld();
     clearEntityMap();
     clearPortal();
     attachTwoMaps(world);
     // 注册 test-player 原型（restoreWorld 按 kind 重建实体）
     ensureArchetype(world, { kind: "test-player", components: {} });
-    ensureMapActive(world, "a");
     const player = spawnTestPlayer(world, { x: 5, y: 5 });
     EntityMap[player] = "a";
     const record = serializeWorld(world, "save1");
-    // todo-15：record.mapId 写世界默认图 id（裸世界无图配置 → 空串）；实体级归属入 components
-    expect(record.mapId).toBe("");
+    // record.mapId 写世界默认图 id；实体级归属入 components
+    expect(record.mapId).toBe("a");
     const saved = record.entities.find((e) => e.kind === "test-player")!;
     expect(saved.components["EntityMap"]).toBe("a");
 
@@ -536,20 +479,27 @@ describe("Slice 6：portal 场景切换", () => {
     ensureArchetype(world2, { kind: "test-player", components: {} });
     // restoreWorld 在 createGameSimulation 构造时就写 EntityMap——清零须在构造前
     clearEntityMap();
-    const sim = createGameSimulation(world2.gameDef, { initialRecord: record });
+    // 读档通道唯一化：快照经 repository 预载（createGameSimulation 装配处）注入
+    const repo: Repository = {
+      saveWorld: async () => {},
+      loadWorld: async () => record,
+    };
+    const sim = await createGameSimulation(world2.gameDef, { repository: repo, saveId: "save1" });
     const simWorld = (sim as unknown as { world: GameWorld }).world;
     const restored = query(simWorld, [NetworkId])[0];
     expect(restored).toBeDefined();
     expect(EntityMap[restored]).toBe("a");
-    expect(simWorld.activeMaps.has("a")).toBe(true);
+    // 激活集由 boot 全量构建（常驻语义）；restoreWorld 仅兜底激活「已构建图」——
+    // 本 world 无地图配置（"a" 未构建）→ 守卫跳过，不抛错、不产生幽灵激活
+    expect(simWorld.activeMaps.has("a")).toBe(false);
   });
 });
 
 // 真实 game 配置集成：墙放置→占用→拆除全链路走配置数据，验证端到端可用
 describe("Slice 6：真实 game 配置集成", () => {
-  it("合成 wall_kit → gridSnap 放置 → 拆除 → 死亡窗口拒绝 全链路", () => {
+  it("合成 wall_kit → gridSnap 放置 → 拆除 → 死亡窗口拒绝 全链路", async () => {
     const def = loadGameDefinition({ gameJsonPath: "game/game.json" });
-    const sim = createGameSimulation(def);
+    const sim = await createGameSimulation(def);
     const world = (sim as unknown as { world: GameWorld }).world;
 
     sim.addPlayer("s1");
@@ -557,12 +507,21 @@ describe("Slice 6：真实 game 配置集成", () => {
     // 直接给 wall_kit（kit 配方引用校验由 validateIntegrity + slice3 真实配置用例覆盖）
     Inventory[playerEid]!.slots[0] = { kind: "wall_kit", count: 1 };
 
-    // gridSnap 放置（真实配置 place.json 已开 gridSnap；出生点右侧有 villager，向左放）
+    // gridSnap 放置（真实配置 place.json 已开 gridSnap）；新地图阻挡/占用分布不同，
+    // 以玩家为原点环状偏移重试，命中可放位置即成功
     const px = Transform.x[playerEid];
     const py = Transform.y[playerEid];
-    expect(sim.submitCommand("s1", { type: "place", slot: 0, x: px - 20, y: py })).toBe(true);
-    const wall = query(world, [Placeable])[0];
-    expect(wall !== undefined).toBe(true);
+    let placed = false;
+    for (const [dx, dy] of [[-20, 0], [20, 0], [0, -20], [0, 20], [-40, 0], [40, 0], [0, -40], [0, 40]]) {
+      if (sim.submitCommand("s1", { type: "place", slot: 0, x: px + dx, y: py + dy })) {
+        placed = true;
+        break;
+      }
+    }
+    expect(placed).toBe(true);
+    // 开机演化可能已铺放带 Placeable 的实体（如 campfire）——取最后创建（本次放置）的
+    const wall = query(world, [Placeable]).at(-1)!;
+    expect(wall).toBeDefined();
     // 对齐到格中心（tile 16 → 中心坐标 ≡ 8 mod 16）
     expect(Transform.x[wall] % 16).toBe(8);
     expect(Transform.y[wall] % 16).toBe(8);
@@ -571,7 +530,7 @@ describe("Slice 6：真实 game 配置集成", () => {
 
     // 放置者拆除成功
     expect(sim.submitCommand("s1", { type: "deconstruct", target: NetworkId.value[wall] })).toBe(true);
-    expect(query(world, [Placeable]).length).toBe(0);
+    expect(query(world, [Placeable]).some((e) => e === wall)).toBe(false);
 
     // 死亡窗口拒绝（submitCommand 层守卫）
     const wall2 = spawnEntity(world, world.archetypes.get("wall"), getRegistries().componentRegistry, { x: px + 24, y: py });

@@ -411,16 +411,18 @@ describe("Slice 7：持久化（Quest/Relation 入档，Dialogue 不入档）", 
 
 // 端到端：真实 game 配置下 对话树→任务线（收集/击杀→提交→奖励）全链路走通
 describe("Slice 7：真实 game 配置集成（对话任务线全链路）", () => {
-  it("talk 接任务 → 收集 → 提交 → 奖励与好感", () => {
+  it("talk 接任务 → 收集 → 提交 → 奖励与好感", async () => {
     const def = loadGameDefinition({ gameJsonPath: "game/game.json" });
-    const sim = createGameSimulation(def);
+    const sim = await createGameSimulation(def);
     const world = (sim as unknown as { world: GameWorld }).world;
 
     sim.addPlayer("s1");
     const playerEid = query(world, [Player])[0];
-    // 初始 villager 在出生点右侧 (544,512)，把玩家放到其旁
-    Transform.x[playerEid] = 544;
-    Transform.y[playerEid] = 512;
+    // villager 由开机演化铺放在 plain 区域——把玩家放到最近一只 villager 旁
+    const villager = query(world, [Transform]).find((eid) => Kind[eid] === "villager");
+    expect(villager).toBeDefined();
+    Transform.x[playerEid] = Transform.x[villager!] + 10;
+    Transform.y[playerEid] = Transform.y[villager!] + 10;
 
     // talk 意图 → 打开 villager 对话（起始节点）；快照同步 Dialogue 展平字段
     sim.submitInput("s1", { seq: 1, moveX: 0, moveY: 0, talk: true });

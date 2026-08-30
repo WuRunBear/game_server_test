@@ -14,6 +14,7 @@
  * SETUP 允许 bracket-access 内部（sim.world / Transform 直接定位置），
  * 传送门定位经 populations 规则刷出后从 ECS 世界查找。
  */
+import type { SimulationPort } from "simulation";
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,7 +33,7 @@ import { Collider } from "framework/components/physics";
 import { Portal } from "framework/components/portal";
 import { EntityMap, entityMapOf } from "framework/components/entityMap";
 import type { GameWorld } from "framework/world";
-import type { MapRuntime } from "framework/map/types";
+import type { MapGeometry } from "map/geometry/types";
 import type { TickResult } from "framework/simulation/types";
 
 beforeAll(() => {
@@ -51,18 +52,16 @@ beforeEach(() => {
 // ---- 来自真实 game 配置的取值（非框架内硬编码语义） ----
 const GAME_JSON = "game/game.json";
 /** game/maps/registry.json 的 default 地图键。 */
-const DEFAULT_MAP_ID = "generated-map";
+const DEFAULT_MAP_ID = "island";
 /** game/maps/registry.json 的 cave 地图键。 */
 const CAVE_MAP_ID = "cave";
-/** game/spawns/populations.json 中 cave 资源规则的反应间隔（ms）。 */
-const CAVE_RESPAWN_MS = 1000;
-/** game/entities/portal.json：入口传送门的目的地（cave 内坐标）。 */
-const ENTRY_DEST = { x: 256, y: 256 };
+/** game/entities/portal.json：入口传送门的目的地（cave 内坐标，回程门邻近格）。 */
+const ENTRY_DEST = { x: 488, y: 520 };
 /** game/rules/server.json 存了 60s 的 saveIntervalMs，超出测试时长——见 it5。 */
 const SAVE_ID = "main";
 const TICK_MS = 50;
 
-function simWorld(sim: ReturnType<typeof createGameSimulation>): GameWorld {
+function simWorld(sim: SimulationPort): GameWorld {
   return (sim as unknown as { world: GameWorld }).world;
 }
 
@@ -79,13 +78,13 @@ function findPortal(world: GameWorld, mapId: string, targetMap: string): number 
   });
 }
 
-/** tile 中心像素坐标是否落在非阻挡格（grid 确定性，seed 固定）。 */
-function isWalkableAt(runtime: MapRuntime, x: number, y: number): boolean {
-  const g = runtime.grid;
+/** tile 中心像素坐标是否落在可走格（grid 确定性，seed 固定）。 */
+function isWalkableAt(geometry: MapGeometry, x: number, y: number): boolean {
+  const g = geometry.grid;
   const tx = Math.floor(x / g.tileWidth);
   const ty = Math.floor(y / g.tileHeight);
-  if (tx < 2 || ty < 2 || tx >= g.width - 2 || ty >= g.height - 2) return false;
-  return runtime.blocked[ty * g.width + tx] === 0;
+  if (tx < 1 || ty < 1 || tx >= g.width - 1 || ty >= g.height - 1) return false;
+  return geometry.walkable[ty * g.width + tx] === 1;
 }
 
 /**
@@ -99,7 +98,7 @@ function isWalkableAt(runtime: MapRuntime, x: number, y: number): boolean {
  */
 function findTriggerSpot(world: GameWorld, portalEid: number, playerEid: number): { x: number; y: number } | null {
   const portalMap = entityMapOf(world, portalEid);
-  const runtime = world.maps[portalMap] ?? world.map!;
+  const runtime = world.maps[portalMap]!;
   const px = Transform.x[portalEid];
   const py = Transform.y[portalEid];
   const bodies = query(world, [Collider, Transform]);
@@ -131,7 +130,7 @@ function findTriggerSpot(world: GameWorld, portalEid: number, playerEid: number)
  */
 function crossPortal(
   world: GameWorld,
-  sim: ReturnType<typeof createGameSimulation>,
+  sim: SimulationPort,
   portalEid: number,
   playerEid: number,
   expectMapId: string,
@@ -160,17 +159,17 @@ function countMapEntities(result: TickResult, mapId: string): number {
 }
 
 /** 建真配置仿真 + 加两玩家 + 首 tick（让 populations 规则刷出 portal 与资源）。 */
-function setupTwoPlayers(): {
+async function setupTwoPlayers(): Promise<{
   def: ReturnType<typeof loadGameDefinition>;
-  sim: ReturnType<typeof createGameSimulation>;
+  sim: SimulationPort;
   world: GameWorld;
   eA: number;
   eB: number;
   nidA: number;
   nidB: number;
-} {
+}> {
   const def = loadGameDefinition({ gameJsonPath: GAME_JSON });
-  const sim = createGameSimulation(def);
+  const sim = await createGameSimulation(def);
   const world = simWorld(sim);
   const nidA = sim.addPlayer("sA").networkId;
   const nidB = sim.addPlayer("sB").networkId;
@@ -185,8 +184,8 @@ function setupTwoPlayers(): {
 
 // ============================================================================
 describe("per-player integration", () => {
-  it("场景1：sA 触发 portal 进 cave；sB 留 generated-map；跨图不可见", () => {
-    const { sim, world, eA, eB, nidA, nidB } = setupTwoPlayers();
+  it("场景1：sA 触发 portal 进 cave；sB 留 generated-map；跨图不可见", async () => {
+    const { sim, world, eA, eB, nidA, nidB } = await setupTwoPlayers();
 
     const portal = findPortal(world, DEFAULT_MAP_ID, CAVE_MAP_ID);
     expect(portal).toBeDefined();
@@ -215,8 +214,8 @@ describe("per-player integration", () => {
     expect(triggered.interest!.get("sB")).toContain(nidB);
   });
 
-  it("场景2：cave 激活后按 cave 规则独立刷出（生态与默认图无关）", () => {
-    const { sim, world, eA, nidA } = setupTwoPlayers();
+  it("场景2：cave 激活后按 cave 规则独立刷出（生态与默认图无关）", async () => {
+    const { sim, world, eA, nidA } = await setupTwoPlayers();
 
     const portal = findPortal(world, DEFAULT_MAP_ID, CAVE_MAP_ID);
     expect(portal).toBeDefined();
@@ -225,14 +224,14 @@ describe("per-player integration", () => {
     const atEntry = countMapEntities(entered, CAVE_MAP_ID);
     expect(entered.snapshot.playerMaps.get("sA")).toBe(CAVE_MAP_ID);
 
-    // 足够长推进（cave 规则 respawnMs=1000ms → 每 20 tick 一周期，跑 60 tick≈3 周期）
+    // 推进若干 tick（cave 生态已由开机初始演化铺满 max，运行期保持稳定）
     let result = entered;
     for (let i = 0; i < 60; i++) {
       result = sim.tick(TICK_MS);
     }
     const caveCount = countMapEntities(result, CAVE_MAP_ID);
-    // 至少 berry_bush/tree/rock 各 1 只（且均为 cave 归属 → 来自 cave 规则而非默认图）
-    expect(caveCount).toBeGreaterThanOrEqual(atEntry + 3);
+    // cave 生态存在（berry_bush/tree/rock/boar 由 cave 规则铺放，归属 cave）
+    expect(caveCount).toBeGreaterThanOrEqual(3);
     // sA 仍在 cave（生态持续运行不把玩家挤走）
     expect(result.snapshot.playerMaps.get("sA")).toBe(CAVE_MAP_ID);
     // 默认图玩家仍留在默认图（sB 从未触发）
@@ -245,8 +244,8 @@ describe("per-player integration", () => {
     }
   });
 
-  it("场景3：sB 随后进 cave，与 sA 共享生态（同图互相可见）", () => {
-    const { sim, world, eA, eB, nidA, nidB } = setupTwoPlayers();
+  it("场景3：sB 随后进 cave，与 sA 共享生态（同图互相可见）", async () => {
+    const { sim, world, eA, eB, nidA, nidB } = await setupTwoPlayers();
 
     const portal = findPortal(world, DEFAULT_MAP_ID, CAVE_MAP_ID);
     expect(portal).toBeDefined();
@@ -271,8 +270,8 @@ describe("per-player integration", () => {
     expect(result.snapshot.entities.get(nidB)?.mapId).toBe(CAVE_MAP_ID);
   });
 
-  it("场景4：sA 返回 generated-map 后，无玩家的 cave 继续按规则刷怪（常驻模拟）", () => {
-    const { sim, world, eA } = setupTwoPlayers();
+  it("场景4：sA 返回 generated-map 后，无玩家的 cave 继续按规则刷怪（常驻模拟）", async () => {
+    const { sim, world, eA } = await setupTwoPlayers();
 
     const portal = findPortal(world, DEFAULT_MAP_ID, CAVE_MAP_ID);
     expect(portal).toBeDefined();
@@ -291,13 +290,13 @@ describe("per-player integration", () => {
     const before = countMapEntities(back, CAVE_MAP_ID);
     expect(before).toBeGreaterThan(0);
 
-    // 再推 25 tick（≥1 个 1000ms 周期）：空图（含无玩家）继续按 respawnMs 刷怪
+    // 再推 25 tick：空图（含无玩家）常驻运行，cave 生态保持（不消失）
     let result = back;
     for (let i = 0; i < 25; i++) {
       result = sim.tick(TICK_MS);
     }
     const after = countMapEntities(result, CAVE_MAP_ID);
-    expect(after).toBeGreaterThan(before);
+    expect(after).toBeGreaterThanOrEqual(before);
     // sA 依然在 generated-map（回来后再没有被移动）
     expect(result.snapshot.playerMaps.get("sA")).toBe(DEFAULT_MAP_ID);
     expect(result.snapshot.playerMaps.get("sB")).toBe(DEFAULT_MAP_ID);
@@ -314,7 +313,7 @@ describe("per-player integration", () => {
     };
     const dir = mkdtempSync(join(tmpdir(), "t17-maps-"));
     const repo = createFileRepository(dir);
-    const sim = createGameSimulation(def, { repository: repo, saveId: SAVE_ID });
+    const sim = await createGameSimulation(def, { repository: repo, saveId: SAVE_ID });
     const world = simWorld(sim);
     const nidA = sim.addPlayer("sA").networkId;
     const nidB = sim.addPlayer("sB").networkId;
@@ -346,8 +345,8 @@ describe("per-player integration", () => {
     expect(savedByNid.get(nidB)).toBe(DEFAULT_MAP_ID);
     void eB;
 
-    // 服务端重启：initialRecord 恢复 + addPlayer 复用绑定
-    const sim2 = createGameSimulation(def, { initialRecord: record! });
+    // 服务端重启：repository 预载恢复（读档通道唯一化）+ addPlayer 复用绑定
+    const sim2 = await createGameSimulation(def, { repository: repo, saveId: SAVE_ID });
     expect(sim2.addPlayer("sA").networkId).toBe(nidA);
     expect(sim2.addPlayer("sB").networkId).toBe(nidB);
     const restored = sim2.tick(TICK_MS);
@@ -361,8 +360,8 @@ describe("per-player integration", () => {
     expect(restored.interest!.get("sB")).not.toContain(nidA);
   });
 
-  it("场景6：长程 tick 基线——无异常、无跨图泄漏", () => {
-    const { sim, world, eA, nidA, nidB } = setupTwoPlayers();
+  it("场景6：长程 tick 基线——无异常、无跨图泄漏", async () => {
+    const { sim, world, eA, nidA, nidB } = await setupTwoPlayers();
 
     const portal = findPortal(world, DEFAULT_MAP_ID, CAVE_MAP_ID);
     expect(portal).toBeDefined();

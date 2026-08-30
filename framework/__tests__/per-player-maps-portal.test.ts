@@ -13,6 +13,7 @@
  * Portal[eid]（T3 注：spawn 链归属未落地前须手工设置 EntityMap，测试用
  * 于跨图判定的实体现均已显式设置）。
  */
+import { makeTestGeometry } from "./helpers/mapGeometry";
 import { describe, it, expect, beforeAll } from "vitest";
 import { addComponent, addEntity } from "bitecs";
 import {
@@ -44,28 +45,13 @@ function createBareWorld(): GameWorld {
 }
 
 /**
- * 挂三张生成图（a/b/c）：a 带 2 个 NPC 出生点（与本切片 helper 同款），b/c 无 NPC。
- * 种子经校验不阻塞出生格（seed 1/2 与 slice6 「挂两张生成图」helper 相同）。
+ * 挂三张图（a/b/c，全部常驻激活——核心切换后无惰性构建）。
  */
 function attachTestMaps(world: GameWorld): void {
-  world.gameDef.resolvedMapSources = {
-    a: {
-      kind: "generated", generatorId: "simple", id: "a", name: "a",
-      seed: 1, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
-      npcSpawns: [
-        { kind: "npc1", offsetTiles: [1, 0] },
-        { kind: "npc1", offsetTiles: [0, 1] },
-      ],
-    },
-    b: {
-      kind: "generated", generatorId: "simple", id: "b", name: "b",
-      seed: 2, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
-    },
-    c: {
-      kind: "generated", generatorId: "simple", id: "c", name: "c",
-      seed: 2, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
-    },
-  };
+  for (const key of ["a", "b", "c"]) {
+    world.maps[key] = makeTestGeometry({ key, width: 8, height: 8 });
+    world.activeMaps.add(key);
+  }
 }
 
 /** 手工构造玩家实体（不经 spawnEntity——非本切片职责，写入组件与 slice6 同款）。 */
@@ -189,8 +175,9 @@ describe("portal", () => {
     expect(EntityMap[player]).toBe("a");
     expect(Transform.x[player]).toBe(500);
     expect(Transform.y[player]).toBe(400);
-    expect(world.maps).toEqual({});
-    expect(world.activeMaps.size).toBe(0);
+    // 世界状态不变（图已由 boot 全量构建，触发与否不改变 maps/activeMaps）
+    expect(Object.keys(world.maps).sort()).toEqual(["a", "b", "c"]);
+    expect(world.activeMaps).toEqual(new Set(["a", "b", "c"]));
   });
 
   it("目标图无效（targetMap=nope）：不移动，其他玩家不受影响", () => {
@@ -212,8 +199,8 @@ describe("portal", () => {
     expect(EntityMap[playerB]).toBe("a");
     expect(Transform.x[playerB]).toBe(200);
     expect(Transform.y[playerB]).toBe(200);
-    expect(world.maps).toEqual({});
-    expect(world.activeMaps.size).toBe(0);
+    expect(Object.keys(world.maps).sort()).toEqual(["a", "b", "c"]);
+    expect(world.activeMaps).toEqual(new Set(["a", "b", "c"]));
   });
 
   it("同一玩家重叠两个 portal 同 tick 只移动一次（迭代序第一个 portal 胜出）", () => {

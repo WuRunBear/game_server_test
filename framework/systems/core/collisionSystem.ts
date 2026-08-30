@@ -7,7 +7,7 @@ const check2d = require("check2d") as typeof import("check2d");
 
 import { Collider, ColliderShape, Transform, Velocity } from "components";
 import { entityMapOf } from "framework/components/entityMap";
-import type { MapRuntime } from "framework/map/types";
+import type { MapGeometry } from "map/geometry/types";
 import type { EntityId, GameWorld } from "world";
 
 /**
@@ -296,15 +296,17 @@ function getCollisionRuntimeMap(world: GameWorld): Map<string, CollisionRuntime>
 }
 
 /**
- * 取某地图的 MapRuntime（地图阻挡格来源）。
- * 优先用 world.maps[mapId]；地图 id 未落到任何已缓存图（无 map 配置路径的 world.map
- * 手工赋值，或 EntityMap 残留导致 mapId 无法解析）时回退世界默认图别名 world.map，
- * 使碰撞几何始终取自一块真实地图（默认图），保持既有碰撞回归用例行为。
+ * 取某地图的几何（阻挡格来源）。空串归属（无图配置世界的哨兵）返回
+ * undefined——得到无地图体的碰撞运行时；非空 mapId 解析不到已构建图即抛
+ * 含 mapId 的显式错误（归属异常是配置/存档 bug，不允许静默回退默认图）。
  */
-function getCollisionMapSource(world: GameWorld, mapId: string): MapRuntime | undefined {
-  const cached = world.maps[mapId];
-  if (cached) return cached;
-  return world.map ?? undefined;
+function getCollisionMapSource(world: GameWorld, mapId: string): MapGeometry | undefined {
+  if (mapId === "") return undefined;
+  const geometry = world.maps[mapId];
+  if (!geometry) {
+    throw new Error(`collision: map "${mapId}" is not present in world.maps`);
+  }
+  return geometry;
 }
 
 /**
@@ -328,7 +330,8 @@ function ensureCollisionRuntime(world: GameWorld, mapId: string): CollisionRunti
     for (let tileY = 0; tileY < height; tileY += 1) {
       for (let tileX = 0; tileX < width; tileX += 1) {
         const idx = tileY * width + tileX;
-        if (map.blocked[idx] !== 1) continue;
+        // walkable=0 即阻挡格（MapGeometry 通行位图语义，与旧 blocked 取反等价）
+        if (map.walkable[idx] === 1) continue;
         mapBodies.push(createMapBody(system, tileX, tileY, tileWidth, tileHeight));
       }
     }

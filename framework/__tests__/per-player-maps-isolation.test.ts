@@ -12,6 +12,8 @@
  *   entityMapOf 回退默认图（与默认图世界行为完全一致）。
  * - 跨图实体显式 EntityMap[eid] = "other"。
  */
+import type { MapGeometry } from "map/geometry/types";
+import { makeTestGeometry } from "./helpers/mapGeometry";
 import { describe, it, expect, beforeAll } from "vitest";
 import { addComponent, addEntity, hasComponent, query } from "bitecs";
 import {
@@ -52,16 +54,9 @@ const DEFAULT_MAP = "dm";
 /** 跨图实体的地图 id。 */
 const OTHER_MAP = "other";
 
-/** 最小确定性地图 runtime（只用于 world.maps 登记，供 effectiveMapOf 的已知图判定）。 */
-function buildMap(id: string): MapRuntime {
-  return {
-    id,
-    name: id,
-    grid: { width: 8, height: 8, tileWidth: 16, tileHeight: 16 },
-    blocked: new Uint8Array(64),
-    spawns: { player: { x: 0, y: 0 }, npcs: [] },
-    zones: [],
-  };
+/** 最小确定性地图几何（只用于 world.maps 登记，供 effectiveMapOf 的已知图判定）。 */
+function buildMap(id: string): MapGeometry {
+  return makeTestGeometry({ key: id, width: 8, height: 8 });
 }
 
 /** 构造一个最小世界（默认配置），默认图 = "dm"，登记 dm/other 两张图。 */

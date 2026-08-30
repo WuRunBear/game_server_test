@@ -18,6 +18,8 @@
  * 常驻房间读档为空 ⇒ 世界从零启动（仅默认图激活，cave 无运行时——这正是
  * 「cave 响应异于默认图」的判定前提）。
  */
+import { makeTestGeometry } from "./helpers/mapGeometry";
+import type { MapGeometry } from "map/geometry/types";
 import http from "node:http";
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -32,7 +34,6 @@ import {
 import { EntityMap } from "framework/components/entityMap";
 import { prewarmCollisionRuntime } from "framework/systems/core/collisionSystem";
 import type { CollisionDebugSnapshot } from "framework/systems/core/collisionSystem";
-import type { MapRuntime } from "framework/map/types";
 import type { GameWorld } from "framework/world";
 import type { ColyseusServer } from "framework/net/colyseus/server";
 import type { SimulationPort } from "simulation";
@@ -60,7 +61,7 @@ beforeAll(() => {
 });
 
 /** 取仿真内部的 GameWorld（镜像 slice5 simWorld 私有访问器）。 */
-function simWorld(sim: ReturnType<typeof createGameSimulation>): GameWorld {
+function simWorld(sim: SimulationPort): GameWorld {
   return (sim as unknown as { world: GameWorld }).world;
 }
 
@@ -74,20 +75,14 @@ function cleanEntityMapOf(alive: number[]): void {
   for (const eid of alive) EntityMap[eid] = undefined;
 }
 
-/** 手工构建一张确定性地图（8×8 tile，tile 16px；blocked 网格显式声明墙）。 */
-function buildMap(id: string, wallTiles: Array<{ x: number; y: number }>): MapRuntime {
-  const blocked = new Uint8Array(64);
-  for (const t of wallTiles) {
-    blocked[t.y * 8 + t.x] = 1;
-  }
-  return {
-    id,
-    name: id,
-    grid: { width: 8, height: 8, tileWidth: 16, tileHeight: 16 },
-    blocked,
-    spawns: { player: { x: 64, y: 64 }, npcs: [] },
-    zones: [],
-  };
+/** 手工构建一张确定性地图几何（8×8 tile，tile 16px；显式声明墙格）。 */
+function buildMap(id: string, wallTiles: Array<{ x: number; y: number }>): MapGeometry {
+  return makeTestGeometry({
+    key: id,
+    width: 8,
+    height: 8,
+    blocked: (tx, ty) => wallTiles.some((t) => t.x === tx && t.y === ty),
+  });
 }
 
 /**
@@ -95,8 +90,8 @@ function buildMap(id: string, wallTiles: Array<{ x: number; y: number }>): MapRu
  * b 墙 tile(5,4) → 地图体 (80,64,16,16)；两图各放一个 player 实体
  * （spawnEntity overrides.mapId，todo 4 已把归属写入 EntityMap）。
  */
-function twoMapSim(): { sim: ReturnType<typeof createGameSimulation>; world: GameWorld; pa: number; pb: number } {
-  const sim = createGameSimulation(createDefaultGameDefinition());
+async function twoMapSim(): Promise<{ sim: SimulationPort; world: GameWorld; pa: number; pb: number }> {
+  const sim = await createGameSimulation(createDefaultGameDefinition());
   const world = simWorld(sim);
   world.defaultMapId = "a";
   world.maps = {
@@ -148,9 +143,9 @@ describe("debug colliders", () => {
   });
 
   describe("GameSimulation.getDebugSnapshot 分图", () => {
-    it("b) 指定图 → 仅该图 bodies（mapBodies 坐标 + 实体互斥）", () => {
+    it("b) 指定图 → 仅该图 bodies（mapBodies 坐标 + 实体互斥）", async () => {
       clearEntityMap();
-      const { sim, pa, pb } = twoMapSim();
+      const { sim, pa, pb } = await twoMapSim();
 
       const bSnap = sim.getDebugSnapshot({ mapId: "b" }) as CollisionDebugSnapshot;
       expect(bSnap.mapBodies).toEqual([
@@ -163,9 +158,9 @@ describe("debug colliders", () => {
       cleanEntityMapOf([pa, pb]);
     });
 
-    it("b) 缺省 mapId → 默认图（a）bodies，且不含 b 图实体", () => {
+    it("b) 缺省 mapId → 默认图（a）bodies，且不含 b 图实体", async () => {
       clearEntityMap();
-      const { sim, pa, pb } = twoMapSim();
+      const { sim, pa, pb } = await twoMapSim();
 
       const defSnap = sim.getDebugSnapshot() as CollisionDebugSnapshot;
       expect(defSnap.mapBodies).toEqual([
@@ -178,9 +173,9 @@ describe("debug colliders", () => {
       cleanEntityMapOf([pa, pb]);
     });
 
-    it("c) 未知 / 空 mapId → 空 bodies（不抛错）", () => {
+    it("c) 未知 / 空 mapId → 空 bodies（不抛错）", async () => {
       clearEntityMap();
-      const { sim, pa, pb } = twoMapSim();
+      const { sim, pa, pb } = await twoMapSim();
 
       const snap = sim.getDebugSnapshot({ mapId: "does-not-exist" }) as CollisionDebugSnapshot;
       expect(snap).toEqual({ tick: 0, mapBodies: [], entityBodies: [], pairs: [] });

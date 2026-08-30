@@ -1,100 +1,26 @@
 /**
- * 地图生命周期原子操作（per-player 地图归属，无异步 I/O，可入 tick）。
+ * 地图切换原子操作（per-player 地图归属，无异步 I/O，可入 tick）。
  *
  * 核心语义：世界只有一个共享 ECS，实体经 `EntityMap`（AoS）标记所属地图。
- * 本模块提供三条原子：
- * - `ensureMapActive`：确保地图已构建（world.maps 惰性缓存）并已激活
- *   （world.activeMaps + 初始 NPC 布置），幂等；
- * - `movePlayerToMap`：把单个玩家移动到目标图（换图 + 传送），
- *   目标图无效返回 false（世界状态不变）；
- * - `spawnInitialNpcs`：按某图 spawns.npcs 布置初始 NPC（归属写入 EntityMap）。
+ * 本模块只提供 `movePlayerToMap`：把单个玩家移动到目标图（换图 + 传送），
+ * 目标图无效返回 false（世界状态不变）。
  *
- * 房间级语义（全员换图/清场）已移除：地图激活按需惰性构建，清场/传送只发生在
- * 实体级移动（movePlayerToMap）。读档恢复走 `ensureMapActive`——存档实体是用户
- * 状态，不做清场（清场只属于 portal 触发的场景切换路径，见 todo 5）。
- *
- * **运行时命名空间约定**：全部 mapId 参数与键（world.maps / activeMaps /
- * EntityMap / world.defaultMapId）统一为 `resolvedMapSources` 的 registry key。
- * `MapSource.id`（显式 id）仅为信息性字段，只被 buildMapRuntime 用于 runtime.id。
+ * 旧地图生命周期原语（惰性构建 + 初始 NPC 布置）已随核心切换消亡：地图由
+ * 开机 bootMaps 全量构建并常驻激活（world.maps + world.activeMaps），实体
+ * 生产唯一路径是演化引擎——本模块不再承担任何构建/布置职责。
  */
 import { Transform } from "components";
 import { EntityMap } from "framework/components/entityMap";
-import { spawnEntity } from "framework/entities/spawn";
-import { buildMapRuntime } from "framework/map/buildRuntime";
 import { prewarmCollisionRuntime } from "framework/systems/core/collisionSystem";
-import type { ComponentRegistry } from "framework/components/componentRegistry";
-import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import type { GameWorld, EntityId } from "framework/world";
-
-/**
- * 按某地图的 spawns.npcs 布置初始 NPC 实体（场景布置，供启动与激活复用）。
- *
- * 每个 NPC 实体生成后直接写入 `EntityMap[eid] = mapId`（地图归属；spawnEntity
- * 的 overrides.mapId 路径由 spawn 链任务负责，此处显式写保持原子独立）。
- * 目标图未构建（world.maps 缺失）或无 NPC 出生点配置时 no-op。
- */
-export function spawnInitialNpcs(world: GameWorld, mapId: string): void {
-  const runtime = world.maps[mapId];
-  if (!runtime || runtime.spawns.npcs.length === 0) return;
-  const archetypeRegistry = world.archetypes as ArchetypeRegistry;
-  const componentRegistry = world.components_registry as ComponentRegistry;
-  for (const spawn of runtime.spawns.npcs) {
-    const archetype = archetypeRegistry.get(spawn.kind);
-    const eid = spawnEntity(world, archetype, componentRegistry, {
-      x: spawn.pos.x,
-      y: spawn.pos.y,
-    });
-    EntityMap[eid] = mapId;
-  }
-}
-
-/**
- * 确保某地图已构建并激活（幂等）。
- *
- * **命名空间约定**：`mapId` 参数就是运行时规范化键（registry key，等于
- * `resolvedMapSources` 的查找键）。`MapSource.id`（显式 id）仅为信息性字段，只被
- * buildMapRuntime 用于 runtime.id 与错误串，不参与运行时键。整条链路（world.maps 存储 /
- * activeMaps 成员 / spawnInitialNpcs / movePlayerToMap 的运行时访问）统一以 registry key 为准。
- *
- * 1. 地图不在 `gameDef.resolvedMapSources` → 返回 false（世界状态不变）；
- * 2. `world.maps` 缺该图 → 按 `resolvedMapSources[mapId]` 构建 MapRuntime，
- *    以 registry key 写入缓存（与开机默认图派生一致）；
- * 3. 地图未激活 → 加入 `world.activeMaps` 并布置初始 NPC；
- *    已激活则跳过（二次激活不重复布置 NPC）。
- *
- * `opts.spawnInitialNpcs`（缺省 true）用于读档恢复：在持久化的 NPC 之上禁止二次 spawn，
- * 仅激活不布置（restoreWorld 传 false；其余调用方保持默认，portal/移动仍首次激活布置）。
- *
- * @returns registry key 解析到来源则 true；否则 false
- */
-export function ensureMapActive(
-  world: GameWorld,
-  mapId: string,
-  opts?: { spawnInitialNpcs?: boolean },
-): boolean {
-  const source = world.gameDef.resolvedMapSources?.[mapId];
-  if (!source) return false;
-  const shouldSpawn = opts?.spawnInitialNpcs !== false;
-
-  if (!world.maps[mapId]) {
-    world.maps[mapId] = buildMapRuntime(source);
-  }
-  if (!world.activeMaps.has(mapId)) {
-    world.activeMaps.add(mapId);
-    if (shouldSpawn) spawnInitialNpcs(world, mapId);
-  }
-  return true;
-}
 
 /**
  * 把单个玩家移动到目标地图（换图 + 传送）。
  *
- * - `mapId` 是 registry key（运行时规范化键，即 `resolvedMapSources` 查找键）；
- *   不做任何 `source.id` 替换——显式 id ≠ registry key 时也不会因 `world.maps[mapId]`
- *   缺键而抛 TypeError（ensureMapActive 已保证该键存在）；
- * - 目标图未激活时自动激活（ensureMapActive 语义；无效图返回 false 不移动）；
+ * - `mapId` 是 registry key（运行时规范化键，即 world.maps 的查找键）；
+ *   目标图未构建（world.maps 缺键）→ 返回 false 不移动；
  * - 写入 `EntityMap[eid] = mapId`（AoS 直接写，不经 spawn 链）；
- * - 坐标取 `dest`（缺省目标图出生点；无出生点配置回退 (0,0)）；
+ * - 坐标取 `dest`（缺省目标图几何中心）；
  * - 同图 move 同样传送（传送即语义，非 no-op）。
  *
  * @returns 是否移动成功
@@ -105,12 +31,16 @@ export function movePlayerToMap(
   mapId: string,
   dest?: { x: number; y: number },
 ): boolean {
-  if (!ensureMapActive(world, mapId)) return false;
+  const geometry = world.maps[mapId];
+  if (!geometry) return false;
 
   EntityMap[eid] = mapId;
-  const spawn = world.maps[mapId].spawns.player ?? { x: 0, y: 0 };
-  Transform.x[eid] = dest?.x ?? spawn.x;
-  Transform.y[eid] = dest?.y ?? spawn.y;
+  const fallback = {
+    x: (geometry.grid.width / 2) * geometry.grid.tileWidth,
+    y: (geometry.grid.height / 2) * geometry.grid.tileHeight,
+  };
+  Transform.x[eid] = dest?.x ?? fallback.x;
+  Transform.y[eid] = dest?.y ?? fallback.y;
   // 预暖目标图碰撞运行时：实体当 tick 进入一个「已有碰撞体」的世界（新激活图当 tick 即可碰撞）。
   prewarmCollisionRuntime(world, mapId);
   return true;

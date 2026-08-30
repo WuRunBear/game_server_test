@@ -161,10 +161,8 @@ export interface TickResult {
 export interface SimulationOptions {
   /** 持久化仓储；缺省不接存档。 */
   repository?: Repository;
-  /** 存档标识；配合 repository 用于定时存档与读档。 */
+  /** 存档标识；配合 repository 用于定时存档与开机读档预载。 */
   saveId?: string;
-  /** 启动时恢复的世界快照（读档结果）；恢复出的玩家实体供 addPlayer 复用绑定。 */
-  initialRecord?: WorldRecord;
 }
 
 /**

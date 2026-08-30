@@ -27,7 +27,14 @@ export function respawnSystem(world: GameWorld): GameWorld {
     }
     if (now < marker.respawnAtMs) continue;
 
-    const spawnPoint = world.maps[entityMapOf(world, eid)]?.spawns.player ?? { x: 0, y: 0 };
+    // 重生点占位（真实出生服务归后续 todo）：所在图几何中心；无图配置回退 (0, 0)
+    const geometry = world.maps[entityMapOf(world, eid)];
+    const spawnPoint = geometry
+      ? {
+          x: (geometry.grid.width / 2) * geometry.grid.tileWidth,
+          y: (geometry.grid.height / 2) * geometry.grid.tileHeight,
+        }
+      : { x: 0, y: 0 };
     Health.current[eid] = Health.max[eid] ?? 100;
     Transform.x[eid] = spawnPoint.x;
     Transform.y[eid] = spawnPoint.y;

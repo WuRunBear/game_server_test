@@ -2,6 +2,6 @@
   "kind": "portal_back",
   "components": {
     "Size": { "w": 32, "h": 32 },
-    "Portal": { "targetMap": "generated-map", "x": 512, "y": 512 }
+    "Portal": { "targetMap": "island", "x": 904, "y": 680 }
   }
 }

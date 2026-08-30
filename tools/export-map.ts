@@ -1,46 +1,40 @@
 import { existsSync, readFileSync } from "node:fs";
-import { resolve, dirname, join } from "node:path";
+import { resolve, dirname } from "node:path";
 import {
   bootstrapFramework,
-  loadGameDefinition,
-  buildMapRuntime,
   exportMapRuntime,
 } from "framework";
-import type { MapSource } from "framework/map/types";
-import type { MapRegistryJson, GeneratedMapEntryJson, TiledMapEntryJson } from "framework/config/schema/MapRegistrySchema";
+import { buildMapGeometry } from "map/generate/pipeline";
+import { createGeneratorRegistry } from "map/generate/generatorRegistry";
+import { registerBuiltinMapGenerators } from "map/generate/registerBuiltin";
+import { MapRegistrySchema, type MapConfig } from "framework/config/schema/MapRegistrySchema";
+import type { MapGeometry } from "map/geometry/types";
+import type { MapRuntime } from "framework/map/types";
 
-function buildSourceFromRegistry(registry: MapRegistryJson, mapId: string | null): MapSource {
-  const entries = registry.maps;
-  const defaultId = registry.default ?? Object.keys(entries)[0];
-  const selectedId = mapId ?? defaultId;
-  if (!selectedId || !entries[selectedId]) {
-    const available = Object.keys(entries).join(", ");
+/** MapGeometry → 旧导出器所需的 MapRuntime 视图（blocked 由 walkable 取反，区域/出生点不在旧模型中表达）。 */
+function geometryToRuntimeView(geometry: MapGeometry): MapRuntime {
+  const blocked = new Uint8Array(geometry.walkable.length);
+  for (let i = 0; i < geometry.walkable.length; i++) {
+    blocked[i] = geometry.walkable[i] === 0 ? 1 : 0;
+  }
+  return {
+    id: geometry.key,
+    name: geometry.key,
+    grid: geometry.grid,
+    blocked,
+    spawns: { player: null, npcs: [] },
+    zones: [],
+  };
+}
+
+function buildConfigFromRegistry(configs: MapConfig[], mapId: string | null): MapConfig {
+  const selectedId = mapId ?? configs[0]?.key;
+  const config = selectedId ? configs.find((c) => c.key === selectedId) : undefined;
+  if (!config) {
+    const available = configs.map((c) => c.key).join(", ");
     throw new Error(`地图 "${selectedId}" 未在注册表中找到。可用: ${available}`);
   }
-
-  const entry = entries[selectedId];
-  if (entry.kind === "tiled") {
-    const tiledEntry = entry as TiledMapEntryJson;
-    return {
-      kind: "tiled",
-      id: tiledEntry.id ?? selectedId,
-      name: tiledEntry.name ?? selectedId,
-      json: JSON.parse(readFileSync(tiledEntry.path, "utf8")),
-    };
-  }
-
-  const genEntry = entry as GeneratedMapEntryJson;
-  return {
-    kind: "generated",
-    generatorId: genEntry.generatorId ?? "simple",
-    id: genEntry.id ?? selectedId,
-    name: genEntry.name ?? selectedId,
-    seed: genEntry.seed ?? 1,
-    width: genEntry.width ?? 64,
-    height: genEntry.height ?? 64,
-    tileWidth: genEntry.tileWidth ?? 16,
-    tileHeight: genEntry.tileHeight ?? 16,
-  };
+  return config;
 }
 
 export function exportMap(argv: string[]): void {
@@ -56,22 +50,34 @@ export function exportMap(argv: string[]): void {
   bootstrapFramework();
 
   try {
-    const gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
-
-    if (!gameDef.map?.registry) {
-      console.error("当前 game.json 未配置地图注册表");
-      process.exit(1);
-    }
-
-    const registryPath = resolve(dirname(resolve(process.cwd(), "game/game.json")), gameDef.map.registry);
+    const registryPath = resolve(process.cwd(), "game/maps/registry.json");
     if (!existsSync(registryPath)) {
       console.error(`地图注册表文件不存在: ${registryPath}`);
       process.exit(1);
     }
 
-    const registry = JSON.parse(readFileSync(registryPath, "utf8")) as MapRegistryJson;
-    const source = buildSourceFromRegistry(registry, mapId);
-    const runtime = buildMapRuntime(source);
+    const registry = MapRegistrySchema.parse(JSON.parse(readFileSync(registryPath, "utf8")));
+    const configs: MapConfig[] = [];
+    for (const [key, entry] of Object.entries(registry.maps)) {
+      if (entry.kind === "tiled") {
+        const tiledJson: unknown = JSON.parse(
+          readFileSync(resolve(dirname(registryPath), entry.path), "utf8"),
+        );
+        configs.push({
+          key,
+          seed: 0,
+          initialAgeTicks: entry.initialAgeTicks,
+          pipeline: [{ generator: "tiled-source", params: { tiled: tiledJson } }],
+        });
+      } else {
+        configs.push({ key, seed: entry.seed, initialAgeTicks: entry.initialAgeTicks, pipeline: entry.pipeline });
+      }
+    }
+
+    const registryBlocks = createGeneratorRegistry();
+    registerBuiltinMapGenerators(registryBlocks);
+    const geometry = buildMapGeometry(buildConfigFromRegistry(configs, mapId), registryBlocks);
+    const runtime = geometryToRuntimeView(geometry);
     const outDir = args.out ? resolve(process.cwd(), args.out) : undefined;
     const { jsonPath, pngPath } = exportMapRuntime(runtime, outDir);
     console.log(`地图已导出: ${jsonPath}, ${pngPath}`);

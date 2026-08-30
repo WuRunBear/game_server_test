@@ -6,6 +6,7 @@
  * 超速/命令限流）、审查修复（destroyEntity 清理 AoS、写盘串行、per-client
  * $filter 编码链路），以及真实 server 规则集成（存档→恢复 demo）。
  */
+import type { SimulationPort } from "simulation";
 import { describe, it, expect, beforeAll } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
@@ -105,7 +106,7 @@ function fillInventory(inv: InventoryEntry, stacks: ItemStack[]): void {
   });
 }
 
-function simWorld(sim: ReturnType<typeof createGameSimulation>): GameWorld {
+function simWorld(sim: SimulationPort): GameWorld {
   return (sim as unknown as { world: GameWorld }).world;
 }
 
@@ -207,14 +208,20 @@ describe("Slice 5：持久化（定时存档 + 读档恢复 + 玩家复用）", 
     def.resolvedRules["server"] = { saveId: "s1", saveIntervalMs: 100 };
 
     const repo = createFileRepository(dir);
-    const sim = createGameSimulation(def, { repository: repo, saveId: "s1" });
+    const sim = await createGameSimulation(def, { repository: repo, saveId: "s1" });
     sim.addPlayer("s1");
+    // 开机首存（bootMaps 无档路径组装首个 WorldRecord，fire-and-forget 写盘）——
+    // 实体为空（玩家在其后加入）
+    await waitFor(async () => (await repo.loadWorld("s1")) !== null);
+    const bootRecord = await repo.loadWorld("s1");
+    expect(bootRecord!.entities.length).toBe(0);
+
     sim.tick(50); // 累计 50 < 100，不触发
     await sleep(20);
-    expect(await repo.loadWorld("s1")).toBeNull();
+    expect((await repo.loadWorld("s1"))!.entities.length).toBe(0);
 
     sim.tick(50); // 累计 100 ≥ 100，触发写盘（fire-and-forget）
-    await waitFor(async () => (await repo.loadWorld("s1")) !== null);
+    await waitFor(async () => (await repo.loadWorld("s1"))!.entities.length === 1);
     const record = await repo.loadWorld("s1");
     expect(record!.id).toBe("s1");
     expect(record!.entities.length).toBe(1);
@@ -226,7 +233,7 @@ describe("Slice 5：持久化（定时存档 + 读档恢复 + 玩家复用）", 
     def.resolvedRules["server"] = { saveId: "s1", saveIntervalMs: 100 };
 
     const repo = createFileRepository(dir);
-    const sim1 = createGameSimulation(def, { repository: repo, saveId: "s1" });
+    const sim1 = await createGameSimulation(def, { repository: repo, saveId: "s1" });
     sim1.addPlayer("s1");
     const world1 = simWorld(sim1);
     const p1 = query(world1, [Player])[0];
@@ -236,7 +243,7 @@ describe("Slice 5：持久化（定时存档 + 读档恢复 + 玩家复用）", 
     await waitFor(async () => (await repo.loadWorld("s1")) !== null);
 
     const record = (await repo.loadWorld("s1"))!;
-    const sim2 = createGameSimulation(def, { repository: repo, saveId: "s1", initialRecord: record });
+    const sim2 = await createGameSimulation(def, { repository: repo, saveId: "s1" });
     expect(sim2.addPlayer("s1").networkId).toBe(savedNid);
 
     const world2 = simWorld(sim2);
@@ -247,7 +254,7 @@ describe("Slice 5：持久化（定时存档 + 读档恢复 + 玩家复用）", 
 
   it("无 server 规则 / 无 repository：tick 正常，不存档不报错", async () => {
     const def = createDefaultGameDefinition();
-    const sim = createGameSimulation(def);
+    const sim = await createGameSimulation(def);
     sim.addPlayer("s1");
     const result = sim.tick(50);
     expect(result.tick).toBe(1);
@@ -256,10 +263,10 @@ describe("Slice 5：持久化（定时存档 + 读档恢复 + 玩家复用）", 
 
 // 兴趣裁剪：own 恒可见、viewRadius 内可见、范围外不可见；无 server 规则则不裁剪（旧协议兼容）
 describe("Slice 5：兴趣管理（视野裁剪）", () => {
-  it("interest：own 恒可见，范围内实体可见，范围外不可见（viewRadius 配置）", () => {
+  it("interest：own 恒可见，范围内实体可见，范围外不可见（viewRadius 配置）", async () => {
     const def = createDefaultGameDefinition();
     def.resolvedRules["server"] = { viewRadius: 100 };
-    const sim = createGameSimulation(def);
+    const sim = await createGameSimulation(def);
     const world = simWorld(sim);
     sim.addPlayer("s1");
     sim.addPlayer("s2");
@@ -285,10 +292,10 @@ describe("Slice 5：兴趣管理（视野裁剪）", () => {
     expect(i2).not.toContain(NetworkId.value[c1]);
   });
 
-  it("interest：玩家靠近后互见", () => {
+  it("interest：玩家靠近后互见", async () => {
     const def = createDefaultGameDefinition();
     def.resolvedRules["server"] = { viewRadius: 100 };
-    const sim = createGameSimulation(def);
+    const sim = await createGameSimulation(def);
     const world = simWorld(sim);
     sim.addPlayer("s1");
     sim.addPlayer("s2");
@@ -303,9 +310,9 @@ describe("Slice 5：兴趣管理（视野裁剪）", () => {
     expect(interest!.get("s2")!).toContain(NetworkId.value[e1]);
   });
 
-  it("无 server 规则：interest 恒存在——own 可见 + 同图全量（不裁距离）", () => {
+  it("无 server 规则：interest 恒存在——own 可见 + 同图全量（不裁距离）", async () => {
     const def = createDefaultGameDefinition();
-    const sim = createGameSimulation(def);
+    const sim = await createGameSimulation(def);
     const world = simWorld(sim);
     sim.addPlayer("s1");
     sim.addPlayer("s2");
@@ -327,10 +334,10 @@ describe("Slice 5：兴趣管理（视野裁剪）", () => {
 
 // 输入校验：超速输入不写 Velocity、命令频率限流；无 server 规则时全部放行（兼容旧客户端）
 describe("Slice 5：输入校验（anti-cheat）", () => {
-  it("超速输入被拒（不写 Velocity）；合法输入通过", () => {
+  it("超速输入被拒（不写 Velocity）；合法输入通过", async () => {
     const def = createDefaultGameDefinition();
     def.resolvedRules["server"] = { maxMoveSpeed: 100 };
-    const sim = createGameSimulation(def);
+    const sim = await createGameSimulation(def);
     const world = simWorld(sim);
     sim.addPlayer("s1");
     const p = query(world, [Player])[0];
@@ -348,10 +355,10 @@ describe("Slice 5：输入校验（anti-cheat）", () => {
     expect(Velocity.vy[p]).toBe(80);
   });
 
-  it("命令频率超限被拒；窗口推进后放行", () => {
+  it("命令频率超限被拒；窗口推进后放行", async () => {
     const def = createDefaultGameDefinition();
     def.resolvedRules["server"] = { maxCommandsPerSec: 2 };
-    const sim = createGameSimulation(def);
+    const sim = await createGameSimulation(def);
     const world = simWorld(sim);
     sim.addPlayer("s1");
     const p = query(world, [Player])[0];
@@ -367,9 +374,9 @@ describe("Slice 5：输入校验（anti-cheat）", () => {
     expect(sim.submitCommand("s1", { type: "transfer", slot: 1, toSlot: 0 })).toBe(true);
   });
 
-  it("无 server 规则：输入与命令全部放行", () => {
+  it("无 server 规则：输入与命令全部放行", async () => {
     const def = createDefaultGameDefinition();
-    const sim = createGameSimulation(def);
+    const sim = await createGameSimulation(def);
     const world = simWorld(sim);
     sim.addPlayer("s1");
     const p = query(world, [Player])[0];
@@ -395,7 +402,7 @@ describe("Slice 5：真实 game 配置（server 规则 + 存档→恢复 demo）
 
     const dir = mkdtempSync(join(tmpdir(), "s5-real-"));
     const repo = createFileRepository(dir);
-    const sim1 = createGameSimulation(def, { repository: repo, saveId: server.saveId });
+    const sim1 = await createGameSimulation(def, { repository: repo, saveId: server.saveId });
     const world1 = simWorld(sim1);
     sim1.addPlayer("s1");
     const p1 = query(world1, [Player])[0];
@@ -407,13 +414,14 @@ describe("Slice 5：真实 game 配置（server 规则 + 存档→恢复 demo）
     const record = (await repo.loadWorld(server.saveId!))!;
     expect(record.entities.some((e) => e.kind === "campfire")).toBe(true);
 
-    const sim2 = createGameSimulation(def, { repository: repo, saveId: server.saveId, initialRecord: record });
+    const sim2 = await createGameSimulation(def, { repository: repo, saveId: server.saveId });
     expect(sim2.addPlayer("s1").networkId).toBe(NetworkId.value[p1]);
 
     const world2 = simWorld(sim2);
+    // 开机演化可能已铺放同 kind 实体——按存档 networkId 精确断言恢复的火堆
     const fires = query(world2, [LightSource]);
-    expect(fires.length).toBe(1);
-    expect(NetworkId.value[fires[0]]).toBe(NetworkId.value[fire]);
+    expect(fires.length).toBeGreaterThanOrEqual(1);
+    expect(fires.map((f) => NetworkId.value[f])).toContain(NetworkId.value[fire]);
     const p2 = query(world2, [Player])[0];
     expect(Inventory[p2]!.slots[0]).toEqual({ kind: "campfire_kit", count: 1 });
   });
@@ -441,7 +449,7 @@ describe("Slice 5：审查修复（destroyEntity / 存档防御 / 写盘串行 /
     const def = createDefaultGameDefinition();
     def.resolvedRules["server"] = { saveId: "s1", saveIntervalMs: 100 };
     const repo = createFileRepository(dir);
-    const sim = createGameSimulation(def, { repository: repo, saveId: "s1" });
+    const sim = await createGameSimulation(def, { repository: repo, saveId: "s1" });
     sim.addPlayer("s1");
     const world = simWorld(sim);
     const p = query(world, [Player])[0];

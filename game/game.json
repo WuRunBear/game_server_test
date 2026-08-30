@@ -5,7 +5,8 @@
   "tickRate": 20,
   "map": {
     "registry": "./maps/registry.json",
-    "default": "generated-map"
+    "entityRules": "./maps/entity-rules.json",
+    "default": "island"
   },
   "systems": [
     { "id": "dayNight" },

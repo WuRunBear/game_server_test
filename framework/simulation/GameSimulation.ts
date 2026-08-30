@@ -8,6 +8,7 @@ import { spawnEntity } from "framework/entities/spawn";
 import { destroyEntity } from "framework/entities/destroyEntity";
 import { createGameInstance, type GameInstance } from "framework/bootstrap/GameInstance";
 import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
+import type { MapConfig } from "framework/config/schema/MapRegistrySchema";
 import { getCollisionDebugSnapshot } from "systems/core/collisionSystem";
 import { recordTick } from "framework/metrics";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
@@ -21,10 +22,17 @@ import { deconstructEntity } from "framework/systems/gameplay/deconstructSystem"
 import { advanceDialogue } from "framework/systems/gameplay/dialogueSystem";
 import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
 import { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
+import { evolve } from "map/evolution/engine";
+import { createMapEvolveDeps } from "map/runtime/evolveDeps";
+import { noopBootDeps, type BootDeps } from "map/runtime/boot";
 import type { Repository } from "framework/repository";
 import type { ServerRule } from "framework/config/schema/RuleSchema";
 import { computeInterest } from "./interest";
 import { createInputGuard, type InputGuard } from "./inputValidation";
+import { createLogger } from "framework/utils/logger";
+
+/** 装配期日志器（world.logger 尚不可用的开机阶段使用）。 */
+const assemblyLogger = createLogger("game-simulation");
 
 import type { SimulationPort } from "./SimulationPort";
 import type {
@@ -130,23 +138,37 @@ export class GameSimulation implements SimulationPort {
   /** 读档恢复出的、尚未绑定 session 的玩家实体 eid 队列（addPlayer 时复用）。 */
   private orphanPlayerEids: number[] = [];
 
+  /** 地图 key → 生成配置（演化钩子按图取 seed）。 */
+  private mapConfigsByKey = new Map<string, MapConfig>();
+
   /**
    * 创建仿真实例。
    *
    * @param gameDef 游戏配置（已通过 loadGameDefinition 加载 + 校验）
-   * @param options 可选注入（持久化仓储/存档标识/启动恢复快照）
+   * @param options 可选注入（持久化仓储/存档标识）
+   * @param bootDeps 开机读档单一通道（由 createGameSimulation 装配：预载快照
+   *   经 loadRecord 同步注入 bootMaps 与 restoreWorld；缺省无档不落盘）
    */
-  constructor(gameDef: LoadedGameDefinition, options?: SimulationOptions) {
-    this.instance = createGameInstance(gameDef);
+  constructor(
+    gameDef: LoadedGameDefinition,
+    options?: SimulationOptions,
+    bootDeps: BootDeps = noopBootDeps,
+  ) {
+    this.instance = createGameInstance(gameDef, bootDeps);
     this.world = this.instance.world;
     this.netSyncFields = gameDef.netSync?.fields ?? [];
     this.componentRegistry = this.world.components_registry as ComponentRegistry;
 
     this.repository = options?.repository;
     this.saveId = options?.saveId;
-    if (options?.initialRecord) {
+    const initialRecord = bootDeps.loadRecord();
+    if (initialRecord) {
       // 读档侧地图激活由 restoreWorld 按实体归属自行处理（todo 15）。
-      this.orphanPlayerEids = restoreWorld(this.world, options.initialRecord);
+      this.orphanPlayerEids = restoreWorld(this.world, initialRecord);
+    }
+
+    for (const config of gameDef.resolvedMapConfigs ?? []) {
+      this.mapConfigsByKey.set(config.key, config);
     }
 
     const serverRules = this.world.gameDef.resolvedRules["server"] as ServerRule | undefined;
@@ -154,6 +176,27 @@ export class GameSimulation implements SimulationPort {
     this.viewRadius = serverRules?.viewRadius;
     const tickRate = this.world.time.fixedDtMs > 0 ? Math.max(1, Math.round(1000 / this.world.time.fixedDtMs)) : 20;
     this.inputGuard = createInputGuard(serverRules, tickRate);
+
+    // 演化钩子：每 tick 对全部激活图按 (tick-1, tick] 跨度补差（常驻语义 D13）。
+    // 注入位置见 GameInstance.beforeSystems——位于 tick 自增与系统拓扑序之间。
+    this.instance.beforeSystems = () => this.evolveActiveMaps();
+  }
+
+  /**
+   * 逐图演化：对 world.activeMaps 中每张已构建图调用 evolve，跨度
+   * (world.time.tick - 1, world.time.tick]。规则/配置缺图时跳过该图。
+   */
+  private evolveActiveMaps(): void {
+    const rules = this.world.gameDef.resolvedEntityRules ?? [];
+    if (rules.length === 0) return;
+
+    const tick = this.world.time.tick;
+    for (const mapKey of this.world.activeMaps) {
+      const geometry = this.world.maps[mapKey];
+      const config = this.mapConfigsByKey.get(mapKey);
+      if (!geometry || !config) continue;
+      evolve(this.world, geometry, rules, tick - 1, tick, createMapEvolveDeps(this.world, geometry, config.seed));
+    }
   }
 
   /**
@@ -244,8 +287,15 @@ export class GameSimulation implements SimulationPort {
     if (this.orphanPlayerEids.length > 0) {
       eid = this.orphanPlayerEids.shift()!;
     } else {
-      // 读取出生点，没有配置则默认 (0, 0)
-      const playerSpawn = this.world.map?.spawns.player ?? { x: 0, y: 0 };
+      // 出生点占位（真实出生服务归后续 todo 的 pickSpawnPosition/player rule 接线）：
+      // 默认图几何中心；无图配置回退 (0, 0)
+      const geometry = this.world.maps[this.world.defaultMapId];
+      const playerSpawn = geometry
+        ? {
+            x: (geometry.grid.width / 2) * geometry.grid.tileWidth,
+            y: (geometry.grid.height / 2) * geometry.grid.tileHeight,
+          }
+        : { x: 0, y: 0 };
       const archetype = (this.world.archetypes as ArchetypeRegistry).get("player");
       eid = spawnEntity(this.world, archetype, this.componentRegistry, {
         x: playerSpawn.x,
@@ -542,18 +592,40 @@ export class GameSimulation implements SimulationPort {
 }
 
 /**
- * 创建仿真实例的工厂函数。
+ * 创建仿真实例的工厂函数（装配处）。
  *
  * 遵循框架中 createGameInstance / createGameWorld 的命名惯例。
  * 返回 SimulationPort 接口类型而非具体类，外部代码只依赖接口。
  *
+ * **读档预载**（原 GameRoom.onCreate 逻辑移入）：repository + saveId 就绪时
+ * 在构造前读档一次，经 BootDeps 单一通道以同步闭包注入——bootMaps（地图
+ * 快照回填）与 restoreWorld（实体恢复）共用同一份预载快照，读档通道唯一。
+ *
  * @param gameDef 已加载和校验的游戏配置
- * @param options 可选注入（持久化仓储/存档标识/启动恢复快照）
+ * @param options 可选注入（持久化仓储/存档标识）
  * @returns 仿真端口实例
  */
-export function createGameSimulation(
+export async function createGameSimulation(
   gameDef: LoadedGameDefinition,
   options?: SimulationOptions,
-): SimulationPort {
-  return new GameSimulation(gameDef, options);
+): Promise<SimulationPort> {
+  const { repository, saveId } = options ?? {};
+  const initialRecord = repository && saveId ? await repository.loadWorld(saveId) : null;
+
+  const bootDeps: BootDeps = {
+    loadRecord: () => initialRecord,
+    saveRecord: repository && saveId
+      ? (record) => {
+          // 首存快照的 id 以装配处 saveId 为准（fileRepository 按 record.id 落盘）
+          void repository.saveWorld({ ...record, id: saveId }).catch((err) => {
+            assemblyLogger.error("boot save failed", {
+              saveId,
+              error: err instanceof Error ? err.stack : String(err),
+            });
+          });
+        }
+      : noopBootDeps.saveRecord,
+  };
+
+  return new GameSimulation(gameDef, options, bootDeps);
 }

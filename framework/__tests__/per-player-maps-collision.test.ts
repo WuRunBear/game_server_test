@@ -10,6 +10,8 @@
  * 测试地图为手工构建的确定性 MapRuntime（blocked 网格显式声明墙 tile），
  * 与 maplifecycle 的生成图 helper 互补：本测试聚焦碰撞分区正确性，不依赖随机种子。
  */
+import { makeTestGeometry } from "./helpers/mapGeometry";
+import type { MapGeometry } from "map/geometry/types";
 import { describe, it, expect, beforeAll } from "vitest";
 import { addComponent, addEntity } from "bitecs";
 import {
@@ -23,7 +25,6 @@ import { Velocity, Collider, ColliderShape } from "framework/components/physics"
 import { EntityMap } from "framework/components/entityMap";
 import { collisionSystem, prewarmCollisionRuntime } from "framework/systems/core/collisionSystem";
 import { movementSystem } from "framework/systems/core/movementSystem";
-import type { MapRuntime } from "framework/map/types";
 import type { GameWorld } from "framework/world";
 
 beforeAll(() => {
@@ -46,43 +47,27 @@ function clearEntityMap(): void {
  * 只写入 world.maps 缓存，不修改 activeMaps / defaultMapId / resolvedMapSources——
  * 地图激活由测试显式控制（setupTwoMapWorld 或 movePlayerToMap）。
  */
-function buildMap(id: string, wallTiles: Array<{ x: number; y: number }>): MapRuntime {
-  const blocked = new Uint8Array(64);
-  for (const t of wallTiles) {
-    blocked[t.y * 8 + t.x] = 1;
-  }
-  return {
-    id,
-    name: id,
-    grid: { width: 8, height: 8, tileWidth: 16, tileHeight: 16 },
-    blocked,
-    spawns: { player: { x: 64, y: 64 }, npcs: [] },
-    zones: [],
-  };
+function buildMap(id: string, wallTiles: Array<{ x: number; y: number }>): MapGeometry {
+  return makeTestGeometry({
+    key: id,
+    width: 8,
+    height: 8,
+    blocked: (tx, ty) => wallTiles.some((t) => t.x === tx && t.y === ty),
+  });
 }
 
 /**
- * 建立两张确定性地图（a/b）的环境：
- * - a 激活 + 默认图，墙在 tile (2,4) → 体中心 x=40；
- * - b 未激活（仅缓存），墙在 tile (5,4) → 体中心 x=88。
- * resolvedMapSources 填好，保证 movePlayerToMap 的 ensureMapActive 可用。
+ * 建立两张确定性地图（a/b）的环境（核心切换后：boot 全量构建、全部常驻激活）：
+ * - a 默认图，墙在 tile (2,4) → 体中心 x=40；
+ * - b 墙在 tile (5,4) → 体中心 x=88。
  */
 function setupTwoMapWorld(world: GameWorld): void {
   world.defaultMapId = "a";
-  world.maps = {};
-  world.activeMaps = new Set<string>(["a"]);
-  world.gameDef.resolvedMapSources = {
-    a: {
-      kind: "generated", generatorId: "simple", id: "a", name: "a",
-      seed: 1, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
-    },
-    b: {
-      kind: "generated", generatorId: "simple", id: "b", name: "b",
-      seed: 2, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
-    },
+  world.maps = {
+    a: buildMap("a", [{ x: 2, y: 4 }]),
+    b: buildMap("b", [{ x: 5, y: 4 }]),
   };
-  world.maps["a"] = buildMap("a", [{ x: 2, y: 4 }]);
-  world.maps["b"] = buildMap("b", [{ x: 5, y: 4 }]);
+  world.activeMaps = new Set<string>(["a", "b"]);
 }
 
 /** 手工构造玩家实体（Transform + Velocity + Box Collider，需挂齐全组件方可被碰撞系统处理）。 */

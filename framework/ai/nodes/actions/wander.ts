@@ -59,7 +59,7 @@ export function createWanderAction(args?: Record<string, unknown>): () => State 
       rt.nextChangeTick = tick + randInt(20, 60);
     }
 
-    const bounds = mapPixelBounds((world.maps[entityMapOf(world, self)] ?? world.map)?.grid);
+    const bounds = mapPixelBounds(world.maps[entityMapOf(world, self)]?.grid);
     const tileW = bounds?.tileW ?? 16;
     const finalSpeed = speed ?? tileW * 2;
 

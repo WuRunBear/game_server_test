@@ -23,7 +23,6 @@ import { Player } from "framework/components/tags";
 import { EntityMap } from "framework/components/entityMap";
 import { spawnEntity } from "framework/entities/spawn";
 import { destroyEntity } from "framework/entities/destroyEntity";
-import { ensureMapActive } from "framework/map/switchMap";
 import type { GameWorld } from "framework/world";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { SerializedEntity, WorldRecord } from "framework/repository";
@@ -102,8 +101,7 @@ export function serializeWorld(world: GameWorld, id: string): WorldRecord {
     nextNetworkId: world.nextNetworkId,
     timeOfDay: { ...world.time.timeOfDay },
     // 保留写 mapId：仅作旧档迁移回退（新档实体归属以 components["EntityMap"]
-    // 为准）。写 world.defaultMapId 而非弃用别名 world.map——多图世界下 world.map
-    // 仅是默认图引用（T2 弃用别名），默认图 id 的权威字段是 world.defaultMapId。
+    // 为准）。默认图 id 的权威字段是 world.defaultMapId。
     mapId: world.defaultMapId,
     entities,
   };
@@ -188,15 +186,14 @@ export function restoreWorld(world: GameWorld, record: WorldRecord): number[] {
   }
   world.nextNetworkId = record.nextNetworkId;
 
-  // 按恢复实体的地图归属重建激活集：实体归属生效即保证该图已构建/已激活
-  // （ensureMapActive 幂等；未知图返回 false 静默跳过，空串已过滤）。
-  // EntityMap 值即 registry key（运行时命名空间键），直接作为 ensureMapActive 的 mapId
-  // 按 key 查来源即可，无需反查 source.id。
-  // 以 { spawnInitialNpcs: false } 激活：恢复出的 NPC 已是存档实体，禁止在其上
-  // 二次 spawn 初始 NPC（否则持久化 NPC 之上叠加同坐标的第二波，见 todo 修复）；投影
-  // 图 activeMaps 收齐即可（常驻语义），实际实体由恢复循环重建。
+  // 按恢复实体的地图归属补齐激活集：bootMaps 已全量构建 world.maps 并激活
+  // 全部配置图（常驻语义），此处仅兜底把实体引用的已构建图加入激活集
+  // （world.maps 缺键的未知图跳过——归属异常由消费方按 error+跳过处理）。
+  // 快照地图回填与激活的彻底重写归持久化切换 todo（WorldRecord.maps 接线）。
   for (const mapId of restoredMaps) {
-    ensureMapActive(world, mapId, { spawnInitialNpcs: false });
+    if (world.maps[mapId]) {
+      world.activeMaps.add(mapId);
+    }
   }
 
   return orphanPlayers;

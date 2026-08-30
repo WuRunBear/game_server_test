@@ -2,6 +2,6 @@
   "kind": "portal",
   "components": {
     "Size": { "w": 32, "h": 32 },
-    "Portal": { "targetMap": "cave", "x": 256, "y": 256 }
+    "Portal": { "targetMap": "cave", "x": 488, "y": 520 }
   }
 }

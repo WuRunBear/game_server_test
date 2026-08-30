@@ -2,13 +2,13 @@ import { createWorld } from "bitecs";
 
 import { createMetrics, type Metrics } from "framework/metrics";
 import { createLogger, type Logger } from "framework/utils/logger";
-import type { MapRuntime } from "framework/map";
+import type { MapGeometry } from "framework/map/geometry/types";
 import type { GameEvent } from "framework/events/gameEvents";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { SystemRegistry } from "framework/systems/systemRegistry";
 import type { ActionRegistry } from "framework/ai/actionRegistry";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
-import type { GeneratorRegistry } from "framework/map/generatorRegistry";
+import type { GeneratorRegistry } from "framework/map/generate/generatorRegistry";
 import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
 
 export type EntityId = number;
@@ -41,16 +41,10 @@ export type GameWorld = ReturnType<typeof createWorld> & {
   time: GameTime;
   metrics: Metrics;
   logger: Logger;
-  /**
-   * 默认地图引用，弃用别名——新代码一律经 `world.maps` / `world.defaultMapId`
-   * / `entityMapOf` 访问。保留仅为兼容既有消费方（始终指向 world.maps[defaultMapId]）。
-   * @deprecated 使用 world.maps[world.defaultMapId] 代替。
-   */
-  map?: MapRuntime;
 
-  /** 全图运行时缓存：mapId → MapRuntime（惰性构建，开机构建仅默认图）。 */
-  maps: Record<string, MapRuntime>;
-  /** 当前激活（规则/系统常驻运行）的地图 id 集合；默认图在开机时激活。 */
+  /** 全图几何缓存：mapId → MapGeometry（开机由 bootMaps 全量构建，常驻）。 */
+  maps: Record<string, MapGeometry>;
+  /** 当前激活（演化/系统常驻运行）的地图 id 集合；全部配置图开机即激活（常驻语义）。 */
   activeMaps: Set<string>;
   /** 默认地图 id（新玩家出生图）；无地图配置时为空串。 */
   defaultMapId: string;
@@ -59,6 +53,7 @@ export type GameWorld = ReturnType<typeof createWorld> & {
   archetypes: ArchetypeRegistry;
   systems_registry: SystemRegistry;
   actions: ActionRegistry;
+  /** 生成积木注册表（map/generate 层；管道积木按名在此查找）。 */
   generators: GeneratorRegistry;
   components_registry: ComponentRegistry;
 

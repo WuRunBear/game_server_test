@@ -10,6 +10,7 @@
  * - loadWorld 找不到返回 null
  * - 数据为纯 JSON（可安全 JSON.stringify）
  */
+import type { SerializedMapGeometry } from "map/geometry/snapshot";
 
 /** 单实体序列化形态：组件名 → 组件值（SoA 为字段值对象，AoS 为完整结构）。 */
 export interface SerializedEntity {
@@ -39,6 +40,13 @@ export interface WorldRecord {
    * 提供回退值（可缺省；缺省时各实体回退世界默认图）。
    */
   mapId?: string;
+  /**
+   * 地图几何快照表（key = 地图 registry key）。由 bootMaps 在无档首存时
+   * 经 serializeWorld 组装写入（序列化写入接线属持久化切换 todo）；
+   * bootMaps 读档路径据此反序列化回填 world.maps。缺省视为快照无该图
+   * （配置新增图走生成+初始演化分支）。
+   */
+  maps?: Record<string, SerializedMapGeometry>;
   /** 存活实体清单。 */
   entities: SerializedEntity[];
 }

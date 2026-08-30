@@ -42,7 +42,7 @@ export function createChaseAction(args?: Record<string, unknown>): () => State {
 
     const finalSpeed = speed ?? DEFAULT_SPEED;
     let dir = normalizeOrFallback(dx, dy);
-    const bounds = mapPixelBounds((world.maps[entityMapOf(world, self)] ?? world.map)?.grid);
+    const bounds = mapPixelBounds(world.maps[entityMapOf(world, self)]?.grid);
     if (bounds) {
       dir = clampDirectionToMapBounds(
         Transform.x[self],

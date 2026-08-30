@@ -429,10 +429,10 @@ describe("interactionSystem 路由", () => {
 
 // netSync 接线：多组件同字段以 OR 语义并入一列；AoS 组件经适配器展平为 numbers/strings
 describe("netSync：OR 语义 + AoS 适配（用真实 game 配置的 netSync 接线）", () => {
-  it("仅 Transform+Size 的 item 实体对快照可见（OR 语义修旧 AND-query 缺陷）", () => {
+  it("仅 Transform+Size 的 item 实体对快照可见（OR 语义修旧 AND-query 缺陷）", async () => {
     const { componentRegistry, archetypeRegistry } = getRegistries();
     const gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
-    const sim = createGameSimulation(gameDef);
+    const sim = await createGameSimulation(gameDef);
     const world = (sim as unknown as { world: GameWorld }).world;
     // 用真实 "item" archetype spawn（只有 Size+Item+Transform）
     const item = spawnEntity(world, archetypeRegistry.get("item"), componentRegistry, { x: 5, y: 5 });
@@ -447,9 +447,9 @@ describe("netSync：OR 语义 + AoS 适配（用真实 game 配置的 netSync �
     expect(found).toBe(true);
   });
 
-  it("玩家 Needs/Inventory 通过 AoS 适配展平为 strings + numbers", () => {
+  it("玩家 Needs/Inventory 通过 AoS 适配展平为 strings + numbers", async () => {
     const gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
-    const sim = createGameSimulation(gameDef);
+    const sim = await createGameSimulation(gameDef);
     const { networkId } = sim.addPlayer("s1");
     const { snapshot } = sim.tick(50);
     const snap = snapshot.entities.get(networkId)!;
@@ -859,9 +859,9 @@ describe("Slice 2 集成：战斗闭环", () => {
     expect(Transform.y[player]).toBe(0);
   });
 
-  it("GameSimulation：applyInputs 把 attack 意图写入 → interactionSystem 路由命中", () => {
+  it("GameSimulation：applyInputs 把 attack 意图写入 → interactionSystem 路由命中", async () => {
     const gameDef = createDefaultGameDefinition();
-    const sim = createGameSimulation(gameDef);
+    const sim = await createGameSimulation(gameDef);
     const world = (sim as unknown as { world: GameWorld }).world;
     const { networkId } = sim.addPlayer("s1");
     const playerEid = query(world, [Player])[0];

@@ -12,6 +12,7 @@
  * addPlayer；地图归属经 spawnEntity overrides.mapId / EntityMap 直写（todo 4）；
  * viewRadius 经 def.resolvedRules["server"]（ServerRuleSchema 语义，同 slice5）。
  */
+import type { SimulationPort } from "simulation";
 import { describe, it, expect, beforeAll } from "vitest";
 import { query } from "bitecs";
 import {
@@ -32,7 +33,7 @@ beforeAll(() => {
 });
 
 /** 取仿真内部的 GameWorld（镜像 slice5 simWorld 私有访问器）。 */
-function simWorld(sim: ReturnType<typeof createGameSimulation>): GameWorld {
+function simWorld(sim: SimulationPort): GameWorld {
   return (sim as unknown as { world: GameWorld }).world;
 }
 
@@ -59,9 +60,9 @@ function spawnItem(world: GameWorld, x: number, y: number, mapId: string): numbe
 }
 
 describe("interest", () => {
-  it("a) 跨图实体与玩家同坐标 → 不可见", () => {
+  it("a) 跨图实体与玩家同坐标 → 不可见", async () => {
     clearEntityMap();
-    const sim = createGameSimulation(createDefaultGameDefinition());
+    const sim = await createGameSimulation(createDefaultGameDefinition());
     const world = simWorld(sim);
     sim.addPlayer("s1");
     const [p1] = query(world, [Player]);
@@ -76,9 +77,9 @@ describe("interest", () => {
     expect(visible).toContain(NetworkId.value[p1]);
   });
 
-  it("b) 同图半径内可见；半径外不可见", () => {
+  it("b) 同图半径内可见；半径外不可见", async () => {
     clearEntityMap();
-    const sim = createGameSimulation(defWithRadius(100));
+    const sim = await createGameSimulation(defWithRadius(100));
     const world = simWorld(sim);
     sim.addPlayer("s1");
     const [p1] = query(world, [Player]);
@@ -94,9 +95,9 @@ describe("interest", () => {
     expect(visible).toContain(NetworkId.value[p1]);
   });
 
-  it("c) 未配 viewRadius → 同图全量（远距同图亦可见）", () => {
+  it("c) 未配 viewRadius → 同图全量（远距同图亦可见）", async () => {
     clearEntityMap();
-    const sim = createGameSimulation(createDefaultGameDefinition());
+    const sim = await createGameSimulation(createDefaultGameDefinition());
     const world = simWorld(sim);
     sim.addPlayer("s1");
     const [p1] = query(world, [Player]);
@@ -109,9 +110,9 @@ describe("interest", () => {
     expect(interest!.get("s1")).toContain(NetworkId.value[p1]);
   });
 
-  it("d) 自身恒可见：出半径 + 跨图邻接均不影响 own", () => {
+  it("d) 自身恒可见：出半径 + 跨图邻接均不影响 own", async () => {
     clearEntityMap();
-    const sim = createGameSimulation(defWithRadius(1));
+    const sim = await createGameSimulation(defWithRadius(1));
     const world = simWorld(sim);
     sim.addPlayer("s1");
     const [p1] = query(world, [Player]);
@@ -127,9 +128,9 @@ describe("interest", () => {
     expect(visible).not.toContain(NetworkId.value[cross]);
   });
 
-  it("e) 他图玩家实体不在本玩家 visible 列表", () => {
+  it("e) 他图玩家实体不在本玩家 visible 列表", async () => {
     clearEntityMap();
-    const sim = createGameSimulation(createDefaultGameDefinition());
+    const sim = await createGameSimulation(createDefaultGameDefinition());
     const world = simWorld(sim);
     sim.addPlayer("s1");
     const [p1] = query(world, [Player]);

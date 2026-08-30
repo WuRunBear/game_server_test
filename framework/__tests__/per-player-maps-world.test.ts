@@ -22,20 +22,19 @@ beforeAll(() => {
 });
 
 describe("world maps", () => {
-  it("with map config: only the default map is cached/active, defaultMapId set", () => {
+  it("with map config: all config maps are built/active at boot, defaultMapId set", () => {
     const gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
     const world: GameWorld = createGameInstance(gameDef).world;
 
-    const defaultId = gameDef.resolvedMapSource!.id;
+    const defaultId = gameDef.map?.default ?? "";
 
-    // 惰性缓存：开机只包含默认图，不含 cave/tiled-demo
-    expect(Object.keys(world.maps)).toEqual([defaultId]);
+    // 常驻语义：开机全量构建并激活全部配置图
+    const configKeys = gameDef.resolvedMapConfigs.map((c) => c.key);
+    expect(Object.keys(world.maps).sort()).toEqual([...configKeys].sort());
     expect(world.maps[defaultId]).toBeDefined();
-    expect(world.maps[defaultId].id).toBe(defaultId);
-    expect(world.activeMaps).toEqual(new Set([defaultId]));
+    expect(world.maps[defaultId]!.key).toBe(defaultId);
+    expect(world.activeMaps).toEqual(new Set(configKeys));
     expect(world.defaultMapId).toBe(defaultId);
-    // world.map 保留为默认图别名，且指向同一运行时对象
-    expect(world.map).toBe(world.maps[defaultId]);
   });
 
   it("without map config: maps/activeMaps stay empty and step still runs", () => {
@@ -45,7 +44,6 @@ describe("world maps", () => {
     expect(world.maps).toEqual({});
     expect(world.activeMaps.size).toBe(0);
     expect(world.defaultMapId).toBe("");
-    expect(world.map).toBeUndefined();
 
     // 无地图配置时世界照常推进，不带错误
     expect(() => instance.step(16)).not.toThrow();

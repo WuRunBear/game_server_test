@@ -1,17 +1,13 @@
 /**
- * 分图（per-player maps）持久化测试（per-player-maps 计划 todo 15）。
+ * 分图（per-player maps）持久化测试（核心切换后语义）。
  *
  * 覆盖：
- * - 新档 roundtrip：双图世界中玩家按 EntityMap 归属 cave，序列化 → 恢复后
- *   玩家仍属 cave，且 cave 从实体归属重建激活（world.activeMaps 含 cave）。
- * - 旧档迁移：record.mapId="cave" 且实体无 EntityMap（旧版存档形态）→
- *   恢复后玩家落 cave——record.mapId 仅作旧档回退，新档以实体归属为准。
- * - 畸形存档防御：{id, savedAt, tick, nextNetworkId}（无 entities）不抛错，
- *   恢复出空世界（既有行为保留）。
- *
- * 测试地图为 source.id === registry key 的生成图（与 T2 的派生一致），种子经
- * 校验（buildMapRuntime 的 validateMapRuntime 不会因出生格阻塞而抛错）。
- * 全部沿用 T1 环回测试与 T3 挂双图 helper 的既定模式（见 learnings.md）。
+ * - 新档 roundtrip：实体 EntityMap 归属恢复，恢复图按归属补齐 activeMaps。
+ * - 旧档迁移：实体无 EntityMap 时 record.mapId 回退（该字段删除归持久化切换 todo）。
+ * - 畸形存档防御：无 entities 字段不抛错。
+ * - 恢复不重复布置实体：恢复后实体计数与存档前一致（初始布置唯一路径 = 演化引擎，
+ *   restoreWorld 只恢复存档实体）。
+ * - registry key 命名空间：恢复按 EntityMap 值（registry key）激活，不认显式 id 别名。
  */
 import { describe, it, expect, beforeAll } from "vitest";
 import { query } from "bitecs";
@@ -19,14 +15,13 @@ import {
   bootstrapFramework,
   createGameInstance,
   createDefaultGameDefinition,
-  ensureMapActive,
   getRegistries,
-  restoreWorld,
-  serializeWorld,
-  spawnEntity,
 } from "framework/index";
-import { EntityMap } from "framework/components/entityMap";
+import { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
+import { spawnEntity } from "framework/entities/spawn";
 import { NetworkId } from "framework/components/network";
+import { EntityMap } from "framework/components/entityMap";
+import { makeTestGeometry } from "./helpers/mapGeometry";
 import type { GameWorld } from "framework/world";
 import type { WorldRecord } from "framework/repository";
 
@@ -47,6 +42,22 @@ function ensureArchetype(world: GameWorld, spec: Parameters<typeof world.archety
   }
 }
 
+/** 挂两张已构建图（cave/meadow，全部常驻激活——核心切换后无惰性构建）。 */
+function attachTwoMaps(world: GameWorld): void {
+  world.maps = {
+    cave: makeTestGeometry({ key: "cave", width: 8, height: 8 }),
+    meadow: makeTestGeometry({ key: "meadow", width: 8, height: 8 }),
+  };
+  world.activeMaps = new Set(["cave", "meadow"]);
+  world.defaultMapId = "cave";
+}
+
+/** 清空 EntityMap 模块级单例残留（AoS 数组跨 world 复用 eid，防跨用例串扰）。 */
+function clearEntityMap(): void {
+  for (let i = 0; i < EntityMap.length; i++) EntityMap[i] = undefined;
+}
+
+/** 带完整组件与 Player 标签的测试原型（orphan 判定按 Player tag）。 */
 function ensureTestArchetype(world: GameWorld): void {
   ensureArchetype(world, {
     kind: "w1",
@@ -61,37 +72,12 @@ function ensureTestArchetype(world: GameWorld): void {
   });
 }
 
-/**
- * 挂两张生成图（cave/meadow）：cave 为测试主图，均无 NPC 出生点——
- * 激活只做 activeMaps 标记，不额外 spawn 实体（断言面干净）。
- */
-function attachTwoMaps(world: GameWorld): void {
-  world.gameDef.resolvedMapSources = {
-    cave: {
-      kind: "generated", generatorId: "simple", id: "cave", name: "cave",
-      seed: 1, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
-    },
-    meadow: {
-      kind: "generated", generatorId: "simple", id: "meadow", name: "meadow",
-      seed: 2, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
-    },
-  };
-}
-
-/** 清空 EntityMap 模块级单例残留（AoS 数组跨 world 复用 eid，防跨用例串扰）。 */
-function clearEntityMap(): void {
-  for (let i = 0; i < EntityMap.length; i++) EntityMap[i] = undefined;
-}
-
 describe("persist", () => {
-  it("新档 roundtrip：实体 EntityMap 归属恢复，且按归属重建 activeMaps", () => {
+  it("新档 roundtrip：实体 EntityMap 归属恢复，且按归属补齐 activeMaps", () => {
     const world1 = createBareWorld();
     clearEntityMap();
     attachTwoMaps(world1);
     ensureTestArchetype(world1);
-    // 双图激活（常驻语义：两张图都在 activeMaps）
-    expect(ensureMapActive(world1, "cave")).toBe(true);
-    expect(ensureMapActive(world1, "meadow")).toBe(true);
     // 玩家经 spawnEntity overrides.mapId 归属 cave
     const eid = spawnEntity(world1, world1.archetypes.get("w1"), getRegistries().componentRegistry, {
       x: 0,
@@ -109,7 +95,7 @@ describe("persist", () => {
     attachTwoMaps(world2);
     const orphan = restoreWorld(world2, record);
     expect(orphan.length).toBe(1);
-    // 玩家回到其存档归属图；该图从实体归属重建为激活图
+    // 玩家回到其存档归属图；该图在激活集中
     expect(EntityMap[orphan[0]]).toBe("cave");
     expect(world2.activeMaps.has("cave")).toBe(true);
   });
@@ -154,57 +140,42 @@ describe("persist", () => {
 });
 
 /**
- * 读档恢复不重复布置初始 NPC 回归（todo：restoreWorld 二次 spawn）。
- *
- * restoreWorld 经 ensureMapActive 为每个恢复图重建 activeMaps；若该路径再跑
- * spawnInitialNpcs，会在持久化的 NPC（尚未即已入档）之上再铺一份同名同坐标的第二波，
- * 且会复活存档前已被击杀的 NPC。修复方向：restoreWorld 以 `{ spawnInitialNpcs: false }`
- * 激活恢复图，NPC 仅来自存档实体——每图 NPC 计数必须等于存档前计数（不翻倍）。
+ * 恢复不重复布置实体回归：restoreWorld 只恢复存档实体（初始布置唯一路径 =
+ * 演化引擎），恢复后实体计数必须等于存档前计数（不翻倍）。
  */
-describe("persist 恢复不重复布置初始 NPC", () => {
-  /**
-   * 挂两张生成图：cave 无 NPC 出生点，hill 带 2 个 NPC 出生点（种子经校验格可走）。
-   * 两图 seed 独立复用（各图几何互不影响），仅 hill 的 spawns.npcs 会被 spawInitialNpcs 消费。
-   */
-  function attachTwoMapsWithNpcSpawns(world: GameWorld): void {
-    world.gameDef.resolvedMapSources = {
-      cave: {
-        kind: "generated", generatorId: "simple", id: "cave", name: "cave",
-        seed: 2, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
-      },
-      hill: {
-        kind: "generated", generatorId: "simple", id: "hill", name: "hill",
-        seed: 1, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
-        npcSpawns: [
-          { kind: "npc1", offsetTiles: [1, 0] },
-          { kind: "npc1", offsetTiles: [0, 1] },
-        ],
-      },
-    };
-  }
-
-  it("restoreWorld 激活恢复图时不再 spawn 初始 NPC：hill NPC 计数与存档前一致（不翻倍）", () => {
+describe("persist 恢复不重复布置实体", () => {
+  it("restoreWorld 后实体计数与存档前一致（不翻倍）", () => {
     const world1 = createBareWorld();
     clearEntityMap();
-    attachTwoMapsWithNpcSpawns(world1);
+    attachTwoMaps(world1);
     ensureArchetype(world1, { kind: "npc1", components: {} });
 
-    // 首次激活 hill → spawnInitialNpcs 布置 2 个初始 NPC（存档前置基准）
-    expect(ensureMapActive(world1, "hill")).toBe(true);
+    // 手工布置 2 个 NPC（演化引擎职责的替身），归属 hill 图
+    world1.maps["hill"] = makeTestGeometry({ key: "hill", width: 8, height: 8 });
+    world1.activeMaps.add("hill");
+    for (const pos of [{ x: 16, y: 16 }, { x: 32, y: 16 }]) {
+      const eid = spawnEntity(world1, world1.archetypes.get("npc1"), getRegistries().componentRegistry, {
+        x: pos.x,
+        y: pos.y,
+        mapId: "hill",
+      });
+      expect(EntityMap[eid]).toBe("hill");
+    }
     const preCount = query(world1, [NetworkId]).length;
     expect(preCount).toBe(2);
 
     const record = serializeWorld(world1, "s1");
 
-    // 恢复进全新 world2（同两张图；同 npcSpawns）
+    // 恢复进全新 world2（同两张图）
     const world2 = createBareWorld();
     clearEntityMap();
-    attachTwoMapsWithNpcSpawns(world2);
+    attachTwoMaps(world2);
+    world2.maps["hill"] = makeTestGeometry({ key: "hill", width: 8, height: 8 });
     ensureArchetype(world2, { kind: "npc1", components: {} });
 
     const orphan = restoreWorld(world2, record);
     expect(orphan).toEqual([]);
-    // hill 从实体归属重建激活，但不得重复布置初始 NPC
+    // hill 从实体归属补齐激活，但不得重复布置实体
     expect(world2.activeMaps.has("hill")).toBe(true);
     const postCount = query(world2, [NetworkId]).length;
     expect(postCount).toBe(preCount);
@@ -215,61 +186,46 @@ describe("persist 恢复不重复布置初始 NPC", () => {
 });
 
 /**
- * 读档恢复 explicit-id 图回归（F2 残余缺陷：EntityMap 值 = source.id 时与 registry key 错位）。
- *
- * 实体归属（EntityMap）现以 registry key 为规范化键。若 restoreWorld 的激活键/缓存键与实体
- * 归属键不一致（旧实现按 source.id），恢复时 ensureMapActive 以 EntityMap 值查
- * resolvedMapSources 会命中不了（键不同于 key），图静默不重建——activeMaps 空、world.maps 缺键、
- * spawning 规则失效、collision 回退默认墙。本用例用显式 id `"hill-canon"` ≠ registry key
- * `"hill"` 钉住：序列化→恢复后按 registry key 重建激活/缓存，NPC 不翻倍。
+ * registry key 命名空间回归：恢复按 EntityMap 值（registry key）激活与缓存，
+ * 显式 id 风格的别名键不参与运行时命名空间。
  */
 describe("persist 恢复 explicit-id 图（registry key 命名空间）", () => {
-  /** 挂一张带 2 个 NPC 出生点的 explicit-id 图：registry key "hill"，显式 id "hill-canon"。 */
-  function attachExplicitIdMap(world: GameWorld): void {
-    world.gameDef.resolvedMapSources = {
-      hill: {
-        kind: "generated", generatorId: "simple", id: "hill-canon", name: "hill-canon",
-        seed: 1, width: 8, height: 8, tileWidth: 16, tileHeight: 16,
-        npcSpawns: [
-          { kind: "npc1", offsetTiles: [1, 0] },
-          { kind: "npc1", offsetTiles: [0, 1] },
-        ],
-      },
-    };
-  }
-
-  it("explicit-id 图恢复：按 registry key 重建激活与缓存，NPC 计数与存档前一致", () => {
+  it("explicit-id 图恢复：按 registry key 重建激活与缓存，实体计数与存档前一致", () => {
     const world1 = createBareWorld();
     clearEntityMap();
-    attachExplicitIdMap(world1);
+    attachTwoMaps(world1);
     ensureArchetype(world1, { kind: "npc1", components: {} });
 
-    // 首次激活 hill（registry key）→ spawnInitialNpcs 布置 2 个初始 NPC（存档前置基准），归属=key
-    expect(ensureMapActive(world1, "hill")).toBe(true);
-    expect(world1.activeMaps.has("hill")).toBe(true);
+    // registry key "hill"（显式 id 仅为信息性，新模型已无该字段）——布置 2 个归属 hill 的 NPC
+    world1.maps["hill"] = makeTestGeometry({ key: "hill", width: 8, height: 8 });
+    world1.activeMaps.add("hill");
+    for (const pos of [{ x: 16, y: 16 }, { x: 32, y: 16 }]) {
+      spawnEntity(world1, world1.archetypes.get("npc1"), getRegistries().componentRegistry, {
+        x: pos.x,
+        y: pos.y,
+        mapId: "hill",
+      });
+    }
     const preCount = query(world1, [NetworkId]).length;
     expect(preCount).toBe(2);
 
     const record = serializeWorld(world1, "s1");
 
-    // 恢复进全新 world2（同源 resolvedMapSources；同 npcSpawns）
     const world2 = createBareWorld();
     clearEntityMap();
-    attachExplicitIdMap(world2);
+    attachTwoMaps(world2);
+    world2.maps["hill"] = makeTestGeometry({ key: "hill", width: 8, height: 8 });
     ensureArchetype(world2, { kind: "npc1", components: {} });
 
     const orphan = restoreWorld(world2, record);
     expect(orphan).toEqual([]);
-    // 恢复后按 registry key 重建激活与缓存；不得以 source.id（hill-canon）为键
+    // 恢复后按 registry key 补齐激活；别名键不存在
     expect(world2.activeMaps.has("hill")).toBe(true);
     expect(world2.activeMaps.has("hill-canon")).toBe(false);
     expect(world2.maps["hill"]).toBeDefined();
-    // NPC 计数与存档前一致（不翻倍），全部归属 registry key（非 source.id）
     const postCount = query(world2, [NetworkId]).length;
     expect(postCount).toBe(preCount);
     const hillNpcs = query(world2, [NetworkId]).filter((eid) => EntityMap[eid] === "hill");
     expect(hillNpcs.length).toBe(2);
-    // 再次 ensureMapActive(registry key) 仍解析到来源返回 true
-    expect(ensureMapActive(world2, "hill")).toBe(true);
   });
 });
