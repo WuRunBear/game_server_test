@@ -46,7 +46,6 @@ export function newGame(argv: string[]): void {
     join(baseDir, "entities"),
     join(baseDir, "behaviors"),
     join(baseDir, "rules"),
-    join(baseDir, "spawns"),
     join(baseDir, "maps"),
     srcDir,
   ];
@@ -65,14 +64,12 @@ export function newGame(argv: string[]): void {
       { id: "movement" },
       { id: "collision" },
       { id: "combat" },
-      { id: "spawning" },
       { id: "inventory" },
       { id: "interaction" },
     ],
     entities: "./entities/*.json",
     behaviors: "./behaviors/*.json",
     rules: "./rules/*.json",
-    spawns: "./spawns/*.json",
     netSync: {
       fields: [
         { component: "Transform", fields: ["x", "y"] },

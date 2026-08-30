@@ -26,10 +26,8 @@
  * 语言保持游戏无关：只描述网格/图层/区域，不引入任何游戏专属语义。
  */
 import { pointInPolygon } from "framework/utils/geometry";
+import { WILDERNESS } from "map/generate/blocks/climateRegions";
 import type { GenerationContext } from "map/generate/types";
-
-/** 不被任何 zone 覆盖的格子的兜底区域名（与 climate-regions 的隐式兜底区同名）。 */
-const FALLBACK_REGION = "wilderness";
 
 /** Tiled 对象的自定义属性（名称 / 类型 / 值）。 */
 type TiledProperty = { name: string; type: string; value: unknown };
@@ -241,6 +239,22 @@ function parseZones(layers: TiledLayer[], key: string): ParsedZone[] {
 }
 
 /**
+ * 收集内联 Tiled JSON 的 zones 层产出的区域名（与积木生成期同源解析，供
+ * 加载期引用完整性校验复用——校验侧不重复实现 zone → 区域名推导）。
+ *
+ * @param tiled 内联 Tiled JSON 对象（未校验的外部输入）
+ * @param key 地图 key（错误消息点名）
+ * @returns 按声明顺序排列的区域名列表
+ * @throws Error 当 Tiled JSON 形状畸形时（与积木生成期抛出同一错误）
+ */
+export function tiledRegionNames(tiled: unknown, key: string): string[] {
+  if (!isRecord(tiled)) {
+    throw new Error(`map "${key}": params.tiled is required and must be an inline Tiled JSON object`);
+  }
+  return parseZones(parseLayers(tiled, key), key).map((z) => z.name);
+}
+
+/**
  * "tiled-source" 生成积木：内联 Tiled JSON → 几何草稿。
  *
  * 无条件设定 draft 尺寸并重新分配 tiles/walkable/regionOfTile 缓冲（Tiled
@@ -311,10 +325,10 @@ export function tiledSource(ctx: GenerationContext): void {
 
   // 兜底区：不被任何 zone 覆盖的格子必须指向可解析的区域索引——追加隐式
   // "wilderness"（若某 zone 已占用该名字，则该 zone 即兜底区）
-  let fallbackIndex = zones.findIndex((z) => z.name === FALLBACK_REGION);
+  let fallbackIndex = zones.findIndex((z) => z.name === WILDERNESS);
   if (fallbackIndex < 0) {
     fallbackIndex = zones.length;
-    geometry.regions.set(FALLBACK_REGION, { name: FALLBACK_REGION, meta: {} });
+    geometry.regions.set(WILDERNESS, { name: WILDERNESS, meta: {} });
   }
 
   // 栅格化：tile 中心点（像素）落在多边形内 → 该区域；首个命中优先（声明序），

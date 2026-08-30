@@ -1,66 +1,37 @@
 /**
- * 分图（per-player maps）刷怪路径测试（核心切换后语义）。
+ * 分图（per-player maps）刷怪路径测试（spawning 退役后语义）。
  *
- * 旧 zone 随机刷怪（spawningSystem + resolvedSpawns）已退役：实体生产的
+ * 旧 zone 随机刷怪（spawning 系统 + resolvedSpawns）已整体删除：实体生产的
  * 唯一决策路径是演化引擎（bootMaps 初始铺放 + 每 tick evolve 钩子，规则源
- * resolvedEntityRules）。本文件钉住退役不变式——即使旧规则形状残留，
- * spawningSystem 也不产出任何实体；引擎侧语义由 map-evolution.test.ts 与
- * 开机冒烟测试覆盖。
+ * resolvedEntityRules）。本文件钉住退役不变式——注册表与 game.json 均不再
+ * 引用 spawning；引擎侧语义由 map-evolution.test.ts 与开机冒烟测试覆盖。
  */
 import { describe, it, expect, beforeAll } from "vitest";
-import { query } from "bitecs";
 import {
   bootstrapFramework,
   createGameInstance,
   createDefaultGameDefinition,
+  loadGameDefinition,
   getRegistries,
 } from "framework/index";
-import { Transform } from "framework/components/transform";
-import { spawningSystem } from "framework/systems/gameplay/spawningSystem";
-import { makeTestGeometry } from "./helpers/mapGeometry";
-import type { GameWorld } from "framework/world";
 
 beforeAll(() => {
   // 全局引导一次：注册表是幂等单例，所有用例共享同一套内置实现
   bootstrapFramework();
 });
 
-/** 构造一个最小世界（默认配置，无地图配置兜底路径）。 */
-function createBareWorld(): GameWorld {
-  return createGameInstance(createDefaultGameDefinition()).world;
-}
+describe("spawning 退役（实体生产唯一路径 = 演化引擎）", () => {
+  it("spawning 不在系统注册表中，game.json 也不再启用", () => {
+    const { systemRegistry } = getRegistries();
+    expect(systemRegistry.has("spawning")).toBe(false);
 
-/** 注册测试原型（全局注册表单例，跨用例重复注册会抛错 → 已存在则跳过）。 */
-function ensureArchetype(world: GameWorld, spec: Parameters<typeof world.archetypes.register>[0]): void {
-  if (!world.archetypes.has(spec.kind)) {
-    world.archetypes.register(spec);
-  }
-}
-
-describe("spawningSystem retired（实体生产唯一路径 = 演化引擎）", () => {
-  it("注入旧形状刷怪规则 + 激活图：spawningSystem 不产出任何实体", () => {
-    const world = createBareWorld();
-    ensureArchetype(world, { kind: "npc1", components: {} });
-    world.maps = {
-      a: makeTestGeometry({ key: "a", width: 8, height: 8 }),
-      b: makeTestGeometry({ key: "b", width: 8, height: 8 }),
-    };
-    world.activeMaps = new Set(["a", "b"]);
-    world.defaultMapId = "a";
-    world.gameDef.resolvedSpawns = [
-      { kind: "npc1", zoneId: 1, max: 6, respawnMs: 0 },
-      { kind: "npc1", zoneId: 1, max: 4, respawnMs: 0, mapId: "b" },
-    ];
-
-    spawningSystem(world);
-
-    expect(query(world, [Transform]).length).toBe(0);
+    const gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
+    expect((gameDef.systems ?? []).some((s) => s.id === "spawning")).toBe(false);
   });
 
-  it("resolvedSpawns 缺省为空（规则已迁入 resolvedEntityRules）", () => {
-    const world = createBareWorld();
-    expect(world.gameDef.resolvedSpawns).toEqual([]);
-    expect((world.gameDef.resolvedEntityRules ?? []).length).toBe(0);
+  it("默认定义无演化规则（resolvedEntityRules 缺省为空）", () => {
+    const world = createGameInstance(createDefaultGameDefinition()).world;
+    expect(world.gameDef.resolvedEntityRules ?? []).toEqual([]);
   });
 
   it("getRegistries 暴露生成积木注册表（内置积木可查）", () => {

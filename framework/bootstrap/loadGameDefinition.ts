@@ -2,7 +2,7 @@
  * 游戏配置加载——把 game/ 目录下的 JSON 配置文件读入内存、逐文件校验并合并。
  *
  * 输入：game.json 主配置（含各资源文件的 glob 路径、netSync 字段等）。
- * 输出：LoadedGameDefinition（主配置 + 解析后的实体原型/行为/规则/刷怪/
+ * 输出：LoadedGameDefinition（主配置 + 解析后的实体原型/行为/规则/
  * 物品/对话/任务/地图来源），最后经 validateIntegrity 做跨文件引用完整性校验。
  *
  * 各资源文件按路径 glob 加载，逐文件用 zod schema 校验；规则文件按文件名
@@ -15,11 +15,9 @@ import {
   GameDefinitionSchema,
   type LoadedGameDefinition,
   type BehaviorDefinition,
-  type SpawnRule,
 } from "framework/config/schema/GameDefinitionSchema";
 import { ArchetypeSchema } from "framework/config/schema/ArchetypeSchema";
 import { BehaviorSchema } from "framework/config/schema/BehaviorSchema";
-import { SpawnRuleSchema, SpawnRegistrySchema } from "framework/config/schema/SpawnSchema";
 import { ItemKindSchema, type ItemKindSpec } from "framework/config/schema/ItemKindSchema";
 import { DialogueRegistrySchema, type DialogueTreeJson } from "framework/config/schema/DialogueSchema";
 import { QuestRegistrySchema, type QuestDefinitionJson } from "framework/config/schema/QuestSchema";
@@ -28,6 +26,8 @@ import { EntityRuleSchema, type EntityRule } from "map/evolution/schema";
 import type { PlayerRule } from "framework/config/schema/PlayerRuleSchema";
 import { getRuleSchema } from "framework/config/schema/ruleSchemas";
 import { hasSpawnCondition } from "framework/systems/gameplay/spawnConditions";
+import { WILDERNESS } from "map/generate/blocks/climateRegions";
+import { tiledRegionNames } from "map/generate/blocks/tiledSource";
 import { getRegistries } from "framework/bootstrap";
 import type { ArchetypeSpec } from "framework/entities/archetypeRegistry";
 
@@ -119,21 +119,7 @@ function loadItemsFile(baseDir: string, itemsPattern?: string): ItemKindSpec[] {
   return results;
 }
 
-/** 加载刷怪规则文件：SpawnRegistrySchema 解包出 rules 数组，逐条再校验。 */
-function loadSpawnsFile(baseDir: string, spawnsPattern?: string): SpawnRule[] {
-  if (!spawnsPattern) return [];
-  const files = loadFilesByGlob(baseDir, spawnsPattern);
-  const results: SpawnRule[] = [];
-  for (const file of files) {
-    const raw = readJsonFile(file);
-    const parsed = SpawnRegistrySchema.parse(raw);
-    for (const rule of parsed.rules) {
-      results.push(SpawnRuleSchema.parse(rule) as SpawnRule);
-    }
-  }
-  return results;
-}
-
+/** 加载对话树文件（DialogueRegistrySchema 解包出 trees 数组）；树 id 全局唯一，重复抛错。 */
 function loadDialoguesFile(baseDir: string, pattern?: string): DialogueTreeJson[] {
   if (!pattern) return [];
   const files = loadFilesByGlob(baseDir, pattern);
@@ -231,11 +217,43 @@ function loadEntityRules(baseDir: string, entityRulesPath?: string): EntityRule[
 }
 
 /**
+ * 收集一张地图生成后将存在的全部区域名（实体演化规则 region 引用的合法集合）：
+ * - climate-regions 步骤的 params.names（命名区域）；
+ * - tiled-source 步骤 zones 层产出的区域名（与积木同源解析）；
+ * - 隐式兜底区 wilderness（未被命名区域认领的格子归属，恒合法）。
+ *
+ * 只做名字收集，不校验各积木参数形状——参数错误由积木在生成期自行抛错。
+ */
+function collectMapRegionNames(config: MapConfig): Set<string> {
+  const names = new Set<string>([WILDERNESS]);
+  for (const step of config.pipeline) {
+    if (step.generator === "climate-regions") {
+      const declared = step.params?.names;
+      if (Array.isArray(declared)) {
+        for (const name of declared) {
+          if (typeof name === "string") names.add(name);
+        }
+      }
+    } else if (step.generator === "tiled-source" && step.params?.tiled !== undefined) {
+      for (const name of tiledRegionNames(step.params.tiled, config.key)) {
+        names.add(name);
+      }
+    }
+  }
+  return names;
+}
+
+/**
  * 跨文件引用完整性校验——配置里引用的任何东西都必须真实存在。
  *
  * 校验对象：system/action/component/archetype 注册表存在性、behavior 引用、
- * 刷怪条件的 kind/condition/mapId、netSync 的组件与标签、合成配方的物品 kind、
- * 放置物品的原型、对话树的 treeId 与跳转目标/任务效果、任务引用的 itemKind/victimKind/奖励。
+ * 实体演化规则的 kind/condition/region、netSync 的组件与标签、合成配方的
+ * 物品 kind、放置物品的原型、对话树的 treeId 与跳转目标/任务效果、任务引用的
+ * itemKind/victimKind/奖励。
+ *
+ * region 校验针对「生成后将存在的完整区域集合」（climate 命名区 ∪ 隐式
+ * wilderness ∪ tiled zones），任一来源合法即可；exact 落点是否合法依赖生成后
+ * 的几何，由开机全局校验负责，此处不查。
  *
  * 若框架尚未 bootstrap（注册表不可用，如纯类型测试场景）则静默跳过校验。
  */
@@ -273,15 +291,29 @@ function validateIntegrity(data: LoadedGameDefinition): void {
       }
     }
 
-    for (const spawn of data.resolvedSpawns) {
-      const entityExists = data.resolvedEntities.some((e) => e.kind === spawn.kind) ||
-        archetypeRegistry.has(spawn.kind);
-      if (!entityExists) {
-        throw new Error(`Entity kind "${spawn.kind}" referenced in spawns is not defined`);
+    // 实体演化规则引用校验：kind（含 template 条目）∈ 原型、condition ∈
+    // spawnConditions 注册表、region ∈ 生成后将存在的区域集合
+    for (const rule of data.resolvedEntityRules) {
+      const ruleKinds = rule.mode === "template"
+        ? [rule.kind, ...rule.template.map((t) => t.kind)]
+        : [rule.kind];
+      for (const kind of ruleKinds) {
+        const kindExists = data.resolvedEntities.some((e) => e.kind === kind) ||
+          archetypeRegistry.has(kind);
+        if (!kindExists) {
+          throw new Error(`Entity rule on map "${rule.map}" references unknown kind "${kind}"`);
+        }
       }
-      if (spawn.condition && !hasSpawnCondition(spawn.condition)) {
+      if (rule.condition && !hasSpawnCondition(rule.condition)) {
         throw new Error(
-          `Spawn rule for "${spawn.kind}" references unknown condition "${spawn.condition}"`,
+          `Entity rule for "${rule.kind}" on map "${rule.map}" references unknown condition "${rule.condition}"`,
+        );
+      }
+      const mapConfig = data.resolvedMapConfigs.find((c) => c.key === rule.map);
+      const legalRegions = mapConfig ? collectMapRegionNames(mapConfig) : new Set([WILDERNESS]);
+      if (!legalRegions.has(rule.region)) {
+        throw new Error(
+          `Entity rule for "${rule.kind}" on map "${rule.map}" references unknown region "${rule.region}" (not produced by any generation source)`,
         );
       }
     }
@@ -440,7 +472,6 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
   const resolvedEntities = loadArchetypesFiles(baseDir, gameDef.entities);
   const resolvedBehaviors = loadBehaviorFiles(baseDir, gameDef.behaviors);
   const resolvedRules = loadRulesFile(baseDir, gameDef.rules);
-  const resolvedSpawns = loadSpawnsFile(baseDir, gameDef.spawns);
   const resolvedItems = loadItemsFile(baseDir, gameDef.items);
   const resolvedDialogues = loadDialoguesFile(baseDir, gameDef.dialogues);
   const resolvedQuests = loadQuestsFile(baseDir, gameDef.quests);
@@ -454,7 +485,6 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
     resolvedEntities,
     resolvedBehaviors,
     resolvedRules,
-    resolvedSpawns,
     resolvedItems,
     resolvedDialogues,
     resolvedQuests,
@@ -479,7 +509,6 @@ export function createDefaultGameDefinition(): LoadedGameDefinition {
       { id: "movement" },
       { id: "collision" },
       { id: "combat" },
-      { id: "spawning" },
       { id: "inventory" },
       { id: "interaction" },
     ],
@@ -494,7 +523,6 @@ export function createDefaultGameDefinition(): LoadedGameDefinition {
     resolvedEntities: [],
     resolvedBehaviors: [],
     resolvedRules: {},
-    resolvedSpawns: [],
     resolvedItems: [],
     resolvedDialogues: [],
     resolvedQuests: [],

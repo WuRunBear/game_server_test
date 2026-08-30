@@ -393,7 +393,6 @@ describe("Slice 5：输入校验（anti-cheat）", () => {
 describe("Slice 5：真实 game 配置（server 规则 + 存档→恢复 demo）", () => {
   it("server 规则解析 + 存档恢复：campfire 与玩家背包俱在", async () => {
     const def = loadGameDefinition({ gameJsonPath: "game/game.json" });
-    def.resolvedSpawns = [];
     const server = def.resolvedRules["server"] as ServerRule;
     expect(server.saveId).toBe("main");
     expect(server.viewRadius).toBe(300);

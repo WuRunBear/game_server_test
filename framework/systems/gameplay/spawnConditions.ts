@@ -3,7 +3,7 @@ import { PHASE_NIGHT, type GameWorld } from "world";
 /**
  * 刷怪条件模块注册表（名 → 判定函数）。
  *
- * SpawnRuleJson 的 `condition` 字段按名字引用这里注册的条件；
+ * 实体演化规则（EntityRule）的 `condition` 字段按名字引用这里注册的条件；
  * 条件只依赖世界状态（如 world.time.timeOfDay.phase），不含游戏语义。
  */
 export type SpawnCondition = (world: GameWorld) => boolean;
@@ -27,7 +27,7 @@ export function getSpawnCondition(name: string): SpawnCondition {
   return condition;
 }
 
-/** 刷怪条件是否已注册（spawningSystem 先用它预检，避免 get 抛错中断 tick）。 */
+/** 刷怪条件是否已注册（加载期完整性校验先用它预检，避免 get 抛错中断加载）。 */
 export function hasSpawnCondition(name: string): boolean {
   return spawnConditions.has(name);
 }

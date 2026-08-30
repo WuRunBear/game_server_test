@@ -19,8 +19,8 @@
 
 import type { GenerationContext } from "map/generate/types";
 
-/** 隐式野区名：未被命名区域认领的格子归属此区域（保留名）。 */
-const WILDERNESS = "wilderness";
+/** 隐式野区名：未被命名区域认领的格子归属此区域（保留名，tiled-source 同名复用）。 */
+export const WILDERNESS = "wilderness";
 
 /** 区域生长预算占全图格数的最小/最大份额（每次运行经 rng 在区间内取值）。 */
 const MIN_AREA_SHARE = 0.12;

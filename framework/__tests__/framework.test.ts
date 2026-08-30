@@ -8,7 +8,7 @@
  * - GameSimulation 无头运行、输入处理、tick 异常隔离、dtMs 钳制
  */
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
-import { addComponent, addEntity, hasComponent, query } from "bitecs";
+import { addComponent, addEntity, hasComponent } from "bitecs";
 import { State } from "mistreevous";
 import {
   bootstrapFramework,
@@ -25,7 +25,6 @@ import {
 } from "framework/index";
 import { getRegistries } from "framework/bootstrap";
 import { setEntityKind } from "framework/systems/gameplay/aiSystem";
-import { spawningSystem } from "framework/systems/gameplay/spawningSystem";
 import { inventorySystem } from "framework/systems/gameplay/inventorySystem";
 import { collisionSystem } from "framework/systems/core/collisionSystem";
 import { attackTarget } from "framework/systems/gameplay/combatSystem";
@@ -105,7 +104,8 @@ describe("componentRegistry", () => {
   });
 });
 
-// 系统注册表：内置系统（ai/physics/movement/collision/combat/spawning）均已注册
+// 系统注册表：内置系统（ai/physics/movement/collision/combat）均已注册；
+// spawning 已退役（实体生产唯一路径 = 演化引擎），注册表中不得再出现
 describe("systemRegistry", () => {
   it("should have registered builtin systems", () => {
     const { systemRegistry } = getRegistries();
@@ -114,7 +114,7 @@ describe("systemRegistry", () => {
     expect(systemRegistry.has("movement")).toBe(true);
     expect(systemRegistry.has("collision")).toBe(true);
     expect(systemRegistry.has("combat")).toBe(true);
-    expect(systemRegistry.has("spawning")).toBe(true);
+    expect(systemRegistry.has("spawning")).toBe(false);
   });
 });
 
@@ -196,7 +196,6 @@ describe("loadGameDefinition (Item 1: sub-config loading)", () => {
     const gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
     expect(gameDef.resolvedEntityRules.length).toBeGreaterThan(0);
     expect(gameDef.resolvedEntityRules[0].kind).toBe("villager");
-    expect(gameDef.resolvedSpawns.length).toBe(0);
   });
 
   // 地图配置：按 maps/registry.json 解析出管道生成配置
@@ -320,39 +319,6 @@ describe("combatSystem (Item 3: damage calculation via attackTarget)", () => {
     expect(Health.current[nearTarget]).toBe(80);
     expect(attackTarget(world, attacker, farTarget)).toBe(false);
     expect(Health.current[farTarget]).toBe(100);
-  });
-});
-
-// Item 4：刷怪系统冒烟——空刷怪规则下 step 一帧不报错
-describe("spawningSystem (Item 4)", () => {
-  it("should run without error with empty spawn rules", () => {
-    const gameDef = createDefaultGameDefinition();
-    const instance = createGameInstance(gameDef);
-    const tickBefore = instance.world.time.tick;
-    instance.step(50);
-    expect(instance.world.time.tick).toBe(tickBefore + 1);
-  });
-});
-
-// 刷怪系统已退役（实体生产唯一路径 = 演化引擎）：系统体恒 no-op
-describe("spawningSystem retired (core switch)", () => {
-  it("should not produce entities even with legacy spawn rules present", () => {
-    const { archetypeRegistry } = getRegistries();
-    archetypeRegistry.register({ kind: "count-zone-a", components: {}, tags: ["NPC"] });
-
-    const gameDef = createDefaultGameDefinition();
-    const instance = createGameInstance(gameDef);
-    const world = instance.world;
-    world.maps["test"] = makeTestGeometry({ key: "test", width: 4, height: 4 });
-    world.gameDef.resolvedSpawns = [
-      { kind: "count-zone-a", zoneId: 1, max: 6, respawnMs: 0 },
-    ];
-
-    spawningSystem(world);
-
-    let count = 0;
-    for (const _eid of query(world, [NPC])) count++;
-    expect(count).toBe(0);
   });
 });
 

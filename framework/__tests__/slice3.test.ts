@@ -576,7 +576,6 @@ describe("Slice 3 集成：合成→装备→采集翻倍 / 合成矛→攻击�
 
   it("真实 netSync 接线：Equipment/CraftingStation 字段进入快照", async () => {
     const def = loadGameDefinition({ gameJsonPath: "game/game.json" });
-    def.resolvedSpawns = [];
     const sim = await createGameSimulation(def);
     const { networkId } = sim.addPlayer("s1");
     const { snapshot } = sim.tick(50);
@@ -590,7 +589,6 @@ describe("Slice 3 集成：合成→装备→采集翻倍 / 合成矛→攻击�
 
   it("真实 game 配置端到端：真实 player/campfire 原型 + 命令通道 + 站点合成全链路", async () => {
     const def = loadGameDefinition({ gameJsonPath: "game/game.json" });
-    def.resolvedSpawns = [];
     def.resolvedRules["crafting"] = {
       recipes: [
         { id: "r1", inputs: [{ kind: "m1", count: 1 }, { kind: "m2", count: 1 }], outputs: [{ kind: "m3", count: 1 }] },
@@ -633,7 +631,5 @@ describe("Slice 3 集成：合成→装备→采集翻倍 / 合成矛→攻击�
 });
 
 function loadRealGameDefForArchetype() {
-  const def = loadGameDefinition({ gameJsonPath: "game/game.json" });
-  def.resolvedSpawns = [];
-  return def;
+  return loadGameDefinition({ gameJsonPath: "game/game.json" });
 }

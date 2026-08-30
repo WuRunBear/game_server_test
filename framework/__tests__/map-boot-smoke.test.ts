@@ -16,6 +16,8 @@ import {
   runHeadless,
 } from "framework/index";
 import { NetworkId } from "framework/components/network";
+import { Kind } from "framework/components/kind";
+import { entityMapOf } from "framework/components/entityMap";
 import type { GameWorld } from "framework/world";
 
 beforeAll(() => {
@@ -44,6 +46,15 @@ describe("boot smoke（真实配置 HeadlessHost 冒烟）", () => {
     expect(world.time.tick).toBe(maxInitialAge);
     // 初始实体 > 0（演化引擎铺放）
     expect(query(world, [NetworkId]).length).toBeGreaterThan(0);
+    // 默认图（island）初始铺放含资源实体（entity-rules 密度规则的真实产出）
+    const eids = [...query(world, [NetworkId])];
+    const islandKinds = new Set(
+      eids
+        .filter((eid) => entityMapOf(world, eid) === world.defaultMapId)
+        .map((eid) => Kind[eid]),
+    );
+    expect(islandKinds.has("tree")).toBe(true);
+    expect(islandKinds.has("berry_bush")).toBe(true);
 
     // HeadlessHost 驱动 3 tick：帧号严格递增、无异常
     const results = runHeadless(sim, { tickCount: 3, dtMs: 50 });

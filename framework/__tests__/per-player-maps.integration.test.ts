@@ -4,7 +4,7 @@
  * 用 loadGameDefinition("game/game.json") + createGameSimulation 起真配置仿真，
  * 六段场景断言（对应任务书 T17）：
  *  1. sA 触发 portal 进 cave → sB 仍留 generated-map，跨图不可见（interest 差集）；
- *  2. cave 激活后按 populations.json 的 cave 规则独立刷出实体（其生态与默认图无关）；
+ *  2. cave 激活后按 entity-rules 的 cave 规则独立刷出实体（其生态与默认图无关）；
  *  3. sB 随后触发同一 portal 进 cave → 与 sA 同图共享生态（互相可见）；
  *  4. sA 经 cave 回传 portal 返回 generated-map → 空 cave 继续按规则刷怪（常驻模拟）；
  *  5. 存档/读档 roundtrip：两玩家分处两图，恢复 + addPlayer 后 playerMaps 与存前一致；

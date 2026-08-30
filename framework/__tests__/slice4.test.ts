@@ -32,9 +32,7 @@ import { LightSource } from "framework/components/lightSource";
 import { Placeable } from "framework/components/placeable";
 import { CraftingStation } from "framework/components/craftingStation";
 import { Inventory, type InventoryEntry } from "framework/components/inventory";
-import { Kind } from "framework/components/kind";
 import { dayNightCycleSystem } from "framework/systems/gameplay/dayNightCycleSystem";
-import { spawningSystem } from "framework/systems/gameplay/spawningSystem";
 import { placeEntity } from "framework/systems/gameplay/placeableSystem";
 import { aiSystem, setEntityKind } from "framework/systems/gameplay/aiSystem";
 import { perceptionSystem } from "framework/systems/gameplay/perceptionSystem";
@@ -242,22 +240,6 @@ describe("Slice 4：spawn condition（条件刷怪）", () => {
     expect(cond(world)).toBe(false);
     world.time.timeOfDay.phase = PHASE_NIGHT;
     expect(cond(world)).toBe(true);
-  });
-
-  it("spawningSystem 已退役：条件刷怪规则注入也不产出实体（条件语义归演化引擎）", () => {
-    const world = createBareWorld();
-    attachTestMap(world);
-    ensureArchetype(world, { kind: "sw1", components: {} });
-    world.gameDef.resolvedSpawns = [
-      { kind: "sw1", zoneId: 1, max: 2, respawnMs: 0, condition: "isNight" },
-    ];
-
-    const countWolves = () => query(world, [Transform]).filter((e) => Kind[e] === "sw1").length;
-
-    world.time.timeOfDay.phase = PHASE_NIGHT;
-    spawningSystem(world);
-    spawningSystem(world);
-    expect(countWolves()).toBe(0);
   });
 
   it("未注册的 condition → 演化引擎求值时抛错（条件校验随引擎走）", () => {
@@ -611,7 +593,6 @@ describe("Slice 4：真实 game 配置（昼夜 + 条件刷怪 + 光源 + 放置
 
   it("demo 主线：合成火堆套件（通用配方覆写）→ 放置真实 campfire → 站点合成可用", async () => {
     const def = loadGameDefinition({ gameJsonPath: "game/game.json" });
-    def.resolvedSpawns = [];
     def.resolvedRules["crafting"] = {
       recipes: [
         { id: "kit", inputs: [{ kind: "m1", count: 3 }, { kind: "m2", count: 2 }], outputs: [{ kind: "k1", count: 1 }] },
@@ -666,7 +647,6 @@ describe("Slice 4：真实 game 配置（昼夜 + 条件刷怪 + 光源 + 放置
 
   it("真实 netSync 接线：LightSource/Placeable 字段与 timeOfDay 进入快照", async () => {
     const def = loadGameDefinition({ gameJsonPath: "game/game.json" });
-    def.resolvedSpawns = [];
     const sim = await createGameSimulation(def);
     const world = (sim as unknown as { world: GameWorld }).world;
     const { componentRegistry, archetypeRegistry } = getRegistries();

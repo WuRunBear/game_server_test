@@ -3,7 +3,7 @@
  *
  * 覆盖：gridSnap 网格对齐与 GridOccupancy 占用、静态体碰撞（墙不被推走）、
  * deconstruct 拆除（仅放置者可拆）、ensureMapActive/movePlayerToMap/portalSystem
- * 分图语义（per-player：仅触发玩家切图，他人不动）、spawningSystem 按 mapId 过滤、
+ * 分图语义（per-player：仅触发玩家切图，他人不动）、
  * 存档记录/恢复（实体级 EntityMap 归属），以及真实 game 配置集成（墙放置→拆除全链路）。
  */
 import { makeTestGeometry } from "./helpers/mapGeometry";
@@ -37,7 +37,6 @@ import { deconstructEntity } from "framework/systems/gameplay/deconstructSystem"
 import { portalSystem } from "framework/systems/gameplay/portalSystem";
 import { collisionSystem } from "framework/systems/core/collisionSystem";
 import { movementSystem } from "framework/systems/core/movementSystem";
-import { spawningSystem } from "framework/systems/gameplay/spawningSystem";
 import { setEntityKind } from "framework/systems/gameplay/aiSystem";
 import type { GameWorld } from "framework/world";
 import type { ItemKindSpec } from "framework/config/schema/ItemKindSchema";
@@ -444,20 +443,7 @@ describe("Slice 6：portal 场景切换", () => {
     expect(world.activeMaps.has("nope")).toBe(false);
   });
 
-  it("spawningSystem 已退役：注入 mapId 过滤规则也不产出实体", () => {
-    const world = createBareWorld();
-    attachTestMap(world, "a");
-    ensureArchetype(world, { kind: "w1", components: {} });
-    world.gameDef.resolvedSpawns = [
-      { kind: "w1", zoneId: 1, max: 2, respawnMs: 0, mapId: "a" },
-      { kind: "w1", zoneId: 1, max: 2, respawnMs: 0, mapId: "b" },
-    ];
-    spawningSystem(world);
-    spawningSystem(world);
-    expect(query(world, [Transform]).length).toBe(0);
-  });
-
-  it("serializeWorld 写 defaultMapId；initialRecord 恢复按实体 EntityMap 归属并激活玩家图", async () => {
+  it("serializeWorld 写地图几何快照；initialRecord 恢复按实体 EntityMap 归属", async () => {
     const world = createBareWorld();
     clearEntityMap();
     clearPortal();
@@ -467,8 +453,8 @@ describe("Slice 6：portal 场景切换", () => {
     const player = spawnTestPlayer(world, { x: 5, y: 5 });
     EntityMap[player] = "a";
     const record = serializeWorld(world, "save1");
-    // record.mapId 写世界默认图 id；实体级归属入 components
-    expect(record.mapId).toBe("a");
+    // 快照入档：全部已构建图经 serializeGeometry 内嵌 record.maps
+    expect(Object.keys(record.maps ?? {}).sort()).toEqual(["a", "b"]);
     const saved = record.entities.find((e) => e.kind === "test-player")!;
     expect(saved.components["EntityMap"]).toBe("a");
 

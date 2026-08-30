@@ -16,7 +16,6 @@ export function validate(argv: string[]): void {
     console.log(`  实体原型: ${gameDef.resolvedEntities.length} 个`);
     console.log(`  行为树: ${gameDef.resolvedBehaviors.length} 个`);
     console.log(`  规则模块: ${Object.keys(gameDef.resolvedRules).length} 个`);
-    console.log(`  生成规则: ${gameDef.resolvedSpawns.length} 个`);
     console.log(`  item kind: ${gameDef.resolvedItems.length} 个`);
     console.log(`  地图: ${(gameDef.resolvedMapConfigs ?? []).map((c) => c.key).join(", ") || "无"}`);
   } catch (err) {

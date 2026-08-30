@@ -12,7 +12,6 @@ import { deathSystem } from "framework/systems/gameplay/deathSystem";
 import { respawnSystem } from "framework/systems/gameplay/respawnSystem";
 import { inventorySystem } from "framework/systems/gameplay/inventorySystem";
 import { createInteractionSystem } from "framework/systems/gameplay/interactionSystem";
-import { spawningSystem } from "framework/systems/gameplay/spawningSystem";
 import { needDecaySystem } from "framework/systems/gameplay/needDecaySystem";
 import { gatheringSystem } from "framework/systems/gameplay/gatheringSystem";
 import { equipmentSystem } from "framework/systems/gameplay/equipmentSystem";
@@ -67,21 +66,14 @@ export function registerBuiltinSystems(
   });
 
   systemRegistry.register({
-    id: "spawning",
-    factory: (_world: GameWorld) => spawningSystem,
-    after: ["combat"],
-  });
-
-  systemRegistry.register({
     id: "dayNight",
     factory: (_world: GameWorld) => dayNightCycleSystem,
-    before: ["spawning"],
   });
 
   systemRegistry.register({
     id: "inventory",
     factory: (_world: GameWorld) => inventorySystem,
-    after: ["spawning"],
+    after: ["combat"],
   });
 
   systemRegistry.register({

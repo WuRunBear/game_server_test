@@ -11,7 +11,7 @@ import type { PlayerRule } from "framework/config/schema/PlayerRuleSchema";
  * 游戏定义（game/game.json）配置 schema——「配置驱动」框架的入口配置。
  *
  * GameDefinitionSchema 描述 game.json 的字段结构；其中 entities/behaviors/rules/
- * spawns/items/dialogues/quests 为相对路径字符串（支持 * 通配），指向同目录下的
+ * items/dialogues/quests 为相对路径字符串（支持 * 通配），指向同目录下的
  * 内容文件，由 loadGameDefinition（framework/bootstrap/loadGameDefinition.ts）
  * 加载并解析为 LoadedGameDefinition 的 resolved* 字段（类型见文件尾部接口）。
  * zod 校验保证结构与类型安全：加载失败即抛错，避免错误配置进入运行时。
@@ -53,7 +53,7 @@ export const NetSyncFieldSchema = z.object({
  * - tickRate：逻辑 tick 频率（次/秒）
  * - map：地图清单路径（registry）与默认地图（default）
  * - systems：启用的系统列表（见 SystemEnableEntrySchema）
- * - entities/behaviors/rules/spawns/items/dialogues/quests：各内容文件路径
+ * - entities/behaviors/rules/items/dialogues/quests：各内容文件路径
  * - netSync：网络同步字段配置（见 NetSyncFieldSchema）
  */
 export const GameDefinitionSchema = z.object({
@@ -72,7 +72,6 @@ export const GameDefinitionSchema = z.object({
   entities: z.string().optional(),
   behaviors: z.string().optional(),
   rules: z.string().optional(),
-  spawns: z.string().optional(),
   items: z.string().optional(),
   /** 对话树配置段（game/dialogues/*.json）。 */
   dialogues: z.string().optional(),
@@ -89,17 +88,6 @@ export type GameDefinition = z.infer<typeof GameDefinitionSchema>;
 export type SystemEnableEntry = z.infer<typeof SystemEnableEntrySchema>;
 /** 网络同步字段条目的类型推断。 */
 export type NetSyncField = z.infer<typeof NetSyncFieldSchema>;
-
-export interface SpawnRule {
-  kind: string;
-  zoneId: number;
-  max: number;
-  respawnMs: number;
-  /** 可选刷怪条件（引用 spawnConditions 注册表，如 "isNight"）。 */
-  condition?: string;
-  /** 可选限定生效的地图 id（缺省全部地图生效）。 */
-  mapId?: string;
-}
 
 /** 行为树定义：id + 不透明 definition（来自 game/behaviors/*.json）。 */
 export interface BehaviorDefinition {
@@ -121,8 +109,6 @@ export interface LoadedGameDefinition extends GameDefinition {
   resolvedBehaviors: BehaviorDefinition[];
   /** 规则表：规则文件基名 → 规则内容（已注册 schema 的经 zod 校验）。 */
   resolvedRules: Record<string, unknown>;
-  /** 刷怪规则列表（来自 game/spawns/*.json）。 */
-  resolvedSpawns: SpawnRule[];
   /** item kind 定义表（来自 game/items/*.json）。 */
   resolvedItems: ItemKindSpec[];
   /** 对话树定义表（来自 game/dialogues/*.json）。 */

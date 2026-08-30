@@ -879,7 +879,6 @@ describe("Slice 2 集成：战斗闭环", () => {
 
   it("集成：真实 aiSystem 全链路——hostile 感知→追击→击杀玩家→死亡标记→重生", () => {
     const gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
-    gameDef.resolvedSpawns = []; // 确定性：关掉随机生成规则
     // delayMs 2000：死亡与重生跨 tick 分离（0 会在同一 tick 内完成，循环检测不到中间态）
     gameDef.resolvedRules["respawn"] = { delayMs: 2000, resetNeeds: true };
     const instance = createGameInstance(gameDef);
