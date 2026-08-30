@@ -44,3 +44,5 @@ export { Intent } from "components/intent";
 export { Kind } from "components/kind";
 // —— 地图分区（AoS） ——
 export { EntityMap, entityMapOf } from "components/entityMap";
+// —— 出生点（AoS，持久化） ——
+export { SpawnPoint, type SpawnPointState } from "components/spawnPoint";

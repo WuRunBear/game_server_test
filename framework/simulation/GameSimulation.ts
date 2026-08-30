@@ -3,12 +3,13 @@
  * 完整说明架构位置、玩家管理/输入处理/快照构建/持久化等职责，此处不重复）。
  */
 import { query } from "bitecs";
-import { NetworkId, Velocity, Inventory, Intent, Health, entityMapOf } from "components";
+import { NetworkId, Velocity, Inventory, Intent, Health, entityMapOf, SpawnPoint } from "components";
 import { spawnEntity } from "framework/entities/spawn";
 import { destroyEntity } from "framework/entities/destroyEntity";
 import { createGameInstance, type GameInstance } from "framework/bootstrap/GameInstance";
 import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
 import type { MapConfig } from "framework/config/schema/MapRegistrySchema";
+import { pickSpawnPosition } from "map/runtime/spawn";
 import { getCollisionDebugSnapshot } from "systems/core/collisionSystem";
 import { recordTick } from "framework/metrics";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
@@ -321,7 +322,9 @@ export class GameSimulation implements SimulationPort {
    * 玩家加入——创建玩家实体并返回网络标识。
    *
    * 内部做了三件事：
-   * 1. 从地图配置读取玩家出生点（map.spawns.player）
+   * 1. 按玩家出生规则（game/rules/player.json → resolvedPlayerRule.spawn）在
+   *    默认图选出生点（random 每玩家独立随机 / seededRandom 同图同点 / exact 固定），
+   *    并写入持久化 SpawnPoint 组件（重生回出生点的唯一依据，随实体入档）
    * 2. 从原型注册表获取 "player" archetype 的组件规格
    * 3. 调用 spawnEntity 创建实体（自动分配 NetworkId + Transform 等组件）
    *
@@ -332,25 +335,35 @@ export class GameSimulation implements SimulationPort {
     let eid: number;
 
     // 读档恢复的玩家实体优先复用绑定（networkId 保持存档值，进度不丢）；
-    // 队列空时按现有逻辑新建玩家实体。
+    // 持久化出生点已随存档恢复，复用路径不重新选点。
     if (this.orphanPlayerEids.length > 0) {
       eid = this.orphanPlayerEids.shift()!;
     } else {
-      // 出生点占位（真实出生服务归后续 todo 的 pickSpawnPosition/player rule 接线）：
-      // 默认图几何中心；无图配置回退 (0, 0)
       const geometry = this.world.maps[this.world.defaultMapId];
-      const playerSpawn = geometry
+      const rule = this.world.gameDef.resolvedPlayerRule?.spawn;
+      const picked = geometry && rule ? pickSpawnPosition(geometry, rule) : undefined;
+      if (geometry && rule && !picked) {
+        // 候选池为空（区域缺失/全不可走）：显式报错，回退地图几何中心
+        this.world.logger.error("玩家出生规则无合法候选点，回退地图几何中心", {
+          mapId: this.world.defaultMapId,
+          mode: rule.mode,
+          region: rule.region ?? null,
+        });
+      }
+      const playerSpawn = picked ?? (geometry
         ? {
             x: (geometry.grid.width / 2) * geometry.grid.tileWidth,
             y: (geometry.grid.height / 2) * geometry.grid.tileHeight,
           }
-        : { x: 0, y: 0 };
+        : { x: 0, y: 0 });
       const archetype = (this.world.archetypes as ArchetypeRegistry).get("player");
       eid = spawnEntity(this.world, archetype, this.componentRegistry, {
         x: playerSpawn.x,
         y: playerSpawn.y,
         mapId: this.world.defaultMapId,
       });
+      // 持久化出生点：Transform 会被移动覆盖，重生（respawnSystem）读本字段
+      SpawnPoint[eid] = { mapId: this.world.defaultMapId, x: playerSpawn.x, y: playerSpawn.y };
     }
 
     // 建立 sessionId → eid 映射，后续输入可以通过 sessionId 找到玩家实体

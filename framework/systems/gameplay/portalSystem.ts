@@ -4,8 +4,11 @@
  * 对每个 portal × 每个玩家配对检查：玩家与 portal 所属同一地图
  * （entityMapOf 相等）且 AABB 相交时，仅移动该玩家到目标图与目标坐标
  * （movePlayerToMap）。同 tick 同一玩家至多移动一次（每玩家每 tick 单次，
- * 防连锁过户）；目标图无效（movePlayerToMap 返回 false）不移动、继续扫描。
- * 不同玩家互不影响（per-player 语义：任一玩家触发只切换自身地图）。
+ * 防连锁过户）。不同玩家互不影响（per-player 语义：任一玩家触发只切换自身地图）。
+ *
+ * 目标图在配对检测前按 registry key 存在性校验（`world.maps` 键存在）：
+ * 非法 key 记 error 并跳过该 portal（不移动任何玩家、不静默顶替）——
+ * portal 规则数据的静态校验在开机阶段，此处是运行时兜底。
  */
 import { query } from "bitecs";
 
@@ -42,6 +45,13 @@ export function portalSystem(world: GameWorld): GameWorld {
   for (const portal of portals) {
     const state = Portal[portal];
     if (!state || !state.targetMap) continue;
+    if (!Object.hasOwn(world.maps, state.targetMap)) {
+      world.logger.error("portal 目标图不存在（registry key 校验失败），跳过传送", {
+        portal,
+        targetMap: state.targetMap,
+      });
+      continue;
+    }
     const portalMap = entityMapOf(world, portal);
 
     for (const player of players) {

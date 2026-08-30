@@ -14,6 +14,7 @@ import { AIState, Target, BlackboardRef } from "framework/components/ai";
 import { Inventory, initInventory } from "framework/components/inventory";
 import { ItemMeta } from "framework/components/itemMeta";
 import { EntityMap } from "framework/components/entityMap";
+import { SpawnPoint } from "framework/components/spawnPoint";
 import { Needs, initNeeds } from "framework/components/needs";
 import { ResourceNode, initResourceNode } from "framework/components/resourceNode";
 import { LootTable, initLootTable } from "framework/components/loot";
@@ -78,6 +79,8 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("Intent", Intent);
   // 地图分区（AoS）：实体所属地图标识，无条目回退 world.defaultMapId
   registry.register("EntityMap", EntityMap);
+  // 出生点（AoS）：实体持久化出生落点，由玩家创建链路写入（重生依据，随实体入档）
+  registry.register("SpawnPoint", SpawnPoint);
   // 网络同步
   registry.register("NetworkId", NetworkId);
   registry.register("LastSynced", LastSynced);
