@@ -2,8 +2,10 @@
  * 世界快照序列化/恢复——持久化的核心，纯数据层（无 I/O）。
  *
  * 职责：
- * - `serializeWorld`：把 ECS world 的全部持久状态导出为纯 JSON（WorldRecord）
- * - `restoreWorld`：按 WorldRecord 重建实体与组件（幂等，先清空当前 world）
+ * - `serializeWorld`：把 ECS world 的全部持久状态导出为纯 JSON（WorldRecord，
+ *   含全部已构建图的地理快照 maps——与实体同盘）
+ * - `restoreWorld`：按 WorldRecord 恢复实体与全局时刻（tick/timeOfDay）并把
+ *   快照图接入激活集（幂等，先清空当前实体；world.maps 回填归 bootMaps）
  *
  * 设计要点：
  * 1. **瞬态组件跳过**：运行时状态（AI 目标/黑板引用/计时器/帧脉冲/同步标记）
@@ -20,9 +22,9 @@ import { query, hasComponent } from "bitecs";
 import { NetworkId } from "framework/components/network";
 import { Kind } from "framework/components/kind";
 import { Player } from "framework/components/tags";
-import { EntityMap } from "framework/components/entityMap";
 import { spawnEntity } from "framework/entities/spawn";
 import { destroyEntity } from "framework/entities/destroyEntity";
+import { serializeGeometry, type SerializedMapGeometry } from "map/geometry/snapshot";
 import type { GameWorld } from "framework/world";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { SerializedEntity, WorldRecord } from "framework/repository";
@@ -87,12 +89,16 @@ function serializeEntity(
   return { networkId: NetworkId.value[eid], kind: Kind[eid] ?? "", components };
 }
 
-/** 导出世界为纯 JSON 存档。 */
+/** 导出世界为纯 JSON 存档（含全部已构建图的地理快照——maps 与实体同盘）。 */
 export function serializeWorld(world: GameWorld, id: string): WorldRecord {
   const registry = world.components_registry;
   const entities: SerializedEntity[] = [];
   for (const eid of query(world, [NetworkId])) {
     entities.push(serializeEntity(world, eid, registry));
+  }
+  const maps: Record<string, SerializedMapGeometry> = {};
+  for (const [key, geometry] of Object.entries(world.maps)) {
+    maps[key] = serializeGeometry(geometry);
   }
   return {
     id,
@@ -100,9 +106,7 @@ export function serializeWorld(world: GameWorld, id: string): WorldRecord {
     tick: world.time.tick,
     nextNetworkId: world.nextNetworkId,
     timeOfDay: { ...world.time.timeOfDay },
-    // 保留写 mapId：仅作旧档迁移回退（新档实体归属以 components["EntityMap"]
-    // 为准）。默认图 id 的权威字段是 world.defaultMapId。
-    mapId: world.defaultMapId,
+    maps,
     entities,
   };
 }
@@ -139,7 +143,16 @@ function applyEntityState(world: GameWorld, eid: number, saved: SerializedEntity
 }
 
 /**
- * 按存档重建 world（先清空当前实体，避免与初始刷怪重复）。
+ * 按存档恢复世界状态（职责单一：实体 + 全局时刻 + 激活集）。
+ *
+ * - 实体恢复：按 kind 查 archetype → spawnEntity → 覆写存档组件值
+ *   （含 EntityMap 归属）→ 覆写 NetworkId → 固定 nextNetworkId；
+ * - 全局时刻：world.time.tick = 存档 tick、timeOfDay = 存档值（离线补差
+ *   由 GameSimulation 在本函数返回后接手，墙钟折算不入本模块）；
+ * - 激活集：全部快照图（record.maps 键）加入 world.activeMaps（常驻语义，
+ *   空图也照常运行演化/碰撞）。world.maps 的回填归 bootMaps（开机分支
+ *   唯一归属地），本函数不碰 world.maps——仅接入 boot 已回填的快照图，
+ *   boot 丢弃的键（配置已删）不激活。
  *
  * 防御畸形存档：entities 缺省/非数组按空处理（恢复出一个空世界，不抛错）；
  * 单实体 components 缺省按空对象处理。
@@ -156,7 +169,6 @@ export function restoreWorld(world: GameWorld, record: WorldRecord): number[] {
   world.nextNetworkId = record.nextNetworkId;
 
   const orphanPlayers: number[] = [];
-  const restoredMaps = new Set<string>();
   const savedEntities = Array.isArray(record.entities) ? record.entities : [];
   for (const saved of savedEntities) {
     if (!saved || typeof saved !== "object") continue;
@@ -166,19 +178,11 @@ export function restoreWorld(world: GameWorld, record: WorldRecord): number[] {
       continue;
     }
 
-    // 地图归属优先级链：存档实体标记 > 旧档 record.mapId 回退 > 世界默认图。
-    // 顺序说明：spawnEntity 先写 EntityMap[eid] = overrides.mapId ?? defaultMapId；
-    // 随后的 applyEntityState 对 components["EntityMap"]（若有）整体覆写回 eid——
-    // 与 overrides.mapId 同值（同源解析），两条路径交汇于同一归属，存档值胜出。
-    // 旧档实体无 EntityMap 组件 → applyEntityState 不写，回退值由 spawn 写入生效。
-    const savedMap = (saved.components as Record<string, unknown> | undefined)?.["EntityMap"];
-    const mapId = typeof savedMap === "string" ? savedMap : (record.mapId ?? world.defaultMapId);
-    const eid = spawnEntity(world, archetype, world.components_registry, { mapId });
+    // 归属恢复：spawnEntity 先写默认图，随后的 applyEntityState 用存档
+    // components["EntityMap"]（AoS 自动入档）整体覆写——存档值胜出。
+    const eid = spawnEntity(world, archetype, world.components_registry);
     applyEntityState(world, eid, saved);
     NetworkId.value[eid] = saved.networkId;
-    if (typeof EntityMap[eid] === "string" && EntityMap[eid] !== "") {
-      restoredMaps.add(EntityMap[eid] as string);
-    }
     // 玩家判定按 Player tag（与具体 kind 名解耦）
     if (hasComponent(world, eid, Player)) {
       orphanPlayers.push(eid);
@@ -186,13 +190,11 @@ export function restoreWorld(world: GameWorld, record: WorldRecord): number[] {
   }
   world.nextNetworkId = record.nextNetworkId;
 
-  // 按恢复实体的地图归属补齐激活集：bootMaps 已全量构建 world.maps 并激活
-  // 全部配置图（常驻语义），此处仅兜底把实体引用的已构建图加入激活集
-  // （world.maps 缺键的未知图跳过——归属异常由消费方按 error+跳过处理）。
-  // 快照地图回填与激活的彻底重写归持久化切换 todo（WorldRecord.maps 接线）。
-  for (const mapId of restoredMaps) {
-    if (world.maps[mapId]) {
-      world.activeMaps.add(mapId);
+  // 全部快照图接入激活集（常驻语义：空图也活着）；仅接入已回填的键——
+  // world.maps 的回填归 bootMaps，boot 丢弃的快照键（配置已删）不激活。
+  for (const mapKey of Object.keys(record.maps ?? {})) {
+    if (world.maps[mapKey]) {
+      world.activeMaps.add(mapKey);
     }
   }
 

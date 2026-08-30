@@ -2,8 +2,9 @@
  * 分图（per-player maps）持久化测试（核心切换后语义）。
  *
  * 覆盖：
- * - 新档 roundtrip：实体 EntityMap 归属恢复，恢复图按归属补齐 activeMaps。
- * - 旧档迁移：实体无 EntityMap 时 record.mapId 回退（该字段删除归持久化切换 todo）。
+ * - 新档 roundtrip：实体 EntityMap 归属恢复，快照图按 record.maps 补齐 activeMaps。
+ * - 无 EntityMap 的存档实体：落回 spawn 链默认图（无任何 record 级回退——
+ *   旧档迁移已废弃，旧存档直接不识别）。
  * - 畸形存档防御：无 entities 字段不抛错。
  * - 恢复不重复布置实体：恢复后实体计数与存档前一致（初始布置唯一路径 = 演化引擎，
  *   restoreWorld 只恢复存档实体）。
@@ -100,7 +101,7 @@ describe("persist", () => {
     expect(world2.activeMaps.has("cave")).toBe(true);
   });
 
-  it("旧档迁移：实体无 EntityMap 时 record.mapId 回退，玩家落回存档图", () => {
+  it("无 EntityMap 的存档实体：落回 spawn 链默认图（无 record 级回退）", () => {
     const world1 = createBareWorld();
     clearEntityMap();
     attachTwoMaps(world1);
@@ -110,16 +111,15 @@ describe("persist", () => {
       y: 0,
     });
 
-    // 模拟旧档形态：删除实体级 EntityMap（旧版本无此组件），只留 record.mapId
+    // 存档实体缺 EntityMap（仅手工构造可出现；真实存档由 spawn 链保证必有）
     const record = serializeWorld(world1, "s1");
     delete record.entities[0].components["EntityMap"];
-    record.mapId = "cave";
 
     const world2 = createBareWorld();
     attachTwoMaps(world2);
     const orphan = restoreWorld(world2, record);
     expect(orphan.length).toBe(1);
-    // record.mapId 回退：实体归属落到存档图并激活
+    // 无任何 record 级回退：实体归属落到 spawn 链默认图（world.defaultMapId）
     expect(EntityMap[orphan[0]]).toBe("cave");
     expect(world2.activeMaps.has("cave")).toBe(true);
   });

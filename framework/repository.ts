@@ -35,16 +35,10 @@ export interface WorldRecord {
   /** world 级昼夜状态（可缺省，缺省时恢复到初始值）。 */
   timeOfDay?: { hour: number; phase: number };
   /**
-   * 旧档迁移回退，新档不再作为唯一地图来源——新档每实体的地图归属存于
-   * 各实体 components["EntityMap"]，record.mapId 只为旧档（无 EntityMap 组件）
-   * 提供回退值（可缺省；缺省时各实体回退世界默认图）。
-   */
-  mapId?: string;
-  /**
-   * 地图几何快照表（key = 地图 registry key）。由 bootMaps 在无档首存时
-   * 经 serializeWorld 组装写入（序列化写入接线属持久化切换 todo）；
-   * bootMaps 读档路径据此反序列化回填 world.maps。缺省视为快照无该图
-   * （配置新增图走生成+初始演化分支）。
+   * 地图几何快照表（key = 地图 registry key）。serializeWorld 每次存档经
+   * serializeGeometry 写入全部已构建图（maps 与实体同盘）；bootMaps 读档
+   * 路径据此反序列化回填 world.maps。缺省视为快照无该图（配置新增图走
+   * 生成+初始演化分支）。
    */
   maps?: Record<string, SerializedMapGeometry>;
   /** 存活实体清单。 */

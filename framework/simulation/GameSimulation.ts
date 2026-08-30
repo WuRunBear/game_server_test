@@ -24,8 +24,9 @@ import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
 import { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
 import { evolve } from "map/evolution/engine";
 import { createMapEvolveDeps } from "map/runtime/evolveDeps";
+import { advanceTickTo, computeOfflineTicks } from "map/runtime/clock";
 import { noopBootDeps, type BootDeps } from "map/runtime/boot";
-import type { Repository } from "framework/repository";
+import type { Repository, WorldRecord } from "framework/repository";
 import type { ServerRule } from "framework/config/schema/RuleSchema";
 import { computeInterest } from "./interest";
 import { createInputGuard, type InputGuard } from "./inputValidation";
@@ -33,6 +34,13 @@ import { createLogger } from "framework/utils/logger";
 
 /** 装配期日志器（world.logger 尚不可用的开机阶段使用）。 */
 const assemblyLogger = createLogger("game-simulation");
+
+/**
+ * 离线补差 tick 上限缺省值：按缺省 tickRate=20 折算约 24 小时真实离线时长
+ * （20 × 60 × 60 × 24 = 1,728,000 tick）。超过该上限的停服时长不再全额补差
+ * （computeOfflineTicks 截断到上限并告警）——防超长停服的演化成本悬崖。
+ */
+export const DEFAULT_MAX_OFFLINE_TICKS = 1_728_000;
 
 import type { SimulationPort } from "./SimulationPort";
 import type {
@@ -161,14 +169,16 @@ export class GameSimulation implements SimulationPort {
 
     this.repository = options?.repository;
     this.saveId = options?.saveId;
-    const initialRecord = bootDeps.loadRecord();
-    if (initialRecord) {
-      // 读档侧地图激活由 restoreWorld 按实体归属自行处理（todo 15）。
-      this.orphanPlayerEids = restoreWorld(this.world, initialRecord);
-    }
 
     for (const config of gameDef.resolvedMapConfigs ?? []) {
       this.mapConfigsByKey.set(config.key, config);
+    }
+
+    const initialRecord = bootDeps.loadRecord();
+    if (initialRecord) {
+      // 实体/全局时刻/激活集恢复（地图快照回填归 bootMaps，已在
+      // createGameInstance → bootMaps 完成）
+      this.orphanPlayerEids = restoreWorld(this.world, initialRecord);
     }
 
     const serverRules = this.world.gameDef.resolvedRules["server"] as ServerRule | undefined;
@@ -177,6 +187,12 @@ export class GameSimulation implements SimulationPort {
     const tickRate = this.world.time.fixedDtMs > 0 ? Math.max(1, Math.round(1000 / this.world.time.fixedDtMs)) : 20;
     this.inputGuard = createInputGuard(serverRules, tickRate);
 
+    // 离线补差：restore 完成后按墙钟一次性折算离线跨度，逐激活图一次
+    // evolve 推到演化边界（与开机初始演化/每 tick 增量共用同一 evolve，D6）。
+    if (initialRecord) {
+      this.runOfflineCatchUp(initialRecord);
+    }
+
     // 演化钩子：每 tick 对全部激活图按 (tick-1, tick] 跨度补差（常驻语义 D13）。
     // 注入位置见 GameInstance.beforeSystems——位于 tick 自增与系统拓扑序之间。
     this.instance.beforeSystems = () => this.evolveActiveMaps();
@@ -184,19 +200,52 @@ export class GameSimulation implements SimulationPort {
 
   /**
    * 逐图演化：对 world.activeMaps 中每张已构建图调用 evolve，跨度
-   * (world.time.tick - 1, world.time.tick]。规则/配置缺图时跳过该图。
+   * (fromTick, toTick]。规则/配置缺图时跳过该图。
    */
-  private evolveActiveMaps(): void {
+  private evolveMaps(fromTick: number, toTick: number): void {
     const rules = this.world.gameDef.resolvedEntityRules ?? [];
     if (rules.length === 0) return;
 
-    const tick = this.world.time.tick;
     for (const mapKey of this.world.activeMaps) {
       const geometry = this.world.maps[mapKey];
       const config = this.mapConfigsByKey.get(mapKey);
       if (!geometry || !config) continue;
-      evolve(this.world, geometry, rules, tick - 1, tick, createMapEvolveDeps(this.world, geometry, config.seed));
+      evolve(this.world, geometry, rules, fromTick, toTick, createMapEvolveDeps(this.world, geometry, config.seed));
     }
+  }
+
+  /** 每 tick 演化钩子：跨度 (tick-1, tick]（见 GameInstance.beforeSystems）。 */
+  private evolveActiveMaps(): void {
+    const tick = this.world.time.tick;
+    this.evolveMaps(tick - 1, tick);
+  }
+
+  /**
+   * 离线补差（读档路径专用，构造期执行一次）：
+   * 1. 墙钟只在此读一次，computeOfflineTicks 把离线时长折算为 tick 数
+   *    （超 DEFAULT_MAX_OFFLINE_TICKS 截断并告警）；
+   * 2. 对全部激活图一次性 evolve(存档tick → 存档tick+离线ticks)——与开机
+   *    初始演化、每 tick 增量共用同一 evolve（D6，唯一动作不变式）；
+   * 3. advanceTickTo 把 world.time.tick 推到演化边界——否则下一运行 tick
+   *    会重走离线跨度。
+   */
+  private runOfflineCatchUp(record: WorldRecord): void {
+    const offlineTicks = computeOfflineTicks(
+      record.savedAt,
+      Date.now(),
+      this.world.gameDef.tickRate,
+      DEFAULT_MAX_OFFLINE_TICKS,
+    );
+    if (offlineTicks <= 0) return;
+
+    const fromTick = record.tick;
+    this.evolveMaps(fromTick, fromTick + offlineTicks);
+    advanceTickTo(this.world, fromTick + offlineTicks);
+    this.world.logger.info("offline catch-up complete", {
+      savedTick: fromTick,
+      offlineTicks,
+      tick: this.world.time.tick,
+    });
   }
 
   /**
