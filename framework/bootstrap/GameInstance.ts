@@ -65,7 +65,7 @@ export function createGameInstance(gameDef: LoadedGameDefinition, bootDeps: Boot
   gameDef.dialoguesByKind = new Map(gameDef.resolvedDialogues.map((t) => [t.id, t]));
   gameDef.questsByKind = new Map(gameDef.resolvedQuests.map((q) => [q.id, q]));
 
-  // game 配置实体优先于框架内建原型（player/villager 等）——
+  // game 配置实体优先于框架内建原型（player 及各内置兜底原型）——
   // 内建仅作 createDefaultGameDefinition 的兜底，真实 game/*.json 应能完全定义游戏内容
   for (const entity of gameDef.resolvedEntities) {
     archetypeRegistry.override(entity);

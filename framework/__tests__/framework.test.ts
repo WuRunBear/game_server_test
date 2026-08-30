@@ -139,7 +139,7 @@ describe("archetypeRegistry", () => {
   it("should have registered builtin archetypes", () => {
     const { archetypeRegistry } = getRegistries();
     expect(archetypeRegistry.has("player")).toBe(true);
-    expect(archetypeRegistry.has("villager")).toBe(true);
+    expect(archetypeRegistry.has("npc")).toBe(true);
   });
 
   // player 原型：标签含 Player、Health 初始 100/100、team=1（配置驱动）
@@ -324,14 +324,14 @@ describe("combatSystem (Item 3: damage calculation via attackTarget)", () => {
 
 // Item 8：行为加载——NPC 原型的 behavior 字段指向行为树 id，加载后实体即可用行为树驱动
 describe("aiSystem with behavior loading (Item 8)", () => {
-  // villager 原型 behavior=wander-default，且 game.json 中该行为树已被解析
+  // 内置 npc 原型 behavior=wander-default，且 game.json 中该行为树已被解析
   it("should create behavior tree for NPC from archetype", () => {
     const gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
     const instance = createGameInstance(gameDef);
 
     const { archetypeRegistry } = getRegistries();
-    const villager = archetypeRegistry.get("villager");
-    expect(villager.behavior).toBe("wander-default");
+    const npc = archetypeRegistry.get("npc");
+    expect(npc.behavior).toBe("wander-default");
 
     const wanderDef = gameDef.resolvedBehaviors.find((b) => b.id === "wander-default");
     expect(wanderDef).toBeDefined();
@@ -525,13 +525,13 @@ describe("archetypeRegistry edge cases", () => {
       .toThrow("already registered");
   });
 
-  // all() 返回全部已注册原型（player/villager 在内）
+  // all() 返回全部已注册原型（player/npc 在内）
   it("all() should return all registered archetypes", () => {
     const { archetypeRegistry } = getRegistries();
     const all = archetypeRegistry.all();
     expect(all.length).toBeGreaterThanOrEqual(2);
     expect(all.some((a) => a.kind === "player")).toBe(true);
-    expect(all.some((a) => a.kind === "villager")).toBe(true);
+    expect(all.some((a) => a.kind === "npc")).toBe(true);
   });
 });
 

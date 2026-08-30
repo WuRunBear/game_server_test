@@ -1,7 +1,7 @@
 /**
  * EntityMap 组件：实体所属地图标识（AoS 结构）。
  *
- * 每个实体记录其所属地图 id 字符串（如 "generated-map" / "cave"）；无条目时由
+ * 每个实体记录其所属地图 id 字符串（如 "main" / "annex"）；无条目时由
  * entityMapOf 回退到 world.defaultMapId。地图是一种通用分区机制：同一张地图的
  * 实体互相可见/交互，不同地图互不干扰（分区语义由各系统按 entityMapOf 过滤，
  * 本组件不包含任何游戏专属地图语义）。

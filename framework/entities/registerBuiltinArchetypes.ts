@@ -28,7 +28,7 @@ export function registerBuiltinArchetypes(registry: ArchetypeRegistry): void {
 
   // 演示 NPC 原型：无加速度、血量较少，挂默认游荡行为树，阵营 0
   registry.register({
-    kind: "villager",
+    kind: "npc",
     tags: ["NPC"],
     components: {
       Size: { w: 16, h: 16 },
