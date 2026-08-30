@@ -2,8 +2,8 @@
  * 分图（per-player maps）世界级基础设施测试：world.maps / activeMaps / defaultMapId。
  *
  * 覆盖：
- * - 有地图配置时：开机仅构建并激活默认图（惰性缓存不构建全部图）；
- *   `world.map` 仍是默认图引用（弃用别名），与 world.maps[defaultMapId] 同一对象。
+ * - 有地图配置时：开机全量构建并激活全部配置图（bootMaps 常驻语义）；
+ *   world.maps[defaultMapId] 为默认图。
  * - 无地图配置（createDefaultGameDefinition 兜底路径）：maps/activeMaps 为空、
  *   defaultMapId 为空串，游戏实例照常 step 不崩溃。
  */

@@ -9,7 +9,6 @@
  * - registerComponent  → entities/*.json 的 components 块（组件名）
  * - registerArchetype  → entities/*.json 的 kind（spawns/放置/恢复按 kind 引用）
  * - registerAction     → behaviors/*.json 的 action.name / condition.call
- * - registerGenerator  → maps/registry.json 的 generatorId
  * - registerRuleModule → rules/*.json 的 xxxRef 字段
  *
  * 注意：bootstrapFramework() 必须先于这些函数调用（getRegistries 依赖其完成）。
@@ -19,7 +18,6 @@ import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { SystemRegistry, SystemSpec } from "framework/systems/systemRegistry";
 import type { ActionRegistry, ActionFactory, ActionEntry } from "framework/ai/actionRegistry";
 import type { ArchetypeRegistry, ArchetypeSpec } from "framework/entities/archetypeRegistry";
-import type { GeneratorRegistry, MapGenerator, GeneratorEntry } from "framework/map/generatorRegistry";
 import type { GeneratorEntry as MapBlockEntry } from "map/generate/generatorRegistry";
 import type { GameDefinition } from "framework/config/schema/GameDefinitionSchema";
 import { GameDefinitionSchema } from "framework/config/schema/GameDefinitionSchema";
@@ -54,14 +52,6 @@ export function registerArchetype(spec: ArchetypeSpec): void {
  */
 export function registerAction(name: string, factory: ActionFactory): void {
   getRegistries().actionRegistry.register(name, factory);
-}
-
-/**
- * 注册一个地图生成器。maps/registry.json 的 `generatorId` 引用其 id，
- * 加载/生成地图时按 id 调用。
- */
-export function registerGenerator(id: string, gen: MapGenerator): void {
-  getRegistries().generatorRegistry.register(id, gen);
 }
 
 /** 规则模块签名：以 world 为参数的计算/判定函数（游戏无关约束）。 */
@@ -110,11 +100,6 @@ export function listRegisteredComponents(): Readonly<Record<string, unknown>> {
   return getRegistries().componentRegistry.all();
 }
 
-/** 列出全部已注册地图生成器。 */
-export function listRegisteredGenerators(): GeneratorEntry[] {
-  return getRegistries().generatorRegistry.all();
-}
-
 /** 列出全部已注册生成积木（map/generate 层注册表；地图管道的 generator 名在此查找）。 */
 export function listRegisteredMapGenerators(): MapBlockEntry[] {
   return getRegistries().mapGeneratorRegistry.all();
@@ -127,5 +112,3 @@ export function listRegisteredMapGenerators(): MapBlockEntry[] {
 export function validateGameDefinition(gameDef: unknown): gameDef is GameDefinition {
   return GameDefinitionSchema.safeParse(gameDef).success;
 }
-
-export { buildMapRuntime } from "framework/map/buildRuntime";

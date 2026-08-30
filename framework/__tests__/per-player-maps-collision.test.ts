@@ -7,7 +7,7 @@
  * - 跨图隔离核心断言：同一坐标、不同地图的两个实体绝不互撞（位置不变 / 无人被推）。
  * - prewarm：新激活地图的碰撞运行时当 tick 即存在，且碰撞体当 tick 生效。
  *
- * 测试地图为手工构建的确定性 MapRuntime（blocked 网格显式声明墙 tile），
+ * 测试地图为手工构建的确定性 MapGeometry（walkable 网格显式声明墙 tile），
  * 与 maplifecycle 的生成图 helper 互补：本测试聚焦碰撞分区正确性，不依赖随机种子。
  */
 import { makeTestGeometry } from "./helpers/mapGeometry";

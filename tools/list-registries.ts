@@ -4,7 +4,6 @@ import {
   listRegisteredArchetypes,
   listRegisteredActions,
   listRegisteredComponents,
-  listRegisteredGenerators,
   listRegisteredMapGenerators,
 } from "framework";
 
@@ -32,12 +31,6 @@ export function listRegistries(): void {
   const components = listRegisteredComponents();
   for (const name of Object.keys(components)) {
     console.log(`  ${name}`);
-  }
-
-  console.log("\n=== 已注册的地图生成器 ===");
-  const generators = listRegisteredGenerators();
-  for (const gen of generators) {
-    console.log(`  ${gen.id}`);
   }
 
   console.log("\n=== 已注册的生成积木 ===");

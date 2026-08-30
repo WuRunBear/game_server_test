@@ -40,7 +40,6 @@ import { inventorySystem } from "framework/systems/gameplay/inventorySystem";
 import { createInteractionSystem } from "framework/systems/gameplay/interactionSystem";
 import { setEntityKind, getOrCreateBlackboard } from "framework/systems/gameplay/aiSystem";
 import { bbGet, BB_PERCEPTION_TARGET, type PerceivedTarget } from "framework/ai/blackboard";
-import type { MapRuntime } from "framework/map/types";
 import type { GameWorld } from "framework/world";
 import type { ItemKindSpec } from "framework/config/schema/ItemKindSchema";
 

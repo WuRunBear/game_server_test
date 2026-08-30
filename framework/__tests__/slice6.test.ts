@@ -2,7 +2,7 @@
  * Slice 6 测试：网格放置 / 静态碰撞 / 拆除 / 多地图（传送门）链路。
  *
  * 覆盖：gridSnap 网格对齐与 GridOccupancy 占用、静态体碰撞（墙不被推走）、
- * deconstruct 拆除（仅放置者可拆）、ensureMapActive/movePlayerToMap/portalSystem
+ * deconstruct 拆除（仅放置者可拆）、movePlayerToMap/portalSystem
  * 分图语义（per-player：仅触发玩家切图，他人不动）、
  * 存档记录/恢复（实体级 EntityMap 归属），以及真实 game 配置集成（墙放置→拆除全链路）。
  */
@@ -293,7 +293,7 @@ describe("Slice 6：deconstruct 拆除（仅放置者可拆）", () => {
   });
 });
 
-// 多地图：ensureMapActive 惰性激活（幂等，NPC 仅首次布置）；movePlayerToMap 仅移动单玩家；
+// 多地图：boot 全量构建常驻激活；movePlayerToMap 仅移动单玩家；
 // portalSystem 触发者切图、他人不动、目标图无效不触发、不相交不触发
 describe("Slice 6：portal 场景切换", () => {
   it("movePlayerToMap：仅触发玩家换图+传送；他人与场景实体不动；目标图按需激活", () => {
@@ -430,7 +430,7 @@ describe("Slice 6：portal 场景切换", () => {
     expect(Transform.x[other]).toBe(500);
   });
 
-  it("地图常驻激活：boot 后全部配置图在 world.maps/activeMaps（ensureMapActive 已消亡）", () => {
+  it("地图常驻激活：boot 后全部配置图在 world.maps/activeMaps", () => {
     const world = createBareWorld();
     clearEntityMap();
     clearPortal();

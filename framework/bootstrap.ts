@@ -11,23 +11,19 @@ import { createActionRegistry } from "framework/ai/actionRegistry";
 import { registerBuiltinSystems } from "framework/systems/registerBuiltinSystems";
 import { createArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import { registerBuiltinArchetypes } from "framework/entities/registerBuiltinArchetypes";
-import { createGeneratorRegistry } from "framework/map/generatorRegistry";
-import { registerBuiltinGenerators } from "framework/map/registerBuiltinGenerators";
-import { createGeneratorRegistry as createMapBlockRegistry } from "map/generate/generatorRegistry";
+import { createGeneratorRegistry } from "map/generate/generatorRegistry";
 import { registerBuiltinMapGenerators } from "map/generate/registerBuiltin";
 import { registerBuiltinRuleSchemas } from "framework/config/schema/ruleSchemas";
 import { registerBuiltinSpawnConditions } from "framework/systems/gameplay/spawnConditions";
 
-/** 注册表聚合容器（组件/系统/动作/原型/旧生成器/生成积木）。 */
+/** 注册表聚合容器（组件/系统/动作/原型/生成积木）。 */
 export interface FrameworkRegistries {
   componentRegistry: ReturnType<typeof createComponentRegistry>;
   systemRegistry: ReturnType<typeof createSystemRegistry>;
   actionRegistry: ReturnType<typeof createActionRegistry>;
   archetypeRegistry: ReturnType<typeof createArchetypeRegistry>;
-  /** 旧 MapRuntime 生成器注册表（buildMapRuntime/tools 链路，清理归后续 todo）。 */
-  generatorRegistry: ReturnType<typeof createGeneratorRegistry>;
   /** 生成积木注册表（map/generate 层；地图管道的 generator 名在此查找）。 */
-  mapGeneratorRegistry: ReturnType<typeof createMapBlockRegistry>;
+  mapGeneratorRegistry: ReturnType<typeof createGeneratorRegistry>;
 }
 
 /** 全局单例缓存：bootstrapFramework 首次调用后填充。 */
@@ -53,16 +49,13 @@ export function bootstrapFramework(): FrameworkRegistries {
   const archetypeRegistry = createArchetypeRegistry();
   registerBuiltinArchetypes(archetypeRegistry);
 
-  const generatorRegistry = createGeneratorRegistry();
-  registerBuiltinGenerators(generatorRegistry);
-
-  const mapGeneratorRegistry = createMapBlockRegistry();
+  const mapGeneratorRegistry = createGeneratorRegistry();
   registerBuiltinMapGenerators(mapGeneratorRegistry);
 
   registerBuiltinRuleSchemas();
   registerBuiltinSpawnConditions();
 
-  registries = { componentRegistry, systemRegistry, actionRegistry, archetypeRegistry, generatorRegistry, mapGeneratorRegistry };
+  registries = { componentRegistry, systemRegistry, actionRegistry, archetypeRegistry, mapGeneratorRegistry };
   return registries;
 }
 

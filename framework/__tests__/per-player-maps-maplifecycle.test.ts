@@ -5,7 +5,7 @@
  * - movePlayerToMap：移动玩家（EntityMap + Transform），dest 缺省用目标图
  *   几何中心，同图移动也传送。
  * - 未知 mapId：movePlayerToMap 返回 false，世界状态不变。
- * - registry key = 运行时规范化键（旧 ensureMapActive 惰性构建/初始布置
+ * - registry key = 运行时规范化键（旧惰性构建/初始布置
  *   已随核心切换消亡：地图由 bootMaps 全量构建并常驻激活）。
  */
 import { describe, it, expect, beforeAll } from "vitest";

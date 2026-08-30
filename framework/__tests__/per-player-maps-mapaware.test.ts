@@ -8,7 +8,7 @@
  * - AI 边界：Flee 移动按自己所在图的像素边界钳制（同位置不同图结果不同）
  * - startDialogue：跨图对话拒、同图对话放行
  *
- * 地图运行时手工构造直写 world.maps（同 slice6 attachTestMap 的手工 MapRuntime
+ * 地图运行时手工构造直写 world.maps（同 slice6 attachTestMap 的手工 MapGeometry
  * 思路，几何完全可控），实体统一经 spawnEntity overrides.mapId（T4）归属地图。
  */
 import { makeTestGeometry } from "./helpers/mapGeometry";

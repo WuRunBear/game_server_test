@@ -9,8 +9,6 @@ export { createLogger, type Logger } from "framework/utils/logger";
 export { clampMs } from "framework/utils/timer";
 export { createMetrics, recordTick, type Metrics } from "framework/metrics";
 export { createGameWorld, type GameWorld, type EntityId, type Tick, type System, type GameTime, type TimeOfDay, PHASE_DAY, PHASE_NIGHT } from "framework/world";
-export type { MapRuntime, MapSource, MapGrid, MapZone, MapSpawns, Vec2 } from "framework/map/types";
-export { buildMapChunks, computeMapVersion, describeMapSource, MAP_CHUNK_SIZE, type MapChunk, type MapMetaInfo } from "framework/map/version";
 
 // 新地图系统公共面（geometry 数据层 + generate 生成层 + 几何导出）
 export type { MapGeometry, MapGeometryGrid, RegionMeta } from "map/geometry/types";
@@ -22,7 +20,6 @@ export { createComponentRegistry, type ComponentRegistry } from "framework/compo
 export { createSystemRegistry, type SystemRegistry, type SystemSpec, buildSystems } from "framework/systems/systemRegistry";
 export { createActionRegistry, type ActionRegistry, type ActionFactory, type ActionEntry } from "framework/ai/actionRegistry";
 export { createArchetypeRegistry, type ArchetypeRegistry, type ArchetypeSpec } from "framework/entities/archetypeRegistry";
-export { createGeneratorRegistry, type GeneratorRegistry, type GeneratorEntry, type MapGenerator } from "framework/map/generatorRegistry";
 export { spawnEntity, type SpawnOverrides } from "framework/entities/spawn";
 
 export { createGameInstance, type GameInstance } from "framework/bootstrap/GameInstance";
@@ -67,16 +64,13 @@ export {
   registerComponent,
   registerArchetype,
   registerAction,
-  registerGenerator,
   registerRuleModule,
   getRuleModule,
   listRegisteredSystems,
   listRegisteredArchetypes,
   listRegisteredActions,
   listRegisteredComponents,
-  listRegisteredGenerators,
   listRegisteredMapGenerators,
   validateGameDefinition,
-  buildMapRuntime,
   type RuleModule,
 } from "framework/api";

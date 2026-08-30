@@ -1,7 +1,7 @@
 /**
  * 移动方向工具：chase / flee / wander 共用。
  */
-import type { MapGrid } from "framework/map/types";
+import type { MapGeometryGrid } from "framework/map/geometry/types";
 
 /** 向量归一化（单位化）；零向量（长度 ≤ 1e-6）时回退到固定方向 (1,0)，避免除零。 */
 export function normalizeOrFallback(x: number, y: number): { x: number; y: number } {
@@ -19,7 +19,7 @@ export interface MapBounds {
 }
 
 /** 地图像素边界；无 grid 时返回 null（节点各自回退到默认速度逻辑）。 */
-export function mapPixelBounds(grid?: MapGrid): MapBounds | null {
+export function mapPixelBounds(grid?: MapGeometryGrid): MapBounds | null {
   if (!grid) return null;
   return {
     tileW: grid.tileWidth,

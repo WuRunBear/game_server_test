@@ -1,11 +1,9 @@
 /**
  * 生成积木注册表（名 → 积木函数）（framework/map/generate/generatorRegistry.ts）。
  *
- * 机制迁移自 framework/map/generatorRegistry.ts（旧 MapRuntime 生成器注册表，
- * 原文件保持不动，由后续清理 todo 处理）：同款 register/get/has/all 形状，
- * 仅 MapGenerator 签名换为生成层管道约定 (ctx: GenerationContext) => void。
- * 注册表实例由 bootstrap 创建（接线属后续核心切换 todo），地图配置管道中的
- * generator 名引用这里注册的名字。
+ * 同款 register/get/has/all 形状，MapGenerator 签名为生成层管道约定
+ * (ctx: GenerationContext) => void。注册表实例由 bootstrap 创建，
+ * 地图配置管道中的 generator 名引用这里注册的名字。
  */
 import type { MapGenerator } from "map/generate/types";
 

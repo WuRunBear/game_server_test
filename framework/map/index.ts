@@ -1,31 +1,8 @@
 /**
  * map 模块公共出口（barrel）。
  *
- * 对外暴露：
- * - buildMapRuntime：地图来源 → MapRuntime 的唯一构建入口；
- * - 地图相关类型（MapRuntime / MapSource / MapZone / Vec2 等）；
- * - 内容版本与分块工具（computeMapVersion / buildMapChunks / describeMapSource）。
+ * 新地图系统按层自治：geometry（数据）/ generate（生成）/ evolution（演化）/
+ * runtime（编排）各有独立子模块；本 barrel 只保留目录级公共面：
+ * - movePlayerToMap：跨图移动执行器（portal/respawn 消费）。
  */
-export { buildMapRuntime } from "map/buildRuntime";
 export { movePlayerToMap } from "map/switchMap";
-export {
-  validateMapRuntime,
-  MIN_WALKABLE_COMPONENT_FRACTION,
-  type ValidationReport,
-} from "map/validate";
-export {
-  buildMapChunks,
-  computeMapVersion,
-  describeMapSource,
-  MAP_CHUNK_SIZE,
-  type MapChunk,
-  type MapMetaInfo,
-} from "map/version";
-export type {
-  MapRuntime,
-  MapSource,
-  MapZone,
-  GeneratedMapSource,
-  TiledMapSource,
-  Vec2,
-} from "map/types";

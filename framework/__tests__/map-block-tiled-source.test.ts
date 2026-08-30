@@ -2,9 +2,8 @@
  * "tiled-source" 生成积木测试（framework/map/generate/blocks/tiledSource.ts）。
  *
  * 覆盖（D12：Tiled 能力保留为积木，不增强）：
- * - 等价性：与旧 mapRuntimeFromTiled（framework/map/tiled.ts，测试独占引用，
- *   原文件保留至清理 todo）对同一 fixture 产出语义等价——旧 blocked=1 ⟺
- *   新 walkable=0，逐格断言；含数据短于网格的 Math.min 截断语义；
+ * - walkable 反转与截断语义：collision data=1 → walkable=0（逐格内联期望值
+ *   钉死）；数据短于网格的剩余格可走（Math.min 截断语义）；
  * - zones → regions：区域名按声明顺序写入 regions（插入顺序即索引序），
  *   regionOfTile 索引可解析回正确区域名（tile 中心点落在多边形内栅格化）；
  * - 确定性：同一 fixture 两次运行（不同 rng 流）产出深相等——Tiled 导入
@@ -14,7 +13,6 @@
  * - path 拒绝：path 参数与字符串形式的 tiled 一律拒绝（积木不做文件 I/O）。
  */
 import { describe, expect, it } from "vitest";
-import { mapRuntimeFromTiled } from "framework/map/tiled";
 import { tiledSource } from "map/generate/blocks/tiledSource";
 import { deriveStream } from "map/generate/rng";
 import { createGeometryDraft } from "map/generate/types";
@@ -114,39 +112,28 @@ function runBlock(params: unknown, key = "tiled-map", seed = 1): GeometryDraft {
   return geometry;
 }
 
-describe("tiled-source: 与旧 mapRuntimeFromTiled 的语义等价", () => {
-  it("逐格等价：旧 blocked=1 ⟺ 新 walkable=0（含数据短于网格的截断语义）；尺寸一致", () => {
-    const json = makeTiledJson();
-    const draft = runBlock({ tiled: json });
-    const rt = mapRuntimeFromTiled("tiled-map", "tiled-map", json);
+describe("tiled-source: walkable 反转与截断语义（内联期望值）", () => {
+  it("collision data=1 → walkable=0（逐格内联期望）；数据短于网格的剩余格可走；尺寸一致", () => {
+    const draft = runBlock({ tiled: makeTiledJson() });
 
-    // 尺寸与 tile 像素尺寸一致
-    expect(draft.width).toBe(rt.grid.width);
-    expect(draft.height).toBe(rt.grid.height);
-    expect(draft.tileWidth).toBe(rt.grid.tileWidth);
-    expect(draft.tileHeight).toBe(rt.grid.tileHeight);
+    // 尺寸与 tile 像素尺寸（fixture：4×3 / 16px）
+    expect(draft.width).toBe(4);
+    expect(draft.height).toBe(3);
+    expect(draft.tileWidth).toBe(16);
+    expect(draft.tileHeight).toBe(16);
 
-    // 逐格语义等价：blocked=1 ⟺ walkable=0
-    expect(draft.walkable.length).toBe(rt.blocked.length);
-    for (let i = 0; i < rt.blocked.length; i++) {
-      expect(draft.walkable[i] === 0).toBe(rt.blocked[i] === 1);
-    }
-
-    // 截断语义显式断言：data 只有 10 项，末尾 2 格旧 blocked=0 → 新 walkable=1
-    expect(rt.blocked.length).toBe(12);
-    expect(draft.walkable[10]).toBe(1);
-    expect(draft.walkable[11]).toBe(1);
+    // 逐格内联期望：COLLISION_DATA 前 10 项按 1→0 / 0→1 反转；
+    // 末尾 2 格（数据 10 项 < 4×3=12 格）截断语义 → 可走
+    expect(Array.from(draft.walkable)).toEqual([0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1]);
 
     // Tiled 导入不携带地面语义：tiles 恒 0
     expect(Array.from(draft.tiles)).toEqual(Array<number>(12).fill(0));
   });
 
-  it("缺失 collision 层 → 全可走（旧 blocked 全 0 ⟺ 新 walkable 全 1）", () => {
+  it("缺失 collision 层 → 全可走", () => {
     const json = { width: 2, height: 2, tilewidth: 16, tileheight: 16, layers: [] };
     const draft = runBlock({ tiled: json });
-    const rt = mapRuntimeFromTiled("tiled-map", "tiled-map", json);
 
-    expect(Array.from(rt.blocked)).toEqual([0, 0, 0, 0]);
     expect(Array.from(draft.walkable)).toEqual([1, 1, 1, 1]);
   });
 });
