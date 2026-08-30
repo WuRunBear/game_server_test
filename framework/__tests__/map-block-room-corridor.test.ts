@@ -178,7 +178,7 @@ describe("room-corridor 连通性（积木自身契约）", () => {
 });
 
 describe("room-corridor 雕挖不变量", () => {
-  it("POSITIVE：floorTile 格恒 walkable=1，且房间外存在走廊格", () => {
+  it("U6：floorTile 格恒 walkable=1，且房间外存在走廊格", () => {
     const seed = 7;
     const geometry = generate(BASE_PARAMS, seed);
     const rooms = planRooms(blockRng(seed), BASE_PARAMS, MAP_W, MAP_H);
@@ -203,7 +203,7 @@ describe("room-corridor 雕挖不变量", () => {
     expect(corridorCells).toBeGreaterThan(0);
   });
 
-  it("POSITIVE：未雕挖格保持上游输出（tiles=SOLID、walkable=0）", () => {
+  it("U6：未雕挖格保持上游输出（tiles=SOLID、walkable=0）", () => {
     const geometry = generate(BASE_PARAMS, 7);
     for (let i = 0; i < geometry.tiles.length; i++) {
       if (geometry.tiles[i] !== FLOOR) {

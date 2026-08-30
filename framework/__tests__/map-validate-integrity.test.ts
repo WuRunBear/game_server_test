@@ -95,14 +95,14 @@ describe("validateIntegrity：实体演化规则引用校验", () => {
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  it("kind 不在原型中 → 抛错并点名 kind", () => {
+  it("U5：kind 不在原型中 → 抛错并点名 kind", () => {
     const dir = makeDir([
       { mode: "density", map: "m1", region: "alpha", kind: "no_such_kind", max: 1, every: 10 },
     ]);
     expect(() => loadFrom(dir)).toThrow(/no_such_kind/);
   });
 
-  it("template 条目 kind 不在原型中 → 抛错并点名该 kind", () => {
+  it("U5：template 条目 kind 不在原型中 → 抛错并点名该 kind", () => {
     const dir = makeDir([
       {
         mode: "template",
@@ -117,14 +117,14 @@ describe("validateIntegrity：实体演化规则引用校验", () => {
     expect(() => loadFrom(dir)).toThrow(/ghost_kind/);
   });
 
-  it("condition 未注册 → 抛错并点名条件名", () => {
+  it("U5：condition 未注册 → 抛错并点名条件名", () => {
     const dir = makeDir([
       { mode: "density", map: "m1", region: "alpha", kind: "kind_a", max: 1, every: 10, condition: "notACondition" },
     ]);
     expect(() => loadFrom(dir)).toThrow(/notACondition/);
   });
 
-  it("region 不由任何来源产出 → 抛错并点名 map 与 region", () => {
+  it("U5：region 不由任何来源产出 → 抛错并点名 map 与 region", () => {
     const dir = makeDir([
       { mode: "density", map: "m1", region: "nowhere", kind: "kind_a", max: 1, every: 10 },
     ]);

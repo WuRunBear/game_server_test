@@ -14,14 +14,18 @@
  * - 合成 8×8 单区域图 + 静态原型（无 Velocity/AIState/Collider）——
  *   系统层不移动/不增删实体，两条路径的占用集演化完全一致。
  */
-import { describe, it, expect, beforeAll, vi, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, vi, afterEach } from "vitest";
 import { query } from "bitecs";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   bootstrapFramework,
   createDefaultGameDefinition,
   createGameSimulation,
   serializeWorld,
 } from "framework/index";
+import { createFileRepository } from "framework/persistence/fileRepository";
 import { destroyEntity } from "framework/entities/destroyEntity";
 import { spawnEntity } from "framework/entities/spawn";
 import { Kind } from "framework/components/kind";
@@ -135,7 +139,7 @@ async function loadWithOfflineTicks(
 }
 
 describe("offline catch-up（离线补差）", () => {
-  it("离线一次推演 ≡ 连续运行同跨度（无 condition 规则的数量与位置逐一一致）", async () => {
+  it("I3/U2：离线一次推演 ≡ 连续运行同跨度（无 condition 规则的数量与位置逐一一致）", async () => {
     const def = buildSyntheticDef();
     const sim1 = await createGameSimulation(def);
     const world1 = simWorld(sim1);
@@ -163,7 +167,7 @@ describe("offline catch-up（离线补差）", () => {
     expect(offlineTiles).toEqual(tilePositionsOf(simWorld(simContinuous), MAP_KEY, KIND_STATIC));
   });
 
-  it("condition 规则按恢复相位求值：白天相位离线补差零补种（计数不变且不越上限）", async () => {
+  it("I3：condition 规则按恢复相位求值：白天相位离线补差零补种（计数不变且不越上限）", async () => {
     const def = buildSyntheticDef();
     const sim1 = await createGameSimulation(def);
     const world1 = simWorld(sim1);
@@ -182,7 +186,7 @@ describe("offline catch-up（离线补差）", () => {
     expect(countOf(simWorld(sim2), KIND_NIGHT)).toBeLessThanOrEqual(4);
   });
 
-  it("condition 规则按恢复相位求值：夜晚相位补种且不越上限（U3）", async () => {
+  it("I3/U3：condition 规则按恢复相位求值：夜晚相位补种且不越上限（U3）", async () => {
     const def = buildSyntheticDef();
     const sim1 = await createGameSimulation(def);
     const world1 = simWorld(sim1);
@@ -199,7 +203,7 @@ describe("offline catch-up（离线补差）", () => {
     expect(count).toBeLessThanOrEqual(4);
   });
 
-  it("补差后 tick 精确落在演化边界，下一运行 tick 恰 +1（不重走离线跨度）", async () => {
+  it("I3：补差后 tick 精确落在演化边界，下一运行 tick 恰 +1（不重走离线跨度）", async () => {
     const def = buildSyntheticDef();
     const sim1 = await createGameSimulation(def);
     const record = serializeWorld(simWorld(sim1), "catchup");
@@ -212,7 +216,7 @@ describe("offline catch-up（离线补差）", () => {
     expect(result.tick).toBe(record.tick + OFFLINE_TICKS + 1);
   });
 
-  it("now ≤ savedAt（时钟回拨）零补差：tick 保持存档值，下一运行 tick 恰 +1", async () => {
+  it("I3：now ≤ savedAt（时钟回拨）零补差：tick 保持存档值，下一运行 tick 恰 +1", async () => {
     const def = buildSyntheticDef();
     const sim1 = await createGameSimulation(def);
     const record = serializeWorld(simWorld(sim1), "catchup");
@@ -223,5 +227,55 @@ describe("offline catch-up（离线补差）", () => {
 
     const result = sim2.tick(DT_MS);
     expect(result.tick).toBe(record.tick + 1);
+  });
+});
+
+describe("I3：fileRepository 真实磁盘往返 + 离线补差一致性", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "i3-file-repo-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+    vi.useRealTimers();
+  });
+
+  it("存档经 fileRepository 落盘 → 重启真实磁盘读档 + 离线补差 ≡ 连续运行（无 condition 规则）", async () => {
+    const def = buildSyntheticDef();
+    const repo = createFileRepository(tmpDir);
+
+    // 首次开机：bootMaps 组装的首个 WorldRecord 经装配通道落盘（真实磁盘写）
+    const sim1 = await createGameSimulation(def, { repository: repo, saveId: "i3-disk" });
+    const world1 = simWorld(sim1);
+    expect(world1.time.tick).toBe(INITIAL_AGE);
+    const stubs = query(world1, [Transform]).filter((eid) => Kind[eid] === KIND_STATIC);
+    expect(stubs.length).toBe(5);
+
+    // 砍掉 2 个制造补种需求，再显式走一次真实磁盘写（临时文件 + rename 原子替换）
+    destroyEntity(world1, stubs[0]);
+    destroyEntity(world1, stubs[1]);
+    const record = serializeWorld(world1, "i3-disk");
+    await repo.saveWorld(record);
+    expect(existsSync(join(tmpDir, "i3-disk.json"))).toBe(true);
+
+    // 路径 A：真实磁盘读 + 离线补差（墙钟只在装配处读一次）
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(record.savedAt + OFFLINE_TICKS * DT_MS);
+    const simOffline = await createGameSimulation(def, { repository: repo, saveId: "i3-disk" });
+    vi.useRealTimers();
+
+    // 路径 B：真实磁盘读 + 零补差 + 连续 N 个运行 tick
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(record.savedAt);
+    const simContinuous = await createGameSimulation(def, { repository: repo, saveId: "i3-disk" });
+    vi.useRealTimers();
+    for (let i = 0; i < OFFLINE_TICKS; i++) simContinuous.tick(DT_MS);
+
+    // 无 condition 规则：数量与位置逐一一致（I3 适用范围内断言等价）
+    const offlineTiles = tilePositionsOf(simWorld(simOffline), MAP_KEY, KIND_STATIC);
+    expect(offlineTiles).toHaveLength(5);
+    expect(offlineTiles).toEqual(tilePositionsOf(simWorld(simContinuous), MAP_KEY, KIND_STATIC));
   });
 });

@@ -326,7 +326,7 @@ describe("Slice 6：portal 场景切换", () => {
     expect(world.activeMaps.has("b")).toBe(true);
   });
 
-  it("portalSystem：玩家与 portal 相交仅触发者切图；另一玩家不动；目标图无效不触发", () => {
+  it("I5：portalSystem：玩家与 portal 相交仅触发者切图；另一玩家不动；目标图无效不触发", () => {
     const world = createBareWorld();
     clearEntityMap();
     clearPortal();

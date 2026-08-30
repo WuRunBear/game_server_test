@@ -154,7 +154,7 @@ describe("climate-regions 区域划分", () => {
     }
   });
 
-  it("POSITIVE：同 seed 两次运行 regions 与 regionOfTile 深相等（确定性）", () => {
+  it("U1：同 seed 两次运行 regions 与 regionOfTile 深相等（确定性）", () => {
     const a = runClimate({ names: NAMES, style: "noise" }, 42);
     const b = runClimate({ names: NAMES, style: "noise" }, 42);
 
@@ -162,7 +162,7 @@ describe("climate-regions 区域划分", () => {
     expect(a.regionOfTile).toEqual(b.regionOfTile);
   });
 
-  it("POSITIVE：异 seed 产出不同的区域位图", () => {
+  it("U1：异 seed 产出不同的区域位图", () => {
     const a = runClimate({ names: NAMES, style: "noise" }, 42);
     const b = runClimate({ names: NAMES, style: "noise" }, 43);
 

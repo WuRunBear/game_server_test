@@ -146,7 +146,7 @@ describe("noiseTerrain 确定性与输出尺寸", () => {
     expect(second.walkable).toEqual(first.walkable);
   });
 
-  it("POSITIVE：异 seed 产出不同 tiles", () => {
+  it("U1：异 seed 产出不同 tiles", () => {
     const a = runBlock(BASE_PARAMS, createRng(42));
     const b = runBlock(BASE_PARAMS, createRng(43));
     expect(b.tiles).not.toEqual(a.tiles);
@@ -195,7 +195,7 @@ describe("noiseTerrain 阈值带与通行派生", () => {
     }
   });
 
-  it("POSITIVE：语义 ∈ nonWalkableSemantics → walkable=0；否则 walkable=1", () => {
+  it("U6：语义 ∈ nonWalkableSemantics → walkable=0；否则 walkable=1", () => {
     // 恒值场全图语义 3：集合含 3 → 全图不可通行；集合仅含 5 → 全图可通行
     const blocked = runBlock({ ...BASE_PARAMS, nonWalkableSemantics: [7, 3] }, constantRng(0.375));
     expect(blocked.walkable).toEqual(new Uint8Array(256));
@@ -203,7 +203,7 @@ describe("noiseTerrain 阈值带与通行派生", () => {
     expect(open.walkable).toEqual(new Uint8Array(256).fill(1));
   });
 
-  it("POSITIVE：真实随机场下 walkable 与语义集合逐格一致", () => {
+  it("U6：真实随机场下 walkable 与语义集合逐格一致", () => {
     const draft = runBlock(BASE_PARAMS, createRng(7));
     const nonWalkable = new Set(BASE_PARAMS.nonWalkableSemantics);
     for (let i = 0; i < draft.tiles.length; i++) {
@@ -211,7 +211,7 @@ describe("noiseTerrain 阈值带与通行派生", () => {
     }
   });
 
-  it("POSITIVE：nonWalkableSemantics 为空数组 → 全图可通行", () => {
+  it("U6：nonWalkableSemantics 为空数组 → 全图可通行", () => {
     const draft = runBlock({ ...BASE_PARAMS, nonWalkableSemantics: [] }, createRng(7));
     expect(draft.walkable).toEqual(new Uint8Array(256).fill(1));
   });

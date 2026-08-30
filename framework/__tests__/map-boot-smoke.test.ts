@@ -1,5 +1,5 @@
 /**
- * 开机冒烟探针（核心切换 todo 9 的临时验收，语义级重写归测试重写 todo）。
+ * I1 开机全量构建（真实配置 HeadlessHost 冒烟）。
  *
  * 真实 game/ 配置 + HeadlessHost 驱动，断言开机编排的四个硬性结果：
  * - 全部配置图就绪于 world.maps；
@@ -25,7 +25,7 @@ beforeAll(() => {
 });
 
 describe("boot smoke（真实配置 HeadlessHost 冒烟）", () => {
-  it("boot：全图就绪并常驻激活、tick=initialAgeTicks、初始实体>0；headless tick 正常推进", async () => {
+  it("I1：boot：全图就绪并常驻激活、tick=initialAgeTicks、初始实体>0；headless tick 正常推进", async () => {
     const def = loadGameDefinition({ gameJsonPath: "game/game.json" });
     const sim = await createGameSimulation(def);
     const world = (sim as unknown as { world: GameWorld }).world;

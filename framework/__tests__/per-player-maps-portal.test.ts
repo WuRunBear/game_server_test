@@ -113,7 +113,7 @@ function clearPortal(): void {
 }
 
 describe("portal", () => {
-  it("同图仅相交者触发：触发者 EntityMap/Transform 变化，另一玩家 EntityMap/Transform 不变", () => {
+  it("I5：同图仅相交者触发：触发者 EntityMap/Transform 变化，另一玩家 EntityMap/Transform 不变", () => {
     const world = createBareWorld();
     clearEntityMap();
     clearPortal();
@@ -180,7 +180,7 @@ describe("portal", () => {
     expect(world.activeMaps).toEqual(new Set(["a", "b", "c"]));
   });
 
-  it("目标图无效（targetMap=nope）：不移动，其他玩家不受影响", () => {
+  it("I5：目标图无效（targetMap=nope）：不移动，其他玩家不受影响", () => {
     const world = createBareWorld();
     clearEntityMap();
     clearPortal();

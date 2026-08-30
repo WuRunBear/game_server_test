@@ -43,7 +43,7 @@ beforeAll(async () => {
 });
 
 describe("worldSerializer 快照入档", () => {
-  it("save→load 往返：maps 深相等（bootMaps 回填路径）、tick/timeOfDay/savedAt 一致、实体组件还原一致", async () => {
+  it("I3：save→load 往返：maps 深相等（bootMaps 回填路径）、tick/timeOfDay/savedAt 一致、实体组件还原一致", async () => {
     const record = suite.record;
     // 快照含全部配置图
     const configKeys = suite.def.resolvedMapConfigs.map((c) => c.key);

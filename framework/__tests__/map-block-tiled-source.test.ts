@@ -113,7 +113,7 @@ function runBlock(params: unknown, key = "tiled-map", seed = 1): GeometryDraft {
 }
 
 describe("tiled-source: walkable 反转与截断语义（内联期望值）", () => {
-  it("collision data=1 → walkable=0（逐格内联期望）；数据短于网格的剩余格可走；尺寸一致", () => {
+  it("U6：collision data=1 → walkable=0（逐格内联期望）；数据短于网格的剩余格可走；尺寸一致", () => {
     const draft = runBlock({ tiled: makeTiledJson() });
 
     // 尺寸与 tile 像素尺寸（fixture：4×3 / 16px）
@@ -130,7 +130,7 @@ describe("tiled-source: walkable 反转与截断语义（内联期望值）", ()
     expect(Array.from(draft.tiles)).toEqual(Array<number>(12).fill(0));
   });
 
-  it("缺失 collision 层 → 全可走", () => {
+  it("U6：缺失 collision 层 → 全可走", () => {
     const json = { width: 2, height: 2, tilewidth: 16, tileheight: 16, layers: [] };
     const draft = runBlock({ tiled: json });
 
@@ -171,7 +171,7 @@ describe("tiled-source: zones → regions 映射", () => {
 });
 
 describe("tiled-source: 确定性", () => {
-  it("同一 fixture 两次运行（不同 rng 流）产出深相等——不消费 ctx.rng", () => {
+  it("U1：同一 fixture 两次运行（不同 rng 流）产出深相等——不消费 ctx.rng", () => {
     const a = runBlock({ tiled: makeTiledJson() }, "tiled-map", 1);
     const b = runBlock({ tiled: makeTiledJson() }, "tiled-map", 4242);
 

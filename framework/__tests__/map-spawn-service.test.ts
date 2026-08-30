@@ -110,7 +110,7 @@ describe("spawn service（真实配置）", () => {
     expect(snapshot.playerMaps.get("s-i4-b")).toBe(world.defaultMapId);
   });
 
-  it("持久化出生点：移动后重生回首次出生点（读 SpawnPoint 而非 Transform）", () => {
+  it("I4：持久化出生点：移动后重生回首次出生点（读 SpawnPoint 而非 Transform）", () => {
     world.gameDef.resolvedRules["respawn"] = { delayMs: 0 };
     const net = sim.addPlayer("s-respawn").networkId;
     const eid = eidByNetworkId(world, net);
@@ -131,7 +131,7 @@ describe("spawn service（真实配置）", () => {
     expect(EntityMap[eid]).toBe(world.defaultMapId);
   });
 
-  it("出生规则候选池为空：error 日志 + 回退地图几何中心（仍写入出生点）", () => {
+  it("I4：出生规则候选池为空：error 日志 + 回退地图几何中心（仍写入出生点）", () => {
     const geometry = world.maps[world.defaultMapId]!;
     const center = {
       x: (geometry.grid.width / 2) * geometry.grid.tileWidth,
@@ -153,7 +153,7 @@ describe("spawn service（真实配置）", () => {
     }
   });
 
-  it("出生点随存档往返：save→load 保留 SpawnPoint，orphan 复用绑定不重新选点", async () => {
+  it("I4：出生点随存档往返：save→load 保留 SpawnPoint，orphan 复用绑定不重新选点", async () => {
     // 全部玩家先移出地图范围（+5000 越界）——重选点必落在图内，存档 Transform 必在图外，
     // 恢复后 Transform 保持存档值即证明未重新选点
     const savedByNetworkId = new Map<number, { spawn: { x: number; y: number; mapId: string }; moved: { x: number; y: number } }>();

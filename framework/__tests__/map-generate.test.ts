@@ -270,7 +270,7 @@ describe("buildMapGeometry 管道执行", () => {
     expect(seqs[1]).toEqual(firstRun[1]);
   });
 
-  it("NEGATIVE：管道引用未注册积木 → 抛错含地图 key、步骤序号与积木名", () => {
+  it("U5：管道引用未注册积木 → 抛错含地图 key、步骤序号与积木名", () => {
     const registry = makeRegistry([]);
     expect(() =>
       buildMapGeometry({ key: "ghost-map", seed: 1, pipeline: [{ generator: "ghost" }] }, registry),
@@ -330,11 +330,11 @@ describe("buildMapGeometry 端到端冻结", () => {
     expect(geometry.version).toBe(computeGeometryVersion(geometry));
   });
 
-  it("POSITIVE：同配置两次生成深相等（确定性）", () => {
+  it("U1：同配置两次生成深相等（确定性）", () => {
     expect(buildMapGeometry(makeConfig(7), registry)).toEqual(buildMapGeometry(makeConfig(7), registry));
   });
 
-  it("POSITIVE：异 seed 生成结果不同（版本指纹不同）", () => {
+  it("U1：异 seed 生成结果不同（版本指纹不同）", () => {
     const a = buildMapGeometry(makeConfig(7), registry);
     const b = buildMapGeometry(makeConfig(8), registry);
     expect(b.version).not.toBe(a.version);
