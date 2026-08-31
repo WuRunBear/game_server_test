@@ -316,25 +316,29 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 
 ### 5.2 HTTP 端点（与 WebSocket 同主机/端口）
 
+> **地图契约 v2（地图系统重设计后）**：`/maps/runtime` 不再返回 chunk 化阻挡位图，改为**全图几何快照**（`tiles`/`walkable`/`regions`/`regionOfTile` 纯 JSON 数组，一次拉取，无 base64）；响应标识字段 `id`→`key`；通行语义反转（`walkable`：1=可走，0=阻挡）。旧版按 `blocked` 位图/`chunks` 分块解码的客户端需升级。
+
 | 端点 | 说明 |
 |------|------|
 | `GET /health` | 健康检查，`{"ok":true}` |
-| `GET /maps/runtime?mapId=<id>` | 地图运行时数据：网格尺寸、阻挡位图（chunk 化）、内容版本。用于客户端加载地图/碰撞。`mapId` 可选：省略时返回注册表默认地图；未知 id 返回 404，错误体附可用图列表 |
-| `GET /maps/meta` | 地图清单：默认图 id 与全部地图的元信息（含 version）。客户端可先拉取清单列出地图、预检版本，再按需拉取 runtime |
+| `GET /maps/runtime?mapId=<key>` | 地图几何全图快照：网格尺寸、地面语义 `tiles`、通行位图 `walkable`、区域 `regions`/`regionOfTile`、内容版本。用于客户端加载地图/碰撞。`mapId` 可选：省略时返回默认地图（`/maps/meta` 的 `default`，当前为 island）；未知 key（含空串）返回 404，错误体附可用图列表 |
+| `GET /maps/meta` | 地图清单：默认图 key 与全部地图的元信息（含 version）。客户端可先拉取清单列出地图、预检版本，再按需拉取 runtime |
 | `GET /debug/colliders` | 房间碰撞体调试快照（房间未就绪时 404） |
 
 `/maps/runtime` 返回示例：
 
 ```jsonc
 {
-  "id": "generated-map",
-  "name": "…",
-  "grid": { "width": 64, "height": 64, "tileWidth": 16, "tileHeight": 16 },
-  "version": "a1b2c3d4",          // 内容哈希（uint32 hex）：同内容恒定、内容变化即变；客户端可作缓存键
-  "chunks": [                     // 阻挡位图分块：16×16 tile/块，行主序排列
-    { "cx": 0, "cy": 0, "data": "…" },   // data：256 字节（每格 1 字节，0=可走 1=阻挡），base64 编码
-    { "cx": 1, "cy": 0, "data": "…" }
-  ]
+  "key": "island",
+  "grid": { "width": 96, "height": 96, "tileWidth": 16, "tileHeight": 16 },
+  "tiles": [1, 1, 1, …],          // 每格地面语义 id（number[]，行主序，长度 = width×height）；id→含义的映射在游戏配置，客户端自备 id→颜色/贴图色表渲染地面
+  "walkable": [0, 0, 0, …],       // 每格通行位图（number[]，行主序）：1=可走，0=阻挡
+  "regions": {                    // 区域名 → 区域元信息（普通对象；键顺序 = regionOfTile 的索引序）
+    "beach": { "name": "beach", "meta": {} },
+    "plain": { "name": "plain", "meta": {} }
+  },
+  "regionOfTile": [4, 4, 4, …],   // 每格所属区域索引（number[]，行主序），指向 regions 的键序
+  "version": "b5f2b031"           // 内容指纹（8 位小写十六进制）：同内容恒定、内容变化即变；客户端可作缓存键
 }
 ```
 
@@ -342,91 +346,88 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 
 | 字段 | 说明 |
 |------|------|
+| `key` | 地图 registry key。客户端应校验 `key` 等于请求的 `mapId`，不符则告警并拒绝应用（防错图） |
 | `grid` | 网格尺寸与 tile 尺寸；`width`/`height` 为 tile 数 |
-| `version` | 内容哈希（uint32 hex，8 位小写十六进制）。同一地图内容恒定则值恒定，内容变化（如重新生成）则变化。客户端可用 `{id, version}` 作缓存键，跳过重复拉取 |
-| `chunks` | 阻挡位图分块数组。每块 16×16 tile（256 字节，每格 1 字节：0=可走 1=阻挡），`data` 为 base64 编码。块按行主序排列：`cx` 为列索引、`cy` 为行索引，总块数 = `ceil(width/16) × ceil(height/16)`。客户端按 `cy` 行、`cx` 列顺序拼接为扁平字节数组（行主序重组） |
+| `tiles` | 每格地面语义 id（number[]，行主序，长度 = width×height，索引 = `y*width+x`）。服务端不解释语义含义（映射在游戏配置）；客户端自备 id→颜色/贴图色表 |
+| `walkable` | 每格通行位图（number[]，行主序）：**1=可走，0=阻挡**。⚠️ 与旧版 chunked `blocked` 位图语义相反（旧：1=阻挡）；按旧语义渲染会把整图画反 |
+| `regions` | 区域名 → 区域元信息 `{name, meta}` 的普通对象。键顺序 = `regionOfTile` 的索引序（第 0 个键 = 索引 0） |
+| `regionOfTile` | 每格所属区域索引（number[]，行主序），指向 `regions` 的键序 |
+| `version` | 内容指纹（8 位小写十六进制）。同一地图内容恒定则值恒定，内容变化则变化。客户端可用 `{key, version}` 作缓存键，跳过重复拉取；响应头 `x-map-version` 与之同值，可只看响应头预检 |
 
 `mapId` 参数语义：
 
-- 省略 `mapId`：返回注册表默认地图（即 `/maps/meta` 的 `default` 字段）。
-- 未知 `mapId`：返回 404，错误体附可用图列表，例如 `{"error":"unknown map","available":["generated-map","cave"]}`。
-- `mapId` 是**本次 HTTP 请求关心的地图 id**（客户端通常取自己的 `players.get(room.sessionId).mapId` 作为参数），与 per-player 当前地图字段同义但归属于**请求**——`RoomState` 级 `mapId` 已不存在，客户端不要读房间根状态。响应 `id` 与请求不符时告警并拒绝应用（防错图）。
+- 省略 `mapId`：返回默认地图（game.json `map.default`，当前为 island，即 `/maps/meta` 的 `default` 字段）。
+- 未知 `mapId`（含空串 `?mapId=`）：返回 404，错误体附可用图列表，例如 `{"error":"unknown map","available":["island","cave","tiled-demo"]}`。
+- `mapId` 是**本次 HTTP 请求关心的地图 key**（客户端通常取自己的 `players.get(room.sessionId).mapId` 作为参数），与 per-player 当前地图字段同义但归属于**请求**——`RoomState` 级 `mapId` 已不存在，客户端不要读房间根状态。响应 `key` 与请求不符时告警并拒绝应用（防错图）。
 
 `/maps/meta` 返回示例：
 
 ```jsonc
 {
-  "default": "generated-map",
+  "default": "island",
   "maps": [
-    { "id": "generated-map", "name": "…", "kind": "generated", "width": 64, "height": 64, "tileWidth": 16, "tileHeight": 16, "generatorId": "…", "seed": 1, "version": "a1b2c3d4" },
-    { "id": "cave", "name": "…", "kind": "generated", "width": 32, "height": 32, "tileWidth": 16, "tileHeight": 16, "generatorId": "…", "seed": 2, "version": "…" }
+    { "id": "island", "name": "island", "kind": "noise-terrain", "width": 96, "height": 96, "tileWidth": 16, "tileHeight": 16, "version": "b5f2b031" },
+    { "id": "cave", "name": "cave", "kind": "noise-terrain", "width": 64, "height": 64, "tileWidth": 16, "tileHeight": 16, "version": "3258f81b" },
+    { "id": "tiled-demo", "name": "tiled-demo", "kind": "tiled-source", "width": 8, "height": 8, "tileWidth": 16, "tileHeight": 16, "version": "52549583" }
   ]
 }
 ```
 
-> 用法：客户端可先请求 `/maps/meta` 列出可用地图与各自 `version`（预检版本、渲染地图选择 UI），再按需请求 `/maps/runtime?mapId=<id>` 拉取具体地图数据。
+> 字段说明：`id`/`name` = 地图 registry key（当前两者同值）；`kind` = 生成管道首积木注册名（如 `noise-terrain`/`tiled-source`）；`version` 与 `/maps/runtime` 响应体及 `x-map-version` 响应头同值。旧版的 `generatorId`/`seed` 字段已移除。
 
-### 5.3 地图内容：生成器 / 校验 / Tiled 制作
+> 用法：客户端可先请求 `/maps/meta` 列出可用地图与各自 `version`（预检版本、渲染地图选择 UI），再按需请求 `/maps/runtime?mapId=<key>` 拉取具体地图数据。
 
-> 本节补充地图「如何产生、是否可用、如何手工制作」的服务端视角（§5.2 已讲客户端如何拉取）。地图数据由 `game/maps/registry.json` 声明：`kind: "generated"` 走程序化生成器，`kind: "tiled"` 走外部 Tiled JSON 文件。客户端关注的是最终 `MapRuntime`（网格、阻挡位图、出生点、zone 列表），其规则如下。
+### 5.3 地图内容：生成管道 / 校验 / Tiled 制作
 
-#### 5.3.1 内置地图生成器（generatorId）
+> 本节补充地图「如何产生、是否可用、如何手工制作」的服务端视角（§5.2 已讲客户端如何拉取）。地图数据由 `game/maps/registry.json` 声明：`kind: "pipeline"` 走生成积木管道，`kind: "tiled"` 走外部 Tiled JSON 文件。客户端关注的是最终 `MapGeometry`（网格、地面语义 `tiles`、`walkable` 通行位图、`regions`/`regionOfTile` 区域位图；出生点不在几何模型——出生由演化规则与 player.json 出生规则决定），其规则如下。
 
-框架内置两种程序化生成器，生成地图条目通过字段 `generatorId` 选择：
+#### 5.3.1 生成积木管道（pipeline）
 
-| generatorId | 说明 | 生成规则 |
-|-------------|------|----------|
-| `simple` | 默认生成器 | 边界一圈全阻挡；内部随机撒约 5% 障碍物；玩家出生在地图中心；单个默认区域。同种子可复现 |
-| `cave` | 元胞自动机洞穴 | 内部约 45% 概率初始置墙、边界恒墙；经典 B=r5 / D=r4 规则平滑 5 轮（8 邻域 ≥5 墙则成墙、否则成地面，每轮后边界强制为墙）；玩家出生在最大 4 向连通地面分量的质心最近格（tile 中心）；单个默认区域。同种子可复现 |
+`kind: "pipeline"` 条目按**生成积木管道**产出几何：`seed` 派生确定性随机流，`pipeline[]` 逐积木在几何草稿上改写（首积木负责设定尺寸并分配缓冲）。框架内置四种积木：
 
-两者都基于 xorshift32 伪随机：**相同 `seed` 生成相同地图**。
+| 积木 | 说明 |
+|------|------|
+| `noise-terrain` | 首积木：设定网格尺寸，按分形噪声铺地面语义带（`bandLevel` + `groundPalette` 决定语义分布，`nonWalkableSemantics` 声明不可走语义） |
+| `climate-regions` | 在地形上划分命名区域（`names[]` 顺序 = 区域索引序；未认领格归隐式区 `wilderness`） |
+| `room-corridor` | 洞穴式房间 + 走廊雕挖（union-find 保证连通） |
+| `tiled-source` | 加载外部 Tiled JSON 并降级为积木（见 §5.3.3） |
 
-`kind: "generated"` 条目完整字段示例（`game/maps/registry.json` 的 `maps` 表内）：
+`kind: "pipeline"` 条目示例（`game/maps/registry.json` 的 `maps` 表内，island 条目）：
 
 ```jsonc
 {
-  "kind": "generated",
-  "generatorId": "cave",       // simple | cave（缺省 simple）
-  "seed": 2,                   // 随机种子，同种子可复现
-  "width": 32,                 // 网格宽（tile 数）
-  "height": 32,                // 网格高（tile 数）
-  "tileWidth": 16,             // 单格宽（像素）
-  "tileHeight": 16,            // 单格高（像素）
-  "npcSpawns": [               // 可选：程序生成内置的 NPC 出生点（相对玩家出生点偏移，tile 单位）
-    { "kind": "villager", "offsetTiles": [2, 0], "zoneId": 1 }
+  "kind": "pipeline",
+  "seed": 1337,                  // 随机种子，同 seed 同管道可复现
+  "initialAgeTicks": 155520000,  // 开机初始演化跨度（实体规则按此补差）
+  "pipeline": [
+    { "generator": "noise-terrain",
+      "params": { "width": 96, "height": 96, "tileWidth": 16, "tileHeight": 16,
+                  "bandLevel": 0.35, "groundPalette": { "1": 0.35, "2": 0.5, "3": 0.62, "4": 0.8, "5": 1 },
+                  "nonWalkableSemantics": [1, 2] } },
+    { "generator": "climate-regions", "params": { "names": ["beach", "plain", "forest", "mountain"], "style": "noise" } }
   ]
 }
 ```
 
-`npcSpawns`（可选）语义：
+实体/NPC 的布置不在地图条目里声明：全部实体（含 NPC 与传送门）由**实体演化规则**（`game/maps/entity-rules.json`）按图/区域/密度补差产出，玩家出生点由 `game/rules/player.json` 的出生规则决定。旧版的 `generatorId`/`npcSpawns` 字段已随地图系统重设计移除。
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `kind` | string | NPC 类型 id（数据，由配置给出，框架只透传，不硬编码） |
-| `offsetTiles` | `[number, number]` | 相对玩家出生点的偏移，单位 tile：`pos = player + offsetTiles × tileSize` |
-| `zoneId` | number（可选） | 归属的地图区域 id |
+#### 5.3.2 地图校验（validateMapGeometry）
 
-`npcSpawns` 缺省或为空时，该地图不生成任何 NPC 出生点。`generated` 条目其余字段（`width`/`height`/`tileWidth`/`tileHeight`/`seed`）缺省时分别取 64/64/16/16/1。
-
-#### 5.3.2 地图校验（validateMapRuntime）
-
-`buildMapRuntime` 在出口处对**每种来源**（`generated` 与 `tiled`）统一调用 `validateMapRuntime`。校验器是纯函数（不抛错、不记日志），返回 `{ errors, warnings }`；由 `buildMapRuntime` 依 `errors` 抛错、对 `warnings` 逐条 `logger.warn`。
+`buildMapGeometry` 在管道出口处统一调用 `validateMapGeometry` 做**结构校验**。校验器发现硬错误即抛错（消息含地图 key 与全部问题），软告警逐条 `logger.warn`（scope `build-map`）。
 
 | 级别 | 触发条件 | 表现 |
 |------|----------|------|
-| 硬错误（HARD ERROR） | 玩家/NPC 出生点落在阻挡格、越出网格边界，或玩家出生点缺失（null） | `buildMapRuntime` 抛出异常 → 该地图**不可用**（构建失败） |
-| 软告警（SOFT WARNING） | 最大 4 向连通可走域占全部地面 tile 的比例低于 40%（`MIN_WALKABLE_COMPONENT_FRACTION = 0.4`） | `logger.warn` 记录，**不阻断**构建 |
+| 硬错误（HARD ERROR） | 网格为空（width/height ≤ 0）；`tiles`/`walkable`/`regionOfTile` 任一长度 ≠ width×height；`regions` 为空；`regionOfTile` 索引越出 regions 数量范围 | `buildMapGeometry` 抛出异常 → 该地图**不可用**（构建失败） |
+| 软告警（SOFT WARNING） | 已声明的区域零覆盖（没有任何格属于它） | `logger.warn` 记录，**不阻断**构建 |
 
-硬错误常见于出生点被墙/障碍压住、出生点坐标超出地图范围、地图未声明玩家出生点。这类图视为「必坏图」，服务端拒绝构建。软告警的设计意图：洞穴/洞窟类地图天然存在封闭空腔（不可达 ≠ 坏图），因此「连通域占比过低」只告警、不断言地图不可用。
+「地面语义 → 通行位图」一致性**不在此校验**（本层无语义上下文）：该一致性由各生成积木自行保证，并以积木单测覆盖。
 
-出生点坐标以世界（像素）坐标换算为 tile 坐标后校验（`floor(pos.x / tileWidth)`、`floor(pos.y / tileHeight)`，行主序 `blocked[y * width + x]`），因此「落在阻挡格」与「越界」都拦得住。
+影响面：`tools/gen-map`、`tools/export-map` 与 HTTP 端点（`/maps/meta`、`/maps/runtime`）都经 `buildMapGeometry` 构建几何，因此：
 
-影响面：`tools/gen-map`、`tools/export-map` 与 HTTP 端点（`/maps/meta`、`/maps/runtime`）都经 `buildMapRuntime` 构建，因此：
+- **硬错误** = 命令非 0 退出 / 端点无法返回该图数据（该图无法产出几何快照）；
+- **软告警** = 命令照常成功，日志出现该图的零覆盖区域警告。
 
-- **硬错误** = 命令非 0 退出 / 端点返回错误（该图无法产出运行时数据）；
-- **软告警** = 命令照常成功，日志出现该图的连通性警告。
-
-客户端效应：一个「必坏图」不会出现在可用的运行时数据里（`/maps/runtime` 对其直接返回错误而非 200 + 数据），客户端按拉图失败处理即可；正常地图恒可成功构建。
+客户端效应：一个「必坏图」不会出现在可用的地图数据里，客户端按拉图失败处理即可；正常地图恒可成功构建。
 
 #### 5.3.3 Tiled 地图制作与注册
 
@@ -434,30 +435,30 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 
 | 图层 | 类型 | 约定 |
 |------|------|------|
-| `collision` | tilelayer | 阻挡层：非 0 的 tile 视为阻挡（0=可走，1=阻挡） |
-| `zones` | objectgroup | 区域：`type="zone"` 的对象，带 `zoneId` 属性；有 `polygon` 用多边形顶点，否则兜底为矩形（`x/y/width/height` 围成） |
-| `objects` | objectgroup | 出生点：`type="spawn_player"` / `type="spawn_npc"`；NPC 的 `kind` 由 `npcKind` 属性给出，`zoneId` 属性可选 |
+| `collision` | tilelayer | 阻挡层：非 0 的 tile 写入 `walkable=0`（阻挡），其余格可走 |
+| `zones` | objectgroup | 区域：`type="zone"` 的对象转为命名区域（`zoneId` 保留进区域元信息）；有 `polygon` 用多边形顶点，否则兜底为矩形（`x/y/width/height` 围成）；区域外格归隐式区 `wilderness` |
+| `objects` | objectgroup | **不再消费**（历史约定）：出生点已移出几何模型，实体/NPC 布置走实体演化规则（§5.3.1） |
 
 根字段：`width` / `height`（tile 数）、`tilewidth` / `tileheight`（单格像素）。对象坐标均为 Tiled 的像素世界坐标（原点左上角）。
 
 注册步骤：
 
 1. 把 Tiled 导出的 JSON 保存到 `game/maps/`（如 `tiled-demo.json`）。
-2. 在 `game/maps/registry.json` 中加入 `kind: "tiled"` 条目，`path` 指向该 JSON，并配所需的 `mapId`；之后用 `mapId` 引用它（`/maps/runtime?mapId=<id>`、`players.get(room.sessionId).mapId`（per-player 当前地图）、传送门 `targetMap` 等）。
+2. 在 `game/maps/registry.json` 的 `maps` 表加入 `kind: "tiled"` 条目（条目键即地图 key），`path` 指向该 JSON；之后用该 key 引用它（`/maps/runtime?mapId=<key>`、`players.get(room.sessionId).mapId`（per-player 当前地图）、传送门 `targetMap` 等）。
 
 ```jsonc
 {
   "maps": {
     "tiled-demo": {
       "kind": "tiled",
-      "path": "game/maps/tiled-demo.json",
-      "name": "手作示例地图"
+      "path": "tiled-demo.json",
+      "initialAgeTicks": 0
     }
   }
 }
 ```
 
-> 示例：`game/maps/tiled-demo.json` 是一张手工绘制的示例图，注册为 mapId `tiled-demo`（由独立任务产出，此处不列举其具体内容）。`kind: "tiled"` 条目经 `buildMapRuntime` 构建后同样接受 §5.3.2 的校验。
+> 示例：`game/maps/tiled-demo.json` 是一张手工绘制的示例图，注册为地图 key `tiled-demo`（由独立任务产出，此处不列举其具体内容）。`kind: "tiled"` 条目经 `tiled-source` 积木构建为几何，出口同样接受 §5.3.2 的校验。
 
 ---
 
@@ -469,7 +470,7 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 4. 渲染：遍历自己的 `players.get(room.sessionId).visibleEntities`（唯一实体来源）。
 5. 按 §3.6 辨识实体种类，按 §3.5 读字段。
 6. UI 操作 → `command`（§2.2），失败以状态回退为准。
-7. 用 `/maps/runtime` 初始化地图与出生点。
+7. 用 `/maps/runtime` 拉取地图几何快照，初始化地图渲染与碰撞（出生点不在几何模型，不从地图数据取）。
 
 ---
 

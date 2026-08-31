@@ -1,5 +1,7 @@
 # Survival-Island 切片实施计划
 
+> **状态：历史规划文档**（切片实施记录，原文保留不回改）；其中地图/刷怪相关表述（如 `game/spawns/populations.json`、zone 划分、出生点随图）为地图系统重设计前的历史，现状以 `docs/ROADMAP.md` 与源码为准。
+>
 > 本文件是 survival-island 游戏从"可玩 demo"到"完整游戏"的切片路线。**demo 阶段
 > 落地核心七切片**（Slice 1-7），后续切片按需开启。
 >

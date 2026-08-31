@@ -123,7 +123,7 @@
 </script>
 ```
 
-**两段示例均浏览器实测通过**：方式 A（unpkg 全局+模块导入，5/5 断言 PASS）；方式 B（jsdelivr `+esm`，`joinOrCreate("game")` 后 tick 为正整数、玩家 `mapId="generated-map"` 非空，9/9 断言 PASS）。方式 B 之所以可行，是因为 jsdelivr `+esm` 会在**服务端**把裸导入改写为绝对 `/npm/...` 路径——这正好绕开浏览器直接 `import` `@colyseus/sdk/build/index.mjs` 时因裸导入 `@colyseus/shared-types` 而报 `Failed to resolve module specifier` 的坑（见坑 K8.4）。**坑 K8 对两种方式同样适用**：`joinOrCreate("game")` 不传自定义 rootSchema。
+**两段示例均浏览器实测通过**：方式 A（unpkg 全局+模块导入，5/5 断言 PASS）；方式 B（jsdelivr `+esm`，`joinOrCreate("game")` 后 tick 为正整数、玩家 `mapId="generated-map"` 非空〔历史实测记录，当时默认图为 generated-map；现默认图为 island〕，9/9 断言 PASS）。方式 B 之所以可行，是因为 jsdelivr `+esm` 会在**服务端**把裸导入改写为绝对 `/npm/...` 路径——这正好绕开浏览器直接 `import` `@colyseus/sdk/build/index.mjs` 时因裸导入 `@colyseus/shared-types` 而报 `Failed to resolve module specifier` 的坑（见坑 K8.4）。**坑 K8 对两种方式同样适用**：`joinOrCreate("game")` 不传自定义 rootSchema。
 
 ⚠️ **切勿用两个普通 `<script>` 标签分别加载 SDK 与 Schema**（例如 `<script src="...colyseus.js"></script>` + `<script src="...colyseus-schema.js"></script>`）——普通 script 无法解析裸导入/依赖关系，会报 `colyseus is not defined` / Schema 类未定义。**二选一**：方式 A（全局脚本+模块导入）或方式 B（importmap+纯 ESM），绝不能拆分混用。
 
@@ -155,10 +155,10 @@
 ### P1 地图加载
 
 1. join 成功后：`GET {httpBase}/maps/runtime?mapId=` + `encodeURIComponent(room.state.players.get(room.sessionId).mapId)`。
-2. **校验**：响应 `id` 必须等于请求的 mapId，不符则控制台告警并拒绝应用。
-3. 解码：每块 `data`（base64）→ `atob` → 逐字节写入 `blocked[(cy*16+r)*grid.width + cx*16+c]`；总长度应 = `width*height`，不符即报错。
-4. 渲染：`blocked[i]===1` 的格子画半透明白色方块（尺寸 `grid.tileWidth/tileHeight`）。
-5. 缓存：以 `{id, version}` 为键缓存已解码地图，命中则跳过拉取与重组。
+2. **校验**：响应 `key` 必须等于请求的 mapId，不符则控制台告警并拒绝应用。
+3. 解码：直接读响应的 `walkable` 数组（纯 JSON number[]，行主序，长度 = `width*height`，索引 = `y*width+x`）；**无 base64、无分块重组**。长度不符即报错。
+4. 渲染：`walkable[i]===0` 的格子画半透明白色方块（尺寸 `grid.tileWidth/tileHeight`）。⚠️ 语义与旧版 chunked `blocked` 位图**相反**：0=阻挡，1=可走。
+5. 缓存：以 `{key, version}` 为键缓存地图（`version` 与响应头 `x-map-version` 同值），命中则跳过拉取。
 6. 监听 `state.players.get(room.sessionId).mapId` 变化 → 变化时重新执行 1-4（该玩家换图）。
 7. 相机：平移画布使自身实体居中（不做边界钳制也可）。
 
@@ -223,7 +223,7 @@
 6. `C` 打开合成面板 → 合成斧头（木材×2）成功入包；`F` 装备后采集速度提升。
 7. 吃浆果（选中+F）→ 饥饿度回升。
 8. 选中火堆套件按 `B` → 身前出现火堆实体（橙色）；`X` 可拆除自己放置的建筑。
-9. 找到紫色传送门走进去 → 该玩家 `mapId` 变为 cave（`players.get(room.sessionId).mapId`），地图重绘为 32×32 小图；走回传送门可返回。
+9. 找到紫色传送门（island tile (54,42)）走进去 → 该玩家 `mapId` 变为 cave（`players.get(room.sessionId).mapId`），地图重绘为 64×64 小图；走 cave 的回程门（tile (32,32)）可返回 island。
 10. 重启服务端后重连 → 位置/背包/任务基本恢复（60s 存档周期内的最后变更可能丢失）。
 
 ---
@@ -235,3 +235,4 @@
 | v1 | 2026-08-25 | 首版。配套协议：`CLIENT-INTEGRATION.md`（含 chunked 地图契约 + `/maps/meta`）。服务端基线：@colyseus/core 0.17.43 / @colyseus/schema 4.0.25；兴趣裁剪开启（viewRadius=300）；存档周期 60s；注册表地图 generated-map(64×64) + cave(32×32)。K1 待服务端升级 colyseus ≥0.17.44 后复核移除 |
 | v1.1 | 2026-08-25 | CDN/导入写法修正（`colyseus.js`→`@colyseus/sdk@0.17.43` 全局版 + `@colyseus/schema@4.0.25` 模块导入，浏览器实测通过）；新增 Tailwind 条目（§1 约束表第 7 条）；新增坑 K8（自定义 rootSchema 传参即空状态等 5 条实测坑）。约束 2/3 改掉原先写错的双重错误地址与“全局提供 Schema 类”的说法；K1-K7 复核后表述保持成立未改 |
 | v1.2 | 2026-08-25 | 约束 2 写法升级：明确**两种实测可行的引入方式**（方式 A：unpkg 全局脚本+Schema 模块导入 / 方式 B：importmap + jsdelivr `+esm`），新增**「禁止两个普通 script 混用」警告**以消除 AI 生成 `colyseus is not defined` 的歧义；最小示例保留方式 A 基准并**新增方式 B 完整可复制示例**（均标注浏览器实测通过）；坑 K8 补第 6 条（方式 B 专用 importmap 位置）并改写 K8.4 说明方式 B 如何绕开裸导入坑 |
+| v1.3 | 2026-08-31 | 地图契约改版（地图系统重设计后）：chunk 化阻挡位图废弃，`/maps/runtime` 改为全图快照 `tiles`/`walkable`/`regions`/`regionOfTile` + `x-map-version` 响应头；响应标识字段 `id`→`key`；默认图 generated-map→island；cave 32×32→64×64；`/maps/meta` 的 `kind` 改为管道首积木名（`generatorId`/`seed` 字段移除）。§P1 地图加载步骤 2-5 与验收清单第 9 步同步改写；§1 示例段 `mapId="generated-map"` 为历史实测记录（已就地标注，不改写实测日志） |
