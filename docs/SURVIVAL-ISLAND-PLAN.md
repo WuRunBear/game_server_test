@@ -18,7 +18,7 @@
 | **Inventory 模型** | slot 存 `{itemId, count}` + 容量走 archetype 配置 + 独立 `Equipment` 组件（weapon/tool/armor 三槽引用 inventory 槽） | 够支撑堆叠/容量/穿戴，不造格子拖拽引擎。客户端拖拽自便（**S1 落地**：slot `{kind,count}`，capacity 进 archetype，经 AoS 钩子初始化） |
 | **服务端操作原子** | `equip/transfer/drop/consume/use` 作为 Inventory/Equipment 系统的对外接口 | 客户端 UI 调这些 RPC，服务端权威做数据变更与校验 |
 
-> **后续对账注记（追加补充，不覆盖原文）**：`use` 原子**未落地**——按"即需即补"
+> **后续对账注记（追加补充，不覆盖原文）**：`use` 原子**未落地**——按"最小实现"
 > 无真实需求静默裁剪（equip 有 S3 明确记录推迟，use 遗漏了记录）。截至 S7，
 > 实际命令原子为：consume / drop / transfer / craft(S3) / equip(S3) / place(S4) /
 > deconstruct(S6) / dialogue(S7)。若未来出现"使用物品触发世界效果"（如点火、
@@ -27,7 +27,7 @@
 ## 总原则（来自 AGENTS.md §AI 协作铁律，强制）
 
 1. **铁律**：游戏逻辑永远不写进 `framework/`。每特性按序决策：① 先尝试纯 `game/*.json` 表达 → ② 缺能力在 `framework/` 加通用机制（类型名/参数游戏无关）→ ③ 扩展点表达不了时**先修扩展点**再写特性。
-2. **通用的接口，最小的实现**：即需即补 ≠ 过度设计。只需状态机时不造 GOAP；只需 `(itemId,count)` 槽时不造格子拖拽。
+2. **通用的接口，最小的实现**：最小实现 ≠ 过度设计。只需状态机时不造 GOAP；只需 `(itemId,count)` 槽时不造格子拖拽。
 3. **每切片收尾三同步**：demo 可玩前进 + 框架增长通用系统 + 测试/文档同步。验收统一以 `pnpm test` + `tsc --noEmit` + `pnpm tools validate` 全绿为准。
 4. **游戏无关性 grep**：每切片收尾前 `rg -i "hunger|荒岛|wood|boar|berry|wolf" framework/` 必须空（游戏词只能在 `game/` 与 `src/register.ts`）。
 
@@ -35,7 +35,7 @@
 
 ## 跨切片前置：必须先修的扩展点
 
-> 这些是"完整结构"能落地的真正前置，**按切片即时即补**，不提前批量造。
+> 这些是"完整结构"能落地的真正前置，**按需**，不提前批量造。
 
 | 扩展点 | 现状 | 切片 | 修法 |
 |--------|------|------|------|
@@ -68,7 +68,7 @@
 > - 变长结构统一走 AoS 数组 + spawn 初始化钩子（替代原 systemRuntimes Map 选型，见上表）
 > - 跨切片前置表补 3 项 S1 真前置：items 加载段、AoS archetype 初始化、netSync 三处深层改造（OR 语义 / 字符串线路 / AoS 数据源）
 > - `ResourceNode` 因字符串引用（yieldsKind）改为 AoS 形态（计划表原写 SoA）；
-> - `equip` 原子按即需即补推迟到 Slice 3 有真实装备需求时再加，S1 不留空 stub。
+> - `equip` 原子按需推迟到 Slice 3 有真实装备需求时再加，S1 不留空 stub。
 
 ### 新增框架组件（通用，游戏无关）
 
@@ -167,7 +167,7 @@
 | 系统 | 职责 |
 |------|------|
 | `perceptionSystem` | 扫视野内敌对实体写黑板 `perception.target`（Chase/Flee/Attack 用），先于 aiSystem 执行 |
-| `lootSystem` | **并入 deathSystem**（即需即补：死亡按 LootTable 掷骰 spawn item 实体，无需独立系统） |
+| `lootSystem` | **并入 deathSystem**（最小实现：死亡按 LootTable 掷骰 spawn item 实体，无需独立系统） |
 | `deathSystem` | Health≤0 → 掉落 → removeEntity；玩家分支留重生标记（原地重置语义） |
 | `respawnSystem` | 玩家死后到期重置 Health/位置/Needs（同 eid 原地重生） |
 
@@ -228,7 +228,7 @@
 >   死亡玩家不可 craft/equip/consume/drop/transfer（补的是 slice-2 遗留的同类缺口）
 > - gatheringSystem：gatherMult 取整为 0 时（含 directConsume 路径）不动节点
 > - framework/index 补导出 EquipEffect / CraftingRecipe / CraftingRule 类型
-> - 记录不修（即需即补）：Equipment/CraftingStation 的 spawn 未声明字段残留
+> - 记录不修（最小实现）：Equipment/CraftingStation 的 spawn 未声明字段残留
 >   （潜伏，当前 game 配置三槽全声明规避；S5 联机前再议）、craftRecipe 部分产出
 >   （全量拒绝是设计取舍）、attackTarget 缺 Transform/Team 边界（slice-2 既有）
 
@@ -287,7 +287,7 @@
 > - `SpawnSchema.condition` 落地为 spawnConditions 注册表（名 → 条件函数，isNight 内建），
 >   spawningSystem 计时/上限检查后判定；validateIntegrity 校验 condition 已注册
 > - 传输层：TickSnapshot.timeOfDay + RoomState hour/phase（world 级同步，不经 netSync 字段）
-> - **未做（即需即补，记录不修）**：Weather（无消费方）、SeekLight（无行为树引用）、
+> - **未做（最小实现，记录不修）**：Weather（无消费方）、SeekLight（无行为树引用）、
 >   zone 分区（simple 生成器硬编码单 zone，装饰性；wolf 用整图 zone + isNight 即可）
 > - LightSource.fuelRemainingMs 无消耗系统（静态/放置火堆常亮大值；燃料消耗留待真实需求）
 >
@@ -298,7 +298,7 @@
 >   SUCCEEDED 后"见敌即醒/天亮停手/光源失效改判"全部由树重置自然达成，无需额外 guard
 > - **wolf-night 分支 2（追击）加 `while: {call:"IsNight"}` guard**：修复"追击中天亮仍攻击"
 >   （guard 每 tick 重求值，天立即中断）；分支 3 改无条件 Sleep（清零速度兜底）
-> - **`IsTargetNotInVision` 节点删除**（重设计后无消费方，即需即补）
+> - **`IsTargetNotInVision` 节点删除**（重设计后无消费方，最小实现）
 > - **validateIntegrity 行为树校验修复**（S2 遗留顺手修）：collectActionNames 补
 >   `child` 递归与 `call` 形态收集（原只认 `children` + `{name,type:"action"}`，所有
 >   行为树引用未注册动作时校验静默放行）；guard 条件名收集随之真正生效
@@ -477,7 +477,7 @@
 
 > **S7 实施修正（来自落地探查，写回此计划）**：
 > - **范围取舍**：PLAN 原列 6 个系统（dialogue/quest/relationship/faction/achievement/
->   progression），按即需即补落地 **对话 + 任务 + 好感**；factionSystem（好感可替代）、
+>   progression），按需落地 **对话 + 任务 + 好感**；factionSystem（好感可替代）、
 >   achievementSystem、progressionSystem 记录不修（后者 S3 已有装备成长维度）
 > - **任务双形态**：collect（背包持有 itemKind ≥ goal，tick 检查）+ kill（玩家击杀
 >   victimKind 计数）——击杀型需要事件机制：落地**帧内事件总线**
@@ -525,7 +525,7 @@
 
 ### 后续候选（按需开启，追加补充）
 
-> 核心七切片（S1-S7）全部完成后的候选方向聚合，按真实需求取舍（即需即补，
+> 核心七切片（S1-S7）全部完成后的候选方向聚合，按真实需求取舍（按需，
 > 不在当前 demo 执行范围内）。来源：S6/S7 记录不修项 + ROADMAP 缺口 + 既有潜伏项。
 
 | 候选 | 内容 | 出处 |

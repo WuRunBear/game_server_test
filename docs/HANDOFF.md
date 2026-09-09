@@ -76,7 +76,7 @@ git branch --show-current        # 确认已是新分支
 - **审查修复**：对话选项 `to` 目标引用未校验 + 运行时无效 to 行为不一致（效果已执行却结束对话并返回 false）——validateIntegrity 补 to 引用校验（缺省/`__end__`/树内节点，含 start 节点存在性）+ advanceDialogue 改为**先解析跳转目标再执行效果**（无效 to 停留、效果不执行、会话不关闭）；补 shim 校验测试 + 真实配置用例 AoS 适配器快照断言（Dialogue/Quest 展平 key）
 
 ## 6. 关键设计决策（"为什么"）
-1. **范围取舍：对话+任务+好感，faction/achievement/progression 不做**：PLAN 原列 6 系统按即需即补收敛——故事闭环只需对话树承载剧情、任务驱动目标、好感回馈关系；成就/等级是离线统计与第三成长维，无 demo 需求牵引
+1. **范围取舍：对话+任务+好感，faction/achievement/progression 不做**：PLAN 原列 6 系统按需收敛——故事闭环只需对话树承载剧情、任务驱动目标、好感回馈关系；成就/等级是离线统计与第三成长维，无 demo 需求牵引
 2. **任务双形态（用户决策）**：collect 型纯配置（背包计数，零新机制）+ kill 型需要事件——落地帧内事件总线（无订阅解耦的最简队列，帧首清空防堆积）；事件消费方先整体取出再分发（清空式消费的共享语义）
 3. **对话入口=新交互键（用户决策）**：PlayerInput.talk 独立意图而非复用 interact——对话是显式社交动作，与采集（interact）语义分离；客户端协议扩展面可控（一个可选布尔字段）
 4. **对话/任务/好感全部 AoS 组件挂玩家**：变长结构走 S1 定型的 AoS 家族机制（初始化钩子 + 同步适配器 + worldSerializer 全量入档）；Dialogue 入瞬态名单（会话重连重开，与 Velocity/AIState 同类），Quest/Relation 持久（进度/好感随玩家存档）

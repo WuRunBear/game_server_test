@@ -205,7 +205,7 @@ Colyseus Schema 每 tick 同步。`EntityState` 的字段通过 `game.json` 的 
 
 ## 扩展指南
 
-> 本节为操作速查。**战略级约束见 `AGENTS.md` §AI 协作铁律**（游戏逻辑永远不写进 framework/、即需即补、通用的接口最小的实现）。
+> 本节为操作速查。**战略级约束见 `AGENTS.md` §AI 协作铁律**（游戏逻辑永远不写进 framework/、通用的接口最小的实现）。
 
 ### 注册扩展
 
