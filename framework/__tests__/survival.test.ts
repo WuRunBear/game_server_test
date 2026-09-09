@@ -226,7 +226,7 @@ describe("consumeSlot / dropSlot / transferSlot", () => {
   it("consumeSlot 恢复 Need 并减堆叠；不可食用返回 false", () => {
     const world = createBareWorld();
     setItemKind(world, { kind: "k1", maxStack: 5, consume: [{ need: "n1", amount: 20 }] });
-    const player = spawnTestPlayer(world, { needs: [{ name: "n1", current: 10, max: 100, decayPerSec: 0, starveDmg: 0 }] });
+    const player = spawnTestPlayer(world, { needs: [{ name: "n1", current: 10, max: 100, decayPerSec: 0, depletionDmg: 0 }] });
     Inventory[player]!.slots[0] = { kind: "k1", count: 3 };
     expect(consumeSlot(world, player, 0)).toBe(true);
     expect(Inventory[player]!.slots[0]).toEqual({ kind: "k1", count: 2 });
@@ -241,7 +241,7 @@ describe("consumeSlot / dropSlot / transferSlot", () => {
   it("consumeSlot 消耗最后 1 个时清空槽", () => {
     const world = createBareWorld();
     setItemKind(world, { kind: "k1", maxStack: 5, consume: [{ need: "n1", amount: 20 }] });
-    const player = spawnTestPlayer(world, { needs: [{ name: "n1", current: 5, max: 100, decayPerSec: 0, starveDmg: 0 }] });
+    const player = spawnTestPlayer(world, { needs: [{ name: "n1", current: 5, max: 100, decayPerSec: 0, depletionDmg: 0 }] });
     Inventory[player]!.slots[0] = { kind: "k1", count: 1 };
     consumeSlot(world, player, 0);
     expect(Inventory[player]!.slots[0]).toBe(null);
@@ -294,7 +294,7 @@ describe("needDecaySystem", () => {
   it("按 dt 衰减 Needs", () => {
     const world = createBareWorld();
     const player = spawnTestPlayer(world, {
-      needs: [{ name: "n1", current: 100, max: 100, decayPerSec: 0.5, starveDmg: 0 }],
+      needs: [{ name: "n1", current: 100, max: 100, decayPerSec: 0.5, depletionDmg: 0 }],
     });
     world.time.dtMs = 1000;
     needDecaySystem(world);
@@ -305,7 +305,7 @@ describe("needDecaySystem", () => {
     const world = createBareWorld();
     const player = spawnTestPlayer(world, {
       hp: 50,
-      needs: [{ name: "n1", current: 0, max: 100, decayPerSec: 0, starveDmg: 200 }],
+      needs: [{ name: "n1", current: 0, max: 100, decayPerSec: 0, depletionDmg: 200 }],
     });
     world.time.dtMs = 1000;
     needDecaySystem(world);
@@ -318,7 +318,7 @@ describe("needDecaySystem", () => {
     const world = createBareWorld();
     world.gameDef.resolvedRules["needs"] = { decayScale: 2 };
     const player = spawnTestPlayer(world, {
-      needs: [{ name: "n1", current: 100, max: 100, decayPerSec: 1, starveDmg: 0 }],
+      needs: [{ name: "n1", current: 100, max: 100, decayPerSec: 1, depletionDmg: 0 }],
     });
     world.time.dtMs = 1000;
     needDecaySystem(world);
@@ -360,8 +360,8 @@ describe("harvest (gatheringModule)", () => {
     const world = createBareWorld();
     setItemKind(world, { kind: "kw", maxStack: 1, consume: [{ need: "n2", amount: 30 }] });
     const player = spawnTestPlayer(world, {
-      needs: [{ name: "n1", current: 100, max: 100, decayPerSec: 0, starveDmg: 0 },
-              { name: "n2", current: 10, max: 100, decayPerSec: 0, starveDmg: 0 }],
+      needs: [{ name: "n1", current: 100, max: 100, decayPerSec: 0, depletionDmg: 0 },
+              { name: "n2", current: 10, max: 100, decayPerSec: 0, depletionDmg: 0 }],
     });
     const node = spawnTestResource(world, { remaining: 999, max: 999, yieldsKind: "kw", directConsume: true });
     expect(harvest(world, player, node)).toBe(true);
@@ -471,7 +471,7 @@ describe("Slice 1 集成：生存循环两条路径", () => {
     const world = createBareWorld();
     setItemKind(world, { kind: "k1", maxStack: 20, consume: [{ need: "n1", amount: 20 }] });
     const player = spawnTestPlayer(world, {
-      needs: [{ name: "n1", current: 100, max: 100, decayPerSec: 0, starveDmg: 0 }],
+      needs: [{ name: "n1", current: 100, max: 100, decayPerSec: 0, depletionDmg: 0 }],
     });
     const node = spawnTestResource(world, { x: 10, y: 0, remaining: 5, max: 5, yieldsKind: "k1" });
     // 交互采集
@@ -489,8 +489,8 @@ describe("Slice 1 集成：生存循环两条路径", () => {
     world.gameDef.resolvedRules["respawn"] = { delayMs: 0 };
     const player = spawnTestPlayer(world, {
       hp: 50,
-      needs: [{ name: "n1", current: 0, max: 100, decayPerSec: 0, starveDmg: 200 },
-              { name: "n2", current: 0, max: 100, decayPerSec: 0, starveDmg: 200 }],
+      needs: [{ name: "n1", current: 0, max: 100, decayPerSec: 0, depletionDmg: 200 },
+              { name: "n2", current: 0, max: 100, decayPerSec: 0, depletionDmg: 200 }],
     });
     world.time.dtMs = 1000;
     for (let i = 0; i < 100 && (Health.current[player] ?? 0) > 0; i++) {
@@ -659,7 +659,7 @@ describe("Slice 2：respawnSystem", () => {
     world.gameDef.resolvedRules["respawn"] = { delayMs: 0 };
     const player = spawnTestPlayer(world, {
       hp: 0, x: 42, y: 42,
-      needs: [{ name: "n1", current: 0, max: 100, decayPerSec: 0, starveDmg: 0 }],
+      needs: [{ name: "n1", current: 0, max: 100, decayPerSec: 0, depletionDmg: 0 }],
     });
     deathSystem(world);
     respawnSystem(world);

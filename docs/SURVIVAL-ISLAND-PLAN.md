@@ -75,7 +75,7 @@
 | 组件 | 形态 | 字段 | 备注 |
 |------|------|------|------|
 | `Kind` | AoS `string[]` | — | Phase 0 #2 已落地：`Kind[eid]` 存 archetype.kind 字符串，spawn 经 `setEntityKind` 写入；gathering/loot/perception 共用 |
-| `Needs` | AoS `(Need[] \| undefined)[]` | `Need={name,current,max,decayPerSec,starveDmg}` | 变长；游戏侧填 `hunger`/`thirst` 名；经 `registerAosInitializer` 从 archetype 数组深拷贝；`callback?` 不存（consume 效果按 need 名匹配） |
+| `Needs` | AoS `(Need[] \| undefined)[]` | `Need={name,current,max,decayPerSec,depletionDmg}` | 变长；游戏侧填 `hunger`/`thirst` 名；经 `registerAosInitializer` 从 archetype 数组深拷贝；`callback?` 不存（consume 效果按 need 名匹配） |
 | `ResourceNode` | AoS `(ResourceNodeState \| undefined)[]` | `remaining,max,amountPerHit,regenMs,yieldsKind,directConsume,depletedSinceMs` | `yieldsKind` 为 item kind **字符串**引用；`directConsume` 直接施放不入背包；`depletedSinceMs` 供再生记账 |
 
 ### 新增/扩展框架系统
@@ -99,7 +99,7 @@
 
 | 文件 | 内容 |
 |------|------|
-| `game/entities/player.json` | 加 `Needs:[{hunger,decay 0.5/s,starveDmg 1},{thirst,decay 0.7/s,starveDmg 1}]`、`Inventory{capacity:12}` |
+| `game/entities/player.json` | 加 `Needs:[{hunger,decay 0.5/s,depletionDmg 1},{thirst,decay 0.7/s,depletionDmg 1}]`、`Inventory{capacity:12}` |
 | `game/entities/berry_bush.json` | ResourceNode：remaining 5, yields `berry`, regenMs 60000 |
 | `game/entities/tree.json` | ResourceNode：yields `wood` |
 | `game/entities/water_pool.json` | ResourceNode 特例：`directConsume` 直接补 Thirst（不入背包），remaining 9999 常驻 |
@@ -107,7 +107,7 @@
 | `game/items/berry.json` | item kind=berry, consume 回 Need(hunger,+20), maxStack 20 |
 | `game/items/wood.json` | item kind=wood（材料，无 consume）, maxStack 50 |
 | `game/items/water.json` | item kind=water（供 water_pool directConsume 引用）, consume 回 Need(thirst,+30) |
-| `game/rules/needs.json` | 全局衰减倍率 `{decayScale}`；starveDmg 逐项放 player.json 的每个 Need 上 |
+| `game/rules/needs.json` | 全局衰减倍率 `{decayScale}`；depletionDmg 逐项放 player.json 的每个 Need 上 |
 | `game/spawns/populations.json` | 资源节点初始布置（berry_bush 8 / tree 6 / water_pool 2） |
 | `game/game.json` | `systems` 启用 needDecay/gathering/interaction(range 24)；`netSync.fields` 加 `Needs{tags:Player,name/current/max}`/`Inventory{tags:Player,slots}`/`ItemMeta{tags:Item,kind/count}`/`ResourceNode{tags:Resource,remaining}` |
 

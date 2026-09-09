@@ -116,7 +116,7 @@ export function attackTarget(world: GameWorld, attackerEid: number, targetEid: n
 
   Health.current[targetEid] = (Health.current[targetEid] ?? 0) - damage;
 
-  // 致命一击：发射击杀事件（同帧 questSystem 等系统消费；饿死等非攻击致死无事件）
+  // 致命一击：发射击杀事件（同帧 questSystem 等系统消费；需求耗尽等非攻击致死无事件）
   if ((Health.current[targetEid] ?? 0) <= 0) {
     emitEvent(world, "killed", {
       killer: attackerEid,

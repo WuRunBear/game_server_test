@@ -22,7 +22,7 @@ export function getRespawnMarkers(world: GameWorld): Map<EntityId, RespawnMarker
 }
 
 /**
- * deathSystem：统一死亡处理（所有致死源：战斗 / 饿死）。
+ * deathSystem：统一死亡处理（所有致死源：战斗 / 需求耗尽）。
  *
  * 对 Health ≤ 0 的实体：
  * - 有 LootTable → 逐条掷骰（chance）→ spawnDroppedItem 落地

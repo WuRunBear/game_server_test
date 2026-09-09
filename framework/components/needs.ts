@@ -15,7 +15,7 @@ export interface Need {
   /** 每秒衰减量。 */
   decayPerSec: number;
   /** 归零时每秒扣 Health 的伤害。 */
-  starveDmg: number;
+  depletionDmg: number;
 }
 
 /** AoS 存储：普通 JS 数组按 eid 索引（非 bitecs 组件，不能 addComponent/query）。 */
@@ -26,7 +26,7 @@ interface NeedConfig {
   current?: number;
   max?: number;
   decayPerSec?: number;
-  starveDmg?: number;
+  depletionDmg?: number;
 }
 
 /** AoS 初始化钩子：深拷贝 archetype 的 Needs 数组配置，补默认值。 */
@@ -41,6 +41,6 @@ export function initNeeds(
     current: Number(n?.current ?? n?.max ?? 0),
     max: Number(n?.max ?? 0),
     decayPerSec: Number(n?.decayPerSec ?? 0),
-    starveDmg: Number(n?.starveDmg ?? 0),
+    depletionDmg: Number(n?.depletionDmg ?? 0),
   }));
 }

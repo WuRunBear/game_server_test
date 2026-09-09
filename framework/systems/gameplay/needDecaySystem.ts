@@ -11,7 +11,7 @@ interface NeedsRule {
  *
  * 死亡处理统一归 deathSystem（Slice 2 起不再自行 removeEntity）——
  * 本系统只负责扣血，Health ≤ 0 的实体由 deathSystem 做掉落/重生/移除。
- * 游戏无关——只按 Need.{name,decayPerSec,starveDmg} 通用字段处理。
+ * 游戏无关——只按 Need.{name,decayPerSec,depletionDmg} 通用字段处理。
  */
 export function needDecaySystem(world: GameWorld): GameWorld {
   const rules = world.gameDef.resolvedRules["needs"] as NeedsRule | undefined;
@@ -24,22 +24,22 @@ export function needDecaySystem(world: GameWorld): GameWorld {
     const needs = Needs[eid];
     if (!needs || needs.length === 0) continue;
 
-    let starving = false;
+    let depleted = false;
     for (const need of needs) {
       need.current = Math.max(0, need.current - need.decayPerSec * decayScale * dtSec);
-      if (need.current <= 0 && need.starveDmg > 0) {
-        starving = true;
+      if (need.current <= 0 && need.depletionDmg > 0) {
+        depleted = true;
       }
     }
 
-    if (starving) {
-      let totalStarveDmg = 0;
+    if (depleted) {
+      let totalDepletionDmg = 0;
       for (const need of needs) {
         if (need.current <= 0) {
-          totalStarveDmg += need.starveDmg;
+          totalDepletionDmg += need.depletionDmg;
         }
       }
-      Health.current[eid] = (Health.current[eid] ?? 0) - totalStarveDmg * dtSec;
+      Health.current[eid] = (Health.current[eid] ?? 0) - totalDepletionDmg * dtSec;
     }
   }
 

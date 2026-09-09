@@ -84,7 +84,7 @@ function ensureTestArchetypes(world: GameWorld): void {
       Collider: { shape: 1, halfW: 8, halfH: 8 },
       Health: { current: 100, max: 100 },
       Inventory: { capacity: 3 },
-      Needs: [{ name: "n1", current: 80, max: 100, decayPerSec: 1, starveDmg: 1 }],
+      Needs: [{ name: "n1", current: 80, max: 100, decayPerSec: 1, depletionDmg: 1 }],
     },
     team: 1,
   });
@@ -135,7 +135,7 @@ describe("Slice 5：世界快照序列化/恢复", () => {
     expect(ws.components["Transform"]).toEqual({ x: 12, y: 34, rot: 0, scale: 0 });
     expect(ws.components["Health"]).toEqual({ current: 42, max: 100 });
     expect(ws.components["Inventory"]).toEqual({ capacity: 3, slots: [{ kind: "k1", count: 5 }, null, null] });
-    expect(ws.components["Needs"]).toEqual([{ name: "n1", current: 33, max: 100, decayPerSec: 1, starveDmg: 1 }]);
+    expect(ws.components["Needs"]).toEqual([{ name: "n1", current: 33, max: 100, decayPerSec: 1, depletionDmg: 1 }]);
     // 瞬态组件不入存档
     expect(ws.components["Velocity"]).toBeUndefined();
     expect(ws.components["Intent"]).toBeUndefined();

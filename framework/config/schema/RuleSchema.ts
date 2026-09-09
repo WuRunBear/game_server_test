@@ -29,7 +29,7 @@ export type CombatRule = z.infer<typeof CombatRuleSchema>;
 /**
  * Needs 全局规则：作用于 needDecaySystem 的衰减倍率。
  *
- * 每个 Need 自身的 decayPerSec/starveDmg 仍在实体 archetype 的 Needs 数组里声明，
+ * 每个 Need 自身的 decayPerSec/depletionDmg 仍在实体 archetype 的 Needs 数组里声明，
  * 规则文件只放跨实体的全局调节项（衰减倍率）。游戏无关。
  */
 export const NeedsRuleSchema = z.object({
