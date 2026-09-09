@@ -6,7 +6,7 @@
  * → 距离范围校验（rules/place.json placeRange）→ destroyEntity。
  *
  * 校验全部在销毁之前完成：任一校验失败即拒绝，零副作用。
- * 拆除不返还材料（即需即补，回收机制留待真实需求）。
+ * 拆除不返还材料（最小实现，回收机制留待真实需求）。
  */
 import { hasComponent, query } from "bitecs";
 
@@ -35,7 +35,7 @@ export function deconstructEntity(
 ): boolean {
   if (!Number.isInteger(targetNetworkId) || targetNetworkId <= 0) return false;
 
-  // 按 networkId 查目标 eid（实体量小，线性查找即需即补）
+  // 按 networkId 查目标 eid（实体量小，线性查找即可）
   let targetEid: EntityId | undefined;
   for (const eid of query(world, [NetworkId])) {
     if (NetworkId.value[eid] === targetNetworkId) {
