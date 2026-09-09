@@ -144,12 +144,15 @@ export function dropSlot(world: GameWorld, ownerEid: number, slot: number): bool
     stack,
     Transform.x[ownerEid],
     Transform.y[ownerEid],
-    now + 1000,
+    now + DROP_PICKUP_AFTER_MS,
     entityMapOf(world, ownerEid),
   );
   inv.slots[slot] = null;
   return true;
 }
+
+/** 丢弃/溢出物防瞬回延迟（ms）：掉落者就在旁边，给走开时间。 */
+export const DROP_PICKUP_AFTER_MS = 1000;
 
 /** 生成一个地面 item 实体并写 ItemMeta（供 drop 与 loot 共用）。 */
 export function spawnDroppedItem(

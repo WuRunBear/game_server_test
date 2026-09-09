@@ -1,7 +1,7 @@
 import { query } from "bitecs";
 import { Resource, ResourceNode, Needs, Inventory, entityMapOf, type ResourceNodeState } from "components";
 import type { GameWorld } from "world";
-import { addToInventory, spawnDroppedItem } from "framework/systems/gameplay/inventoryOps";
+import { addToInventory, spawnDroppedItem, DROP_PICKUP_AFTER_MS } from "framework/systems/gameplay/inventoryOps";
 import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
 import type { ConsumeEffect } from "framework/config/schema/ItemKindSchema";
 
@@ -43,7 +43,7 @@ export function harvest(world: GameWorld, actorEid: number, nodeEid: number): bo
         { kind: nodeState.yieldsKind, count: leftover },
         0,
         0,
-        world.time.tick * world.time.fixedDtMs + 1000,
+        world.time.tick * world.time.fixedDtMs + DROP_PICKUP_AFTER_MS,
         entityMapOf(world, actorEid),
       );
     }

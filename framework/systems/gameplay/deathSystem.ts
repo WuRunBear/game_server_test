@@ -10,6 +10,7 @@ export interface RespawnMarker {
 
 const DEATH_KEY = "death";
 const DEFAULT_RESPAWN_DELAY_MS = 2000;
+/** 战利品防误拾延迟（ms）：只需防同帧误拾、尽快可捡，与丢弃防瞬回的 DROP_PICKUP_AFTER_MS 语义不同。 */
 const LOOT_PICKUP_DELAY_MS = 300;
 
 /** 取（或惰性创建）重生标记表：eid → 重生截止时刻（world.systemRuntimes 持久）。 */
