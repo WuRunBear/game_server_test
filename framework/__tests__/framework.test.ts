@@ -29,7 +29,7 @@ import { inventorySystem } from "framework/systems/gameplay/inventorySystem";
 import { collisionSystem } from "framework/systems/core/collisionSystem";
 import { attackTarget } from "framework/systems/gameplay/combatSystem";
 import { deathSystem } from "framework/systems/gameplay/deathSystem";
-import { createNpcTree } from "framework/ai/btFactory";
+import { createBehaviourTree } from "framework/ai/btFactory";
 
 import { Transform } from "framework/components/transform";
 import { Velocity } from "framework/components/physics";
@@ -711,7 +711,7 @@ describe("btFactory condition nodes (Defect 5)", () => {
       },
     };
 
-    const instance = createNpcTree(definition, registry);
+    const instance = createBehaviourTree(definition, registry);
     const agent = instance.agent as Record<string, unknown>;
 
     expect(typeof agent.CondX).toBe("function");
@@ -734,7 +734,7 @@ describe("btFactory condition nodes (Defect 5)", () => {
       },
     };
 
-    expect(() => createNpcTree(definition, registry)).toThrow(/both an action and a condition/);
+    expect(() => createBehaviourTree(definition, registry)).toThrow(/both an action and a condition/);
   });
 });
 

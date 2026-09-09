@@ -14,7 +14,7 @@
 import { query } from "bitecs";
 import { NPC, Kind } from "components";
 import { createBlackboard, type Blackboard } from "ai/blackboard";
-import { createNpcTree } from "ai/btFactory";
+import { createBehaviourTree } from "ai/btFactory";
 import { stepBehaviourTree, type BtInstance } from "ai/btRunner";
 import type { EntityId, GameWorld } from "world";
 
@@ -88,13 +88,13 @@ export function aiSystem(world: GameWorld): GameWorld {
         if (archetype?.behavior) {
           const behaviorDef = world.gameDef.resolvedBehaviors.find((b) => b.id === archetype.behavior);
           if (behaviorDef) {
-            bt = createNpcTree(behaviorDef.definition as Parameters<typeof createNpcTree>[0], world.actions);
+            bt = createBehaviourTree(behaviorDef.definition as Parameters<typeof createBehaviourTree>[0], world.actions);
           }
         }
       }
 
       if (!bt) {
-        bt = createNpcTree(undefined, world.actions);
+        bt = createBehaviourTree(undefined, world.actions);
       }
 
       rt.npcTrees.set(eid, bt);

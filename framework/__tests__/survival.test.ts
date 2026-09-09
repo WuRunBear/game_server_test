@@ -55,7 +55,7 @@ import {
   BB_PERCEPTION_TARGET,
   type PerceivedTarget,
 } from "framework/ai/blackboard";
-import { createNpcTree } from "framework/ai/btFactory";
+import { createBehaviourTree } from "framework/ai/btFactory";
 import { stepBehaviourTree } from "framework/ai/btRunner";
 import { registerBuiltinActions } from "framework/ai/registerBuiltinActions";
 import type { GameWorld } from "framework/world";
@@ -681,10 +681,10 @@ describe("Slice 2：respawnSystem", () => {
 
 // BT 战斗节点：Chase 追击/Attack 攻击并回传黑板上目标状态/目标丢失返回待机，验证行为树驱动战斗
 describe("Slice 2：BT 战斗节点", () => {
-  function makeInstance(definition: Parameters<typeof createNpcTree>[0]) {
+  function makeInstance(definition: Parameters<typeof createBehaviourTree>[0]) {
     const registry = createActionRegistry();
     registerBuiltinActions(registry);
-    return createNpcTree(definition, registry);
+    return createBehaviourTree(definition, registry);
   }
 
   it("IsTargetInVision：有目标 true / 无目标（未写与写 null）false", () => {
@@ -839,7 +839,7 @@ describe("Slice 2 集成：战斗闭环", () => {
 
     const registry = createActionRegistry();
     registerBuiltinActions(registry);
-    const inst = createNpcTree({
+    const inst = createBehaviourTree({
       type: "root",
       child: {
         type: "sequence",

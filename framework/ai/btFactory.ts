@@ -1,7 +1,7 @@
 /**
  * 行为树工厂：把配置化的行为树定义编译成 mistreevous 可执行的 BehaviourTree。
  *
- * 编译流程（createNpcTree）：
+ * 编译流程（createBehaviourTree）：
  * 1. 定义来源可为 mistreevous DSL 字符串、JSON 文本或 JSON 对象；
  * 2. 递归扫描整棵树（含 while/until guard 条件与字符串 DSL），收集所有 action/condition 名称；
  * 3. 按名从 ActionRegistry 取工厂、解析节点上的 args，生成 agent 方法集
@@ -126,7 +126,7 @@ function extractActionArgs(node: unknown, actionName: string): Record<string, un
 
 let defaultActionRegistry: ActionRegistry | undefined;
 
-/** 设置默认节点注册表（供未显式传 registry 的 createNpcTree / createDefaultNpcTree 使用）。 */
+/** 设置默认节点注册表（供未显式传 registry 的 createBehaviourTree 使用）。 */
 export function setDefaultActionRegistry(registry: ActionRegistry): void {
   defaultActionRegistry = registry;
 }
@@ -140,13 +140,13 @@ export function setDefaultActionRegistry(registry: ActionRegistry): void {
  * - agent 初始仅含 { ctx: null }，ctx 由 btRunner 每 tick 注入运行上下文；
  * - 剥离 args 后的定义才交给 mistreevous 编译（其不识别 args 字段）。
  */
-export function createNpcTree(
+export function createBehaviourTree(
   definition: string | BtDefinitionJson = `root { action [Wander] }`,
   actionRegistry?: ActionRegistry,
 ): BtInstance<BtAgent> {
   const registry = actionRegistry ?? defaultActionRegistry;
   if (!registry) {
-    throw new Error("No ActionRegistry provided for createNpcTree");
+    throw new Error("No ActionRegistry provided for createBehaviourTree");
   }
 
   const normalizedDefinition =
@@ -193,7 +193,3 @@ function removeArgsFromDefinition(node: unknown): unknown {
   return obj;
 }
 
-/** 用默认注册表与默认定义（root { action [Wander] }）创建一棵行为树实例。 */
-export function createDefaultNpcTree(): BtInstance<BtAgent> {
-  return createNpcTree();
-}

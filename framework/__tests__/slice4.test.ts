@@ -37,7 +37,7 @@ import { placeEntity } from "framework/systems/gameplay/placeableSystem";
 import { aiSystem, setEntityKind } from "framework/systems/gameplay/aiSystem";
 import { perceptionSystem } from "framework/systems/gameplay/perceptionSystem";
 import { movementSystem } from "framework/systems/core/movementSystem";
-import { createNpcTree } from "framework/ai/btFactory";
+import { createBehaviourTree } from "framework/ai/btFactory";
 import { stepBehaviourTree } from "framework/ai/btRunner";
 import { createBlackboard } from "framework/ai/blackboard";
 import type { GameWorld } from "framework/world";
@@ -253,7 +253,7 @@ describe("Slice 4：spawn condition（条件刷怪）", () => {
 // BT 通用节点：IsNight 判相位、Sleep 清速度、IsInLight 按光源半径与燃料判定（燃料耗尽不发光）
 describe("Slice 4：BT 通用节点 IsNight / Sleep / IsInLight", () => {
   function makeInstance(world: GameWorld, node: unknown) {
-    const inst = createNpcTree({ type: "root", child: node }, world.actions);
+    const inst = createBehaviourTree({ type: "root", child: node }, world.actions);
     const bb = createBlackboard(-1);
     return { inst, bb };
   }

@@ -190,7 +190,7 @@
 
 ### 测试点
 
-- perception 写黑板、attackTarget（射程/冷却/友伤/死亡守卫）、death 三分支（掉落/玩家标记/移除）、respawn 重置+传送+Needs、5 个 BT 节点经 createNpcTree+step 断言
+- perception 写黑板、attackTarget（射程/冷却/友伤/死亡守卫）、death 三分支（掉落/玩家标记/移除）、respawn 重置+传送+Needs、5 个 BT 节点经 createBehaviourTree+step 断言
 - 集成：玩家击杀 boar → 掉肉落地；boar 感知 BT Attack 击杀玩家 → 重生回出生点
 - 既有用例同步：combatSystem 自动攻击用例 → attackTarget 显式调用；needDecay 移除用例 → death/respawn 全链路
 

@@ -30,7 +30,7 @@ export interface BtAgent {
   ctx: BtContext | null;
 }
 
-/** 一棵已编译的行为树与其绑定的 agent（createNpcTree 的产物）。 */
+/** 一棵已编译的行为树与其绑定的 agent（createBehaviourTree 的产物）。 */
 export interface BtInstance<TAgent extends BtAgent = BtAgent> {
   tree: BehaviourTree;
   agent: TAgent;

@@ -38,7 +38,7 @@ import { placeEntity } from "framework/systems/gameplay/placeableSystem";
 import { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";
 import { createActionRegistry } from "framework/ai/actionRegistry";
 import { registerBuiltinActions } from "framework/ai/registerBuiltinActions";
-import { createNpcTree } from "framework/ai/btFactory";
+import { createBehaviourTree } from "framework/ai/btFactory";
 import { createBlackboard, bbSet, BB_PERCEPTION_TARGET } from "framework/ai/blackboard";
 import { stepBehaviourTree } from "framework/ai/btRunner";
 import type { GameWorld } from "framework/world";
@@ -235,7 +235,7 @@ describe("map-aware", () => {
 
     const registry = createActionRegistry();
     registerBuiltinActions(registry);
-    const inst = createNpcTree({ type: "root", child: { type: "action", call: "Flee" } }, registry);
+    const inst = createBehaviourTree({ type: "root", child: { type: "action", call: "Flee" } }, registry);
     for (const self of [selfA, selfB]) {
       const bb = createBlackboard(self);
       bbSet(bb, BB_PERCEPTION_TARGET, { eid: target, dist: 10 });
