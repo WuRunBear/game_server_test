@@ -4,7 +4,8 @@
  * 生成层是「配置 → 几何」的纯生产管线：地图配置（MapGenerationConfig）
  * 声明一个积木管道，每个积木（MapGenerator）在 GenerationContext 中向
  * GeometryDraft 累积写入地理缓冲，管道终态把 draft 冻结为不可变的
- * MapGeometry（见 geometry/types.ts）。
+ * MapGeometry（见 geometry/types.ts）。积木间的非地理结构化中间产物经
+ * draft 的 aux 槽位池传递（仅管道执行期，冻结时丢弃，见 AuxSlot）。
  *
  * 纯几何生产层：不 import bitecs/ECS/任何 world 类型，不产出实体。
  */
@@ -20,7 +21,9 @@ import type { Rng } from "map/generate/rng";
  * - 首个积木负责设定 width/height/tileWidth/tileHeight 并分配
  *   tiles/walkable/regionOfTile 缓冲（长度 = width × height，行主序）；
  * - regions 为「区域名 → 元信息」Map，插入顺序即 regionOfTile 的索引序；
- * - key 为地图稳定标识，冻结时原样带入 MapGeometry。
+ * - key 为地图稳定标识，冻结时原样带入 MapGeometry；
+ * - aux 为积木间结构化中间产物暂存池：仅存在于 buildMapGeometry 执行期，
+ *   不进快照、不参与内容指纹与出口校验，冻结为 MapGeometry 时天然丢弃。
  */
 export interface GeometryDraft {
   /** 地图 key（registry 中的稳定标识）。 */
@@ -41,10 +44,17 @@ export interface GeometryDraft {
   regions: Map<string, RegionMeta>;
   /** 每格所属区域的索引（行主序展平，指向 regions 的插入顺序）。 */
   regionOfTile: Uint16Array;
+  /**
+   * 结构化中间产物暂存池（仅管道执行期存活）：供积木间传递非地理数据，
+   * 上游积木 setAux 写入、下游积木 getAux 读取。仅存在于 buildMapGeometry
+   * 内部——不进快照、不参与内容指纹与出口校验，冻结为 MapGeometry 时
+   * 天然丢弃。读写一律经 branded 槽位（见 AuxSlot / setAux / getAux）。
+   */
+  aux: Map<string, unknown>;
 }
 
 /**
- * 创建空白的几何草稿（零尺寸、零长缓冲、空区域表）。
+ * 创建空白的几何草稿（零尺寸、零长缓冲、空区域表、空 aux 池）。
  *
  * @param key 地图 key
  * @returns 可变 GeometryDraft
@@ -60,7 +70,58 @@ export function createGeometryDraft(key: string): GeometryDraft {
     walkable: new Uint8Array(0),
     regions: new Map<string, RegionMeta>(),
     regionOfTile: new Uint16Array(0),
+    aux: new Map<string, unknown>(),
   };
+}
+
+/**
+ * aux 槽位键（branded 类型）：T 为该槽位承载值的类型，编码在品牌字段的
+ * 返回值（协变）位置——不同 T 的槽位在结构类型检查下互不兼容，把 A 槽
+ * 的值写进 B 槽会在编译期报错（运行时品牌字段不参与任何行为）。
+ *
+ * 槽位名命名约定："<积木名>.<产物>"（如 "room-corridor.rooms"），积木名
+ * 即其在注册表中的 id，保证跨积木传递的键不冲突。
+ *
+ * 框架不预置任何槽位：具体槽位常量由各积木自带（经 defineAuxSlot 声明），
+ * 协作积木双方引用同一常量即可完成传递。
+ */
+export interface AuxSlot<T> {
+  /** 槽位名（aux 池的键，跨积木协作双方共用）。 */
+  readonly name: string;
+  /** 类型品牌占位：仅存在于类型层，运行时永不调用。 */
+  readonly brand: (value: never) => T;
+}
+
+/**
+ * 声明一个 branded 槽位常量（积木自带槽位的推荐入口）。
+ *
+ * @param name 槽位名（aux 池的键）
+ * @returns 带品牌标记的槽位键
+ */
+export function defineAuxSlot<T>(name: string): AuxSlot<T> {
+  return { name, brand: (value) => value as T };
+}
+
+/**
+ * 向草稿的 aux 槽位写入结构化中间产物（同槽覆盖旧值）。
+ *
+ * @param draft 目标几何草稿
+ * @param slot branded 槽位键
+ * @param value 要写入的值（类型由槽位约束）
+ */
+export function setAux<T>(draft: GeometryDraft, slot: AuxSlot<T>, value: T): void {
+  draft.aux.set(slot.name, value);
+}
+
+/**
+ * 读取草稿的 aux 槽位。
+ *
+ * @param draft 来源几何草稿
+ * @param slot branded 槽位键
+ * @returns 槽位值；未写入时为 undefined
+ */
+export function getAux<T>(draft: GeometryDraft, slot: AuxSlot<T>): T | undefined {
+  return draft.aux.get(slot.name) as T | undefined;
 }
 
 /**
