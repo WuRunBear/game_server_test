@@ -243,3 +243,141 @@ describe("noiseTerrain 管道接入", () => {
     expect(geometry.version).not.toBe("");
   });
 });
+
+describe("noiseTerrain 采样参数化（falloff / redistribution / octaves / baseCellTiles）", () => {
+  /** 与四个新参数缺省值等价的显式参数切片（供「缺省 = 显式缺省值」对照）。 */
+  const EXPLICIT_DEFAULTS = { falloff: 0, redistribution: 1, octaves: 4, baseCellTiles: 8 };
+
+  it("POSITIVE：省略新参数与显式传缺省值输出逐位一致（缺省 = 现状）", () => {
+    const rng = createRng(123);
+    const omitted = runBlock(BASE_PARAMS, createRng(123));
+    const explicit = runBlock({ ...BASE_PARAMS, ...EXPLICIT_DEFAULTS }, rng);
+    expect(explicit.tiles).toEqual(omitted.tiles);
+    expect(explicit.walkable).toEqual(omitted.walkable);
+  });
+
+  it("POSITIVE：falloff 开启后边缘衰减为最低带、中心保持原带（恒值场精确断言）", () => {
+    // 恒值场 level=0.5：无 falloff 时全图带 3（0.25 < 0.5 ≤ 0.5）
+    const base = runBlock(BASE_PARAMS, constantRng(0.5));
+    expect(new Set(base.tiles)).toEqual(new Set([3]));
+    // falloff=0.9：角/边缘中点衰减到 0 → 最低带 7；中心附近几乎不衰减 → 带 3
+    const masked = runBlock({ ...BASE_PARAMS, falloff: 0.9 }, constantRng(0.5));
+    expect(masked.tiles[0]).toBe(7); // 角 (0,0)：edgeDist=0 → 衰减因子 0
+    expect(masked.tiles[8]).toBe(7); // 边缘中点 (8,0)：edgeDist=0
+    expect(masked.tiles[8 * 16 + 8]).toBe(3); // 中心 (8,8)：衰减因子 ≈ 0.98
+  });
+
+  it("U6：falloff 开启后边缘环的最低带占比高于中心区域（真实随机场统计）", () => {
+    const size = { width: 64, height: 64 };
+    const plain = runBlock({ ...BASE_PARAMS, ...size }, createRng(9));
+    const masked = runBlock({ ...BASE_PARAMS, ...size, falloff: 0.9 }, createRng(9));
+    const lowest = BASE_PARAMS.groundPalette["7"] !== undefined ? 7 : 0;
+    const lowestShare = (tiles: Uint8Array, test: (x: number, y: number) => boolean): number => {
+      let hit = 0;
+      let total = 0;
+      for (let y = 0; y < size.height; y++) {
+        for (let x = 0; x < size.width; x++) {
+          if (!test(x, y)) continue;
+          total++;
+          if (tiles[y * size.width + x] === lowest) hit++;
+        }
+      }
+      return hit / total;
+    };
+    const edgeShare = (tiles: Uint8Array): number =>
+      lowestShare(tiles, (x, y) => x < 2 || y < 2 || x >= size.width - 2 || y >= size.height - 2);
+    const centerShare = (tiles: Uint8Array): number =>
+      lowestShare(tiles, (x, y) => x >= 28 && x < 36 && y >= 28 && y < 36);
+    // 无 falloff：边缘与中心的最低带占比统计上接近
+    expect(Math.abs(edgeShare(plain.tiles) - centerShare(plain.tiles))).toBeLessThan(0.35);
+    // 开 falloff：边缘显著低于中心 → 最低带（水/最低带语义）更多
+    expect(edgeShare(masked.tiles)).toBeGreaterThan(centerShare(masked.tiles) + 0.3);
+  });
+
+  it("POSITIVE：falloff 开启时同 seed 两次产出逐位一致（确定性）", () => {
+    const params = { ...BASE_PARAMS, falloff: 0.9, redistribution: 0.7, octaves: 3, baseCellTiles: 12 };
+    const first = runBlock(params, createRng(55));
+    const second = runBlock(params, createRng(55));
+    expect(second.tiles).toEqual(first.tiles);
+    expect(second.walkable).toEqual(first.walkable);
+  });
+
+  it("POSITIVE：redistribution 指数重映射改变分带（恒值场精确断言）", () => {
+    // 恒值 0.5：0.5^0.5 ≈ 0.707 > 0.5 → 最高带 5；0.5^1.5 ≈ 0.354 → 中带 3
+    const lifted = runBlock({ ...BASE_PARAMS, redistribution: 0.5 }, constantRng(0.5));
+    expect(new Set(lifted.tiles)).toEqual(new Set([5]));
+    const sunk = runBlock({ ...BASE_PARAMS, redistribution: 1.5 }, constantRng(0.5));
+    expect(new Set(sunk.tiles)).toEqual(new Set([3]));
+  });
+
+  it("U6：redistribution 1.5 的最低带覆盖率显著高于 0.5（真实随机场统计）", () => {
+    // x^exponent ∈ [0,1] 单调：指数 0.5 抬高采样值（最低带减少）、
+    // 指数 1.5 压低采样值（最低带增加）
+    const size = { width: 64, height: 64 };
+    const lifted = runBlock({ ...BASE_PARAMS, ...size, redistribution: 0.5 }, createRng(21));
+    const sunk = runBlock({ ...BASE_PARAMS, ...size, redistribution: 1.5 }, createRng(21));
+    const lowestCount = (tiles: Uint8Array): number => {
+      let hit = 0;
+      for (const id of tiles) {
+        if (id === 7) hit++;
+      }
+      return hit;
+    };
+    expect(lowestCount(sunk.tiles)).toBeGreaterThan(lowestCount(lifted.tiles) + 256);
+  });
+
+  it("POSITIVE：octaves=1 单层输出确定且与缺省 4 层不同", () => {
+    const single = runBlock({ ...BASE_PARAMS, octaves: 1 }, createRng(31));
+    const singleAgain = runBlock({ ...BASE_PARAMS, octaves: 1 }, createRng(31));
+    expect(single.tiles).toEqual(singleAgain.tiles);
+    const four = runBlock(BASE_PARAMS, createRng(31));
+    expect(single.tiles).not.toEqual(four.tiles);
+  });
+
+  it("POSITIVE：baseCellTiles 变化改变噪声粒度（与缺省输出不同且确定）", () => {
+    const fine = runBlock({ ...BASE_PARAMS, baseCellTiles: 4 }, createRng(77));
+    const fineAgain = runBlock({ ...BASE_PARAMS, baseCellTiles: 4 }, createRng(77));
+    expect(fine.tiles).toEqual(fineAgain.tiles);
+    const coarse = runBlock(BASE_PARAMS, createRng(77));
+    expect(fine.tiles).not.toEqual(coarse.tiles);
+  });
+
+  it("NEGATIVE：falloff 越界（<0 / >0.9）→ 抛错点名 params.falloff", () => {
+    expect(() => runBlock({ ...BASE_PARAMS, falloff: -0.1 }, createRng(1))).toThrowError(
+      /params falloff must be a number in \[0, 0\.9\], got -0\.1/,
+    );
+    expect(() => runBlock({ ...BASE_PARAMS, falloff: 0.95 }, createRng(1))).toThrowError(
+      /params falloff must be a number in \[0, 0\.9\], got 0\.95/,
+    );
+  });
+
+  it("NEGATIVE：redistribution 越界（<0.5 / >1.5）→ 抛错点名 params.redistribution", () => {
+    expect(() => runBlock({ ...BASE_PARAMS, redistribution: 0.4 }, createRng(1))).toThrowError(
+      /params redistribution must be a number in \[0\.5, 1\.5\], got 0\.4/,
+    );
+    expect(() => runBlock({ ...BASE_PARAMS, redistribution: 1.6 }, createRng(1))).toThrowError(
+      /params redistribution must be a number in \[0\.5, 1\.5\], got 1\.6/,
+    );
+  });
+
+  it("NEGATIVE：octaves 越界（0 / 9 / 非整数）→ 抛错点名 params.octaves", () => {
+    expect(() => runBlock({ ...BASE_PARAMS, octaves: 0 }, createRng(1))).toThrowError(
+      /params octaves must be an integer in \[1, 8\], got 0/,
+    );
+    expect(() => runBlock({ ...BASE_PARAMS, octaves: 9 }, createRng(1))).toThrowError(
+      /params octaves must be an integer in \[1, 8\], got 9/,
+    );
+    expect(() => runBlock({ ...BASE_PARAMS, octaves: 2.5 }, createRng(1))).toThrowError(
+      /params octaves must be an integer in \[1, 8\], got 2\.5/,
+    );
+  });
+
+  it("NEGATIVE：baseCellTiles 越界（1 / 65）→ 抛错点名 params.baseCellTiles", () => {
+    expect(() => runBlock({ ...BASE_PARAMS, baseCellTiles: 1 }, createRng(1))).toThrowError(
+      /params baseCellTiles must be an integer in \[2, 64\], got 1/,
+    );
+    expect(() => runBlock({ ...BASE_PARAMS, baseCellTiles: 65 }, createRng(1))).toThrowError(
+      /params baseCellTiles must be an integer in \[2, 64\], got 65/,
+    );
+  });
+});

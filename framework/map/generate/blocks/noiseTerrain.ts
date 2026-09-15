@@ -4,9 +4,11 @@
  * 管道首积木：值噪声/fBm 生成地面语义分布，并派生通行位图。
  * - 设定 draft 的 width/height/tileWidth/tileHeight，并分配 tiles/walkable/
  *   regionOfTile 缓冲（行主序，长度 = width × height）；
- * - 每格采样多倍频值噪声（fBm，归一化到 [0, 1)），按 groundPalette 的累计
- *   阈值带（升序上界，噪声值 ≤ 上界 → 该带语义 id）映射为数字语义 id；
- *   语义 id 的含义命名映射整体在 game 配置，框架只见数字；
+ * - 每格采样多倍频值噪声（fBm，归一化到 [0, 1)），可选经指数重映射
+ *   （redistribution）与径向掩膜衰减（falloff）整形采样值后，按
+ *   groundPalette 的累计阈值带（升序上界，噪声值 ≤ 上界 → 该带语义 id）
+ *   映射为数字语义 id；语义 id 的含义命名映射整体在 game 配置，框架只见
+ *   数字；
  * - walkable 由 nonWalkableSemantics 派生：语义 ∈ 集合 → 0，否则 1；
  * - 全部随机性取自 ctx.rng（管道派生流）：晶格随机值按「层序 × 行主序」
  *   固定顺序抽取，同 params 同 seed 确定复现。
@@ -16,12 +18,24 @@
 import type { Rng } from "map/generate/rng";
 import type { GenerationContext } from "map/generate/types";
 
-/** 噪声特征：基频晶格间距（tile 数，逐层减半）。 */
-const BASE_CELL_TILES = 8;
-/** 噪声特征：fBm 叠加层数。 */
-const OCTAVES = 4;
-/** 噪声特征：逐层振幅衰减系数。 */
+/** 噪声特征：基频晶格间距（tile 数，逐层减半）的缺省值。 */
+const DEFAULT_BASE_CELL_TILES = 8;
+/** 噪声特征：fBm 叠加层数的缺省值。 */
+const DEFAULT_OCTAVES = 4;
+/** 噪声特征：逐层振幅衰减系数（固定常量，不参数化）。 */
 const GAIN = 0.5;
+
+/** 采样参数边界：falloff 径向掩膜 ∈ [0, 0.9]（0 = 关闭）。 */
+const FALLOFF_MAX = 0.9;
+/** 采样参数边界：redistribution 指数 ∈ [0.5, 1.5]（1 = 现状）。 */
+const REDISTRIBUTION_MIN = 0.5;
+const REDISTRIBUTION_MAX = 1.5;
+/** 采样参数边界：octaves 层数 ∈ [1, 8]。 */
+const OCTAVES_MIN = 1;
+const OCTAVES_MAX = 8;
+/** 采样参数边界：基频晶格间距 ∈ [2, 64] tile。 */
+const BASE_CELL_MIN = 2;
+const BASE_CELL_MAX = 64;
 
 /** 单条阈值带：语义 id + 累计上界（升序排列后覆盖 (0, 1]，末位为 1）。 */
 interface TerrainBand {
@@ -45,6 +59,14 @@ interface NoiseTerrainParams {
   bands: TerrainBand[];
   /** 不可通行语义 id 集合。 */
   nonWalkable: Set<number>;
+  /** 径向掩膜强度（[0, 0.9]，0 = 关闭 = 现状）。 */
+  falloff: number;
+  /** 归一化后指数重映射指数（[0.5, 1.5]，1 = 现状）。 */
+  redistribution: number;
+  /** fBm 叠加层数（[1, 8]，缺省 4 = 现状）。 */
+  octaves: number;
+  /** 基频晶格间距 tile 数（[2, 64]，缺省 8 = 现状）。 */
+  baseCellTiles: number;
 }
 
 /** 抛出点名地图 key 与具体配置项的参数错误。 */
@@ -68,6 +90,46 @@ function requirePositiveNumber(params: Record<string, unknown>, key: string, map
     fail(mapKey, `${key} must be a positive number, got ${String(value)}`);
   }
   return value;
+}
+
+/**
+ * 校验并取回一个可选的有界数字段：缺省时返回缺省值；提供时必须为
+ * 有限数字且落在 [min, max]，越界/类型错误即抛错（fail-fast，不 clamp）。
+ */
+function optionalBoundedNumber(
+  params: Record<string, unknown>,
+  key: string,
+  mapKey: string,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
+  const raw = params[key];
+  if (raw === undefined) return fallback;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < min || raw > max) {
+    fail(mapKey, `${key} must be a number in [${min}, ${max}], got ${String(raw)}`);
+  }
+  return raw;
+}
+
+/**
+ * 校验并取回一个可选的有界整数字段：缺省时返回缺省值；提供时必须为
+ * 整数且落在 [min, max]，越界/类型错误即抛错。
+ */
+function optionalBoundedInt(
+  params: Record<string, unknown>,
+  key: string,
+  mapKey: string,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
+  const raw = params[key];
+  if (raw === undefined) return fallback;
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < min || raw > max) {
+    fail(mapKey, `${key} must be an integer in [${min}, ${max}], got ${String(raw)}`);
+  }
+  return raw;
 }
 
 /**
@@ -147,7 +209,18 @@ function parseParams(params: unknown, mapKey: string): NoiseTerrainParams {
     nonWalkable.add(entry);
   }
 
-  return { width, height, tileWidth, tileHeight, bands, nonWalkable };
+  return {
+    width,
+    height,
+    tileWidth,
+    tileHeight,
+    bands,
+    nonWalkable,
+    falloff: optionalBoundedNumber(p, "falloff", mapKey, 0, FALLOFF_MAX, 0),
+    redistribution: optionalBoundedNumber(p, "redistribution", mapKey, REDISTRIBUTION_MIN, REDISTRIBUTION_MAX, 1),
+    octaves: optionalBoundedInt(p, "octaves", mapKey, OCTAVES_MIN, OCTAVES_MAX, DEFAULT_OCTAVES),
+    baseCellTiles: optionalBoundedInt(p, "baseCellTiles", mapKey, BASE_CELL_MIN, BASE_CELL_MAX, DEFAULT_BASE_CELL_TILES),
+  };
 }
 
 /** 单倍频值噪声晶格：cell 为晶格间距（tile 数），values 为行主序晶格随机值。 */
@@ -158,13 +231,13 @@ interface NoiseLattice {
 }
 
 /**
- * 为各倍频层构建晶格：第 o 层间距 = BASE_CELL_TILES / 2^o，晶格随机值按
+ * 为各倍频层构建晶格：第 o 层间距 = baseCellTiles / 2^o，晶格随机值按
  * 「层序 × 行主序」从 rng 固定顺序抽取（确定性的唯一来源）。
  */
-function buildLattices(width: number, height: number, rng: Rng): NoiseLattice[] {
+function buildLattices(width: number, height: number, rng: Rng, octaves: number, baseCellTiles: number): NoiseLattice[] {
   const lattices: NoiseLattice[] = [];
-  for (let octave = 0; octave < OCTAVES; octave++) {
-    const cell = BASE_CELL_TILES / 2 ** octave;
+  for (let octave = 0; octave < octaves; octave++) {
+    const cell = baseCellTiles / 2 ** octave;
     const cols = Math.ceil(width / cell) + 1;
     const rows = Math.ceil(height / cell) + 1;
     const values = new Float64Array(cols * rows);
@@ -179,6 +252,27 @@ function buildLattices(width: number, height: number, rng: Rng): NoiseLattice[] 
 /** 平滑插值曲线（smoothstep）。 */
 function smooth(t: number): number {
   return t * t * (3 - 2 * t);
+}
+
+/** 五次 smootherstep 曲线（6t^5 - 15t^4 + 10t^3，两端导数为零）。 */
+function smootherstep(t: number): number {
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+/**
+ * 径向掩膜衰减系数：按"距地图边缘的归一化距离"衰减采样值。
+ *
+ * d = 最近边距 / (较短边长的一半)，边缘 0、地图中心 1；falloff 控制掩膜
+ * 从边缘向内覆盖的归一化宽度——d ≤ 1 - falloff 的内圈不衰减，越靠外
+ * 衰减越强，边缘处经 smootherstep 平滑趋零。同 (width, height, falloff)
+ * 的系数是纯几何函数，与随机流无关。
+ */
+function falloffFactor(x: number, y: number, width: number, height: number, falloff: number): number {
+  const halfMin = Math.min(width, height) / 2;
+  const edgeDist = Math.min(x, y, width - 1 - x, height - 1 - y);
+  const d = Math.min(1, edgeDist / halfMin);
+  const t = Math.min(1, Math.max(0, (d - (1 - falloff)) / falloff));
+  return smootherstep(t);
 }
 
 /** 双线性 + smoothstep 采样晶格（晶格尺寸保证索引不越界）。 */
@@ -238,11 +332,20 @@ export function noiseTerrain(ctx: GenerationContext): void {
   draft.walkable = new Uint8Array(size);
   draft.regionOfTile = new Uint16Array(size);
 
-  const lattices = buildLattices(width, height, ctx.rng);
+  const lattices = buildLattices(width, height, ctx.rng, params.octaves, params.baseCellTiles);
   const bands = params.bands;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const level = sampleFbm(lattices, x, y);
+      let level = sampleFbm(lattices, x, y);
+      // 分带前的采样值整形（均不影响 bandLevel 与 groundPalette 的校验语义）：
+      // 1. 指数重映射 level = level^exponent（整体平移各带覆盖率）；
+      // 2. 径向掩膜向边缘衰减 level（falloff = 0 时完全跳过，保持现状逐位一致）
+      if (params.redistribution !== 1) {
+        level = level ** params.redistribution;
+      }
+      if (params.falloff > 0) {
+        level *= falloffFactor(x, y, width, height, params.falloff);
+      }
       // bands 末位 bound = 1 且 level ∈ [0, 1)，扫描必命中；初始化仅为类型收窄
       let id = bands[bands.length - 1].id;
       for (const band of bands) {

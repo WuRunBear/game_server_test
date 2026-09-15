@@ -2,10 +2,12 @@
  * 内置生成积木注册测试（framework/__tests__/map-block-register.test.ts）。
  *
  * 覆盖计划 todo 3 注册接线验收：
- * - registerBuiltinMapGenerators 注册四个内置积木 id（has 全真）；
- * - 注册表恰好含这四条（all 长度 = 4 且 id 集合一致）；
+ * - registerBuiltinMapGenerators 注册九个内置积木 id（has 全真）；
+ * - 注册表恰好含这九条（all 长度 = 9 且 id 集合一致）；
  * - 端到端：注册表 + buildMapGeometry 跑 noise-terrain → climate-regions
- *   管道产出合法 MapGeometry（证明注册的是真实积木而非占位）。
+ *   管道产出合法 MapGeometry（证明注册的是真实积木而非占位）；
+ * - 新积木端到端：slot-rooms 首积木 + region-stats 精修 + smooth-terrain
+ *   精修的组合管道同样产出合法 MapGeometry（注册接线可达新能力）。
  */
 import { describe, expect, it } from "vitest";
 
@@ -14,11 +16,21 @@ import { createGeneratorRegistry } from "map/generate/generatorRegistry";
 import { buildMapGeometry } from "map/generate/pipeline";
 import type { MapGenerationConfig } from "map/generate/types";
 
-/** 四个内置积木的注册名（与 registerBuiltin.ts 一一对应）。 */
-const BLOCK_IDS = ["noise-terrain", "climate-regions", "room-corridor", "tiled-source"] as const;
+/** 九个内置积木的注册名（与 registerBuiltin.ts 一一对应）。 */
+const BLOCK_IDS = [
+  "noise-terrain",
+  "climate-regions",
+  "room-corridor",
+  "tiled-source",
+  "region-stats",
+  "smooth-terrain",
+  "height-channel",
+  "height-mask",
+  "slot-rooms",
+] as const;
 
 describe("registerBuiltinMapGenerators", () => {
-  it("注册四个内置积木 id（has 全真）", () => {
+  it("注册九个内置积木 id（has 全真）", () => {
     const registry = createGeneratorRegistry();
     registerBuiltinMapGenerators(registry);
     for (const id of BLOCK_IDS) {
@@ -26,11 +38,11 @@ describe("registerBuiltinMapGenerators", () => {
     }
   });
 
-  it("注册表恰好含这四条（all 长度 = 4 且 id 集合一致）", () => {
+  it("注册表恰好含这九条（all 长度 = 9 且 id 集合一致）", () => {
     const registry = createGeneratorRegistry();
     registerBuiltinMapGenerators(registry);
     const entries = registry.all();
-    expect(entries).toHaveLength(4);
+    expect(entries).toHaveLength(9);
     expect(entries.map((entry) => entry.id).sort()).toEqual([...BLOCK_IDS].sort());
   });
 
@@ -74,6 +86,31 @@ describe("registerBuiltinMapGenerators", () => {
       expect(regionIndex).toBeLessThan(geometry.regions.size);
     }
     // 冻结时已计算内容指纹
+    expect(geometry.version).not.toBe("");
+  });
+
+  it("端到端：slot-rooms → smooth-terrain → region-stats 组合管道产出合法 MapGeometry（新积木接线可达）", () => {
+    const registry = createGeneratorRegistry();
+    registerBuiltinMapGenerators(registry);
+    const config: MapGenerationConfig = {
+      key: "register-e2e-new",
+      seed: 42,
+      pipeline: [
+        { generator: "slot-rooms", params: { floorTile: 2, solidTile: 1, tileWidth: 16, tileHeight: 16 } },
+        { generator: "smooth-terrain", params: { maxRounds: 2 } },
+        { generator: "region-stats" },
+      ],
+    };
+
+    const geometry = buildMapGeometry(config, registry);
+
+    expect(geometry.grid).toEqual({ width: 75, height: 48, tileWidth: 16, tileHeight: 16 });
+    // region-stats 为每个有覆盖区域写入 area 统计（walls 区域除外为零覆盖时跳过）
+    let statsWritten = 0;
+    for (const [, region] of geometry.regions) {
+      if (region.meta.area !== undefined) statsWritten++;
+    }
+    expect(statsWritten).toBeGreaterThanOrEqual(5);
     expect(geometry.version).not.toBe("");
   });
 });
