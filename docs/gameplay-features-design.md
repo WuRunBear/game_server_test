@@ -1,116 +1,152 @@
-# 玩法系统补充建议（借鉴 demo-e7ae1909）
+# 玩法系统实现记录（借鉴 demo-e7ae1909）
+
+> 状态标注：本文档已与实现同步（提交 0675aa2），后续以代码为准。
+> 原为「G1–G8 玩法能力提案」；其中六个通用子系统与投射物最小集已落地（见第三节），
+> 其余条目保留为后续配方切片（见第四节落地对照）。
 
 ## 一、背景与来源
 
 来源：对纯前端地牢 roguelike `demo-e7ae1909`（元气骑士风格，Canvas 2D，位于 `/mnt/jixie/data/AI/project/game/demo-e7ae1909`）的只读源码调研——架构与地牢生成、玩法机制清点、本框架覆盖面 grep 核对各一份。本文档记录调研中确认**本框架缺失、且 demo 有成熟参照**的玩法层能力，作为后续切片的候选池。
 
-与 `map-system-design.md` 的分工：地图生成相关（slot-rooms 槽位房间布局积木）已写入该文档提案 7；本文档只收录玩法/战斗/AI 层。双方唯一交叉点是房间流程（G6），它依赖提案 7 产出的 region 元数据。
+与 `map-system-design.md` 的分工：地图生成相关（slot-rooms 槽位房间布局积木）已写入该文档；本文档只收录玩法/战斗/AI 层。双方唯一交叉点是房间流程（G6），它依赖 slot-rooms 产出的 region 元数据。
 
-## 二、现状基线（已核实）
+## 二、现状基线（改动前，历史记录）
 
 | 能力 | 框架现状 | 证据 |
 |------|---------|------|
-| 攻击 | 瞬发 hitscan，`combatSystem.attackTarget`（framework/systems/gameplay/combatSystem.ts:68），伤害公式 max(1, 攻-防)（L101-115） | grep `projectile\|bullet\|missile\|arrow` 零命中；types.ts:34 注释自述"近战等" |
-| 状态效果 | `Duration` 组件已注册但**零消费者**（仅 worldSerializer 瞬态跳过清单）；无 buff/poison/burn/slow/stun 概念 | grep `buff\|statusEffect\|poison\|burn\|stun\|slow` 零命中 |
-| 技能/闪避 | PlayerCommand 仅 8 种（consume/drop/transfer/craft/equip/place/deconstruct/dialogue），PlayerInput 仅 moveX/moveY/interact/attack/talk（framework/simulation/types.ts L21/L52）；`Cooldown` 仅战斗使用 | grep `skill\|dodge\|dash\|ability` 零命中 |
-| 武器模型 | `Attack` 组件仅 value/range；ItemKind 的 equip 仅 attackBonus/defenseBonus/gatherMult | 无 category/rarity/攻击模式字段 |
-| 精英/缩放 | EntityRule 无任何缩放概念 | grep `boss\|elite\|精英` 零命中 |
-| 房间流程 | 地图常驻全图模拟（bootMaps），演化引擎只做上限补足，无进入触发/清场判定 | grep `roguelike\|dungeon\|关卡\|波次\|wave` 零命中 |
-| 货币/商店 | 完全没有 | grep `gold\|coin\|currency\|shop\|trade` 零命中 |
-| Boss 能力 | BT 仅 6 动作 4 条件（Idle/Wander/Chase/Flee/Attack/Sleep + IsTargetInVision/InAttackRange/IsNight/IsInLight） | 无 telegraph/范围弹幕/召唤/阶段节点 |
+| 攻击 | 瞬发 hitscan，`combatSystem.attackTarget`，伤害公式 max(1, 攻-防) | 无投射物 |
+| 状态效果 | `Duration` 组件已注册但**零消费者**；无 buff/poison/burn/slow/stun 概念 | — |
+| 技能/闪避 | PlayerCommand 8 种，PlayerInput 仅 move/interact/attack/talk；`Cooldown` 仅战斗使用 | 无 skill/dodge/ability |
+| 武器模型 | `Attack` 组件仅 value/range；ItemKind 的 equip 仅 attackBonus/defenseBonus/gatherMult | 无 category/rarity/攻击模式 |
+| 精英/缩放 | EntityRule 无任何缩放概念 | — |
+| 房间流程 | 地图常驻全图模拟，演化引擎只做上限补足，无进入触发/清场判定 | — |
+| 货币/商店 | 完全没有 | — |
+| Boss 能力 | BT 仅 6 动作 4 条件 | 无 telegraph/范围弹幕/召唤/阶段节点 |
 
-另有三个"已注册但未接线"的陷阱，借鉴时不要误判为已实现：`Duration`（零消费者）、`AIState/Target/BlackboardRef`（全仓库无读写）、`Perception.hostilityRange`（组件注释自认占位）。
+另有三个「已注册但未接线」的陷阱，借鉴时不要误判为已实现：`Duration`（**至今仍零消费者**——定时能力走新增的 ExpiresAt/Interval，见 3.3）、`AIState/Target/BlackboardRef`（全仓库无读写）、`Perception.hostilityRange`（组件注释自认占位）。
 
-## 三、建议
+## 三、已实现：六个通用子系统 + 投射物最小集
 
-### G1 投射物/弹道系统（最高优先）
+实现形态与 map 侧一致：全部为**通用机制**（无游戏名词），注册表模式对齐 action/ruleModule；bootstrap 一次性装配；全部经 `framework/index.ts` barrel 导出；三个新测试文件 49 用例锚定。
 
-- **现状**：见基线表第一行；攻击命中即扣血，无飞行过程。
-- **demo 参照**：统一弹体结构（bullets.js spawn L11-19：x/y/vx/vy/r/dmg/team/life/pierce/elem/explode/homing/bounce，上限 460）；14 种开火原型（bullet/pellet/arrow/laserBolt/orb/beam/chain/rocket/grenade/shuriken/boomerang/flame/blackhole/melee）；49 把武器全部用同一套字段参数化（weapons.js LIST）。
-- **实现方案**（第一步只做最小集）：
-  1. 新增 SoA 组件 `Projectile`（ownerEid、team、damage、velocity、lifetime、pierce 最小集）+ `projectileSystem`：tick 移动 → tile 碰撞（经 `world.maps` walkable 查询，与 collisionSystem 同源）→ 命中判定（Team 不同 + 距离）→ 寿命销毁；netSync 按现有配置驱动机制同步。
-  2. 伤害公式复用：把 attackTarget L101-115 的公式抽为纯函数（或 RuleModule），hitscan 与投射物共用，保证数值一致。
-  3. PlayerInput 扩展瞄准方向（aimX/aimY 或 attack 携带方向），服务端权威校验射速（复用 Cooldown）。
-  4. ItemKindSchema 的 equip 块扩展远程参数（projectile 原型/speed/range/pierce），攻击时按装备发射。
-  - **首期不做**：beam/chain/homing/bounce 等 12 种原型；demo 全参数表留作后续扩展目录。
-- **单测**：直线轨迹、墙体阻挡、命中扣血与 killed 事件、穿透计数、寿命销毁、射速限制、netSync 同步。
+### 3.1 事件总线（`framework/simulation/events/eventBus.ts`）
 
-### G2 状态效果系统（激活 Duration）
+- 与 `framework/events/gameEvents.ts`（帧内轻量、无订阅者）互补：**类型化事件队列**，tick 内排队、固定阶段消费（不自动派发，保系统拓扑确定性）。
+- API：`queueEvent(world, name, payload)` / `subscribeEvent` / `drainEvents`（清空式，triggerSystem 用）/ `dispatchEvents`（订阅式）。
+- 事件表 `TypedEventPayloads`（interface merging 可扩展）：`on-timer`/`on-command`/`on-contact` 已由产生方接线；`on-hit`/`on-death`/`on-region-enter`/`on-region-clear` 预留（产生方留配方切片）。
+- 帧首由 GameInstance.step 清空队列，事件只在产生它的那一 tick 有效。
+- 挂在 `world.eventBus`（per-world 实例）。
 
-- **现状**：`Duration` 组件零消费者（framework/components/timer.ts）。
-- **demo 参照**：四元素效果（enemies.js update L409-422）——burn 170f、每 24f 结算 3+floor；poison 220f、每 30f 结算 2+0.7×floor；slow 130f、速度×0.45；stun 16f 停止 AI。施加点在伤害入口按 elem 分发。
-- **实现方案**：
-  1. 新增 `statusEffectSystem`（tick 系统）：遍历 `[Duration]` 递减，到期清零；效果定义走规则 JSON：`{ kind, durationMs, periodMs?, damage?, speedMul?, stun? }`。
-  2. slow 挂 movementSystem 速度乘区；stun 门 aiSystem（有 stun 跳过行为树）；DoT 周期写 Health 并经 gameEvents emit 事件。
-  3. 施加入口：combatSystem 命中后按攻击者配置的 elem 附加（demo 的 fire/ice/poison/shock）。
-- **单测**：递减到零清除、DoT 周期数值、slow 改变移动、stun 抑制 AI、Duration 瞬态不入档（恢复后状态重建）。
+### 3.2 效果系统（`framework/simulation/effects/`）
 
-### G3 技能/冷却/闪避
+- 注册表 `effectRegistry.ts`：「效果名 → 执行器」工厂表，签名 `(ctx) => boolean`；`EffectSpec = { name, params? }` 声明式引用。未注册的效果名记 warn 跳过（不崩 tick）。
+- 内置七效果（`builtinEffects.ts`，bootstrap 注册）：
 
-- **现状**：见基线表第三行；能量/资源概念缺失。
-- **demo 参照**：8 个技能（player.js useSkill L97-172）= 冷却 240-420f + 能耗 26-50 + 效果；翻滚 = 13 帧位移 + 无敌帧 invT = 13+dashInv、CD 46f。
-- **实现方案**：
-  1. 技能 = 配置声明的"动作 + Cooldown + 可选资源消耗 + 可选效果引用（G1 投射物 / G2 状态效果）"。新增 `skill` 命令（PlayerCommand）+ 技能注册表（RuleModule 同款 名→factory），服务端校验冷却与资源。
-  2. 闪避 = `dodge` 输入意图 + `Invulnerable`（SoA 剩余 ms）+ 位移脉冲（服务端校验位移距离上限与 CD）；受击判定前置 Invulnerable 检查（demo hurtPlayer L180 的 invT 判定）。
-  3. 资源：新增通用 `Resource` 组件（或复用 Needs 模式），配置驱动上限/回复。
-- **单测**：冷却窗口拒绝、资源不足拒绝、无敌帧免疫伤害、位移上限校验、瞬态不入档。
+| 效果名 | 语义 |
+|--------|------|
+| `damage` | 对目标扣血：走 `computeStandardDamage` 同一公式（含防御 + 装备加成），致命发 gameEvents `killed` 事件 |
+| `heal` | 治疗（上限 Health.max） |
+| `spawn-projectile` | 从作用位置发射直线投射物（vx/vy/lifeMs/radius） |
+| `apply-status` | 给目标追加一条属性修饰符（状态的最小实现，见 3.4） |
+| `impulse` | 瞬时位移脉冲（dx/dy） |
+| `ledger` | 对目标账本 credit/debit（见 3.6） |
+| `spawn-entity` | 按原型名召唤实体（count/offset/mapId） |
 
-### G4 武器与攻击模式配置扩展
+- 消费方：timerSystem 到期触发、triggerSystem 命中求值、命令通道——统一入口 `applyEffectSpecs`。
 
-- **现状**：见基线表第四行。
-- **demo 参照**：武器字段集（dmg/rate/n/spread/speed/pierce/energy/crit/style/elem/explode…）+ 11 类 cat + 5 级稀有度；掉落权重随进度偏置（weapons.js roll L97-108）。
-- **实现方案**：ItemKindSchema.equip 扩展可选字段 `attack: { cooldownMs?, range?, projectile? }`、`category?`、`rarity?`（zod 校验，缺省行为与现状完全一致）；equipModifiers 聚合时纳入；掉落 rarity 偏置留到 G7 一并做。首期只做 G1 直线弹所需最小集。
-- **单测**：缺省配置行为与现状逐字节一致（schema 向后兼容）、新字段聚合进攻击数值、非法值抛错。
+### 3.3 定时器（`framework/simulation/timer/`）
 
-### G5 精英与难度缩放
+- AoS 组件（条目携带效果引用，SoA 表达不了）：`ExpiresAt`（一次性，绝对到期 tick）、`Interval`（周期 + 下次触发 + 剩余次数，负值无限）。
+- `timerSystem`：到期/到周期 → `applyEffectSpecs` → 发 `on-timer` 事件 → 清理；落后追帧单 tick 最多补 64 次防病态循环。
+- API：`setExpiresAt` / `setIntervalTimer` / `clearTimers`。
+- **瞬态**：worldSerializer 跳过清单，恢复后由效果/触发配置重建。
+- 注：`Duration` 组件仍零消费者（保留原组件不动，新定时能力独立实现）。
 
-- **现状**：见基线表第五行；离线补差与每 tick 补差共用同一 evolve 引擎，缩放天然继承。
-- **demo 参照**：make() 层缩放公式（enemies.js L51-68）：hpMul=(1+(floor-1)×0.42)×(elite?2.4:1)×(boss?1+(floor-1)×0.3:1)；dmgMul=(1+(floor-1)×0.2)×(elite?1.4:1)；精英掉落×2.2。demo 的"楼层"对应本框架的不同 map/region。
-- **实现方案**：EntityRule 增可选字段 `scale?: { hp?, damage?, speed? }`（固定乘区）与 `elite?: { chance: number, mult: { hp, damage } }`（按概率生成精英变体，实体加 elite 标记供展示/掉落区分）；engine 在生成时乘算，zod 校验。
-- **单测**：无新字段时与现状一致、scale 生效、elite 概率分布统计断言、同 seed 确定性。
+### 3.4 修饰符（`framework/simulation/modifiers/modifiers.ts`）
 
-### G6 房间战斗流程
+- `Modifiers` AoS：`statKey → ModifierEntry[]`（mul/add/bool 三型 + source + expiresTick）。
+- `computeStat(world, eid, statKey, base)`：`base × (1+Σmul) + Σadd`；bool 型条目取或（布尔语义 stat 优先）。
+- 过期条目惰性判定（读取路径过滤），不做主动清理。
+- 现有移动/战斗系统**暂未接入** computeStat（接线留配方切片）；当前消费方为 `apply-status` 效果与测试。
 
-- **现状**：见基线表第六行。
-- **demo 参照**：房间状态机 idle→fighting→clear（game.js startFight L231-246 / clearRoom L247-263）：进入有 spawns 的房间→关门（门格写 blocked）→生成→房内敌人清空→开门+奖励（金币、40% 宝箱、30% 红心；Boss 房掉传送门+大宝箱）。
-- **实现方案**：新增通用 gameplay 系统（如 roomFlowSystem）：
-  1. 触发：玩家进入标记为 combat 类的 region（依赖 map-system-design.md 提案 7 的 region meta.type；无该积木的图不启用，或用 climate-regions 的 region 配置做降级版）。
-  2. 封锁：按 region meta.doors 在门格生成临时障碍实体（或 collision 标记），离开即恢复。
-  3. 刷怪：对该 region 的 EntityRule 立即补足到 max（复用 evolve）或模板生成。
-  4. 清场：region 内敌对实体为 0 → 解锁 + 奖励掉落（复用 LootTable + spawnDroppedItem）+ 清场事件（供任务/统计扩展）。
-  - 多玩家语义（demo 是单机）：缺省取"同图玩家共享房间状态"，实现时显式写死并在文档注明。
-- **单测**：进入触发/离开重置、门格封锁生效、清场解锁、奖励数值、多人共享判定。
+### 3.5 触发器（`framework/simulation/triggers/`）
 
-### G7 货币与商店
+- `Triggers` AoS：`TriggerEntry = { trigger, effects[] }`，声明式挂载（`addTrigger`）。
+- `triggerRegistry`：7 个内建求值器（`on-timer`/`on-command`/`on-hit`/`on-contact`/`on-death`/`on-region-enter`/`on-region-clear`），统一「实体事件」实现：owner=载荷 eid、target=载荷 target（缺省 owner），效果列表经 effectRegistry 求值。
+- `triggerSystem`：固定阶段 `drainEvents` 消费事件总线 → 按事件名匹配 → 执行命中实体的效果列表。系统序 `after: ["timer"]`（同 tick 定时器事件可被消费）。
 
-- **现状**：见基线表第七行。
-- **demo 参照**：金币局内经济（敌掉/清房/宝箱），商店定价武器 40+rarity×14、遗物 85、治疗 35、祭坛 30（items.js interact）。
-- **实现方案**（最小实现）：
-  1. `Currency` AoS 组件（按 kind 计数，支持多种货币）+ 货币物品 kind（拾取入 Currency 而非背包）。
-  2. 交易走 dialogueSystem 效果扩展（buy/sell 效果，对话树即商店界面）——零新 UI 协议，任务/对话基建现成；备选 `trade` 命令（PlayerCommand 扩展）留作后续。
-- **单测**：货币增减原子性、余额不足拒绝、购买扣款+发货、货币不入背包。
+### 3.6 容器层（`framework/economy/container.ts` + `components/ledger.ts`）
 
-### G8 Boss 行为能力（BT 扩展）
+- 统一容器接口 `queryContainer` / `insertContainer` / `removeContainer`，两种实现：
+  - `"inventory"`：包装现有 InventoryEntry，insert 复用 `inventoryOps.addToInventory` 堆叠合并（maxStack 语义），remove 跨槽扣减；
+  - `"ledger"`：新 `Ledger` AoS 组件（kind → 数量，无容量上限，归零移除键），insert 直加、remove 余额校验。
+- 转移原语 `transferContainer` / `swapContainers`：**先全量校验后执行、失败整体回滚**（容器快照为回滚依据）；`snapshotContainer`/`restoreContainer` 供 settle 复用。
+- Ledger 随实体入档持久化；aosSyncAdapters 新增 Ledger 适配器（`Ledger.<kind>` 展平，fields 白名单 `"entries"`）；archetype 可配初始条目。
 
-- **现状**：见基线表第八行；Chase 无寻路，感知纯圆形半径。
-- **demo 参照**：3 个多阶段 Boss（enemies.js BOSSES L42-49）：acts 池随机选招（环形弹幕、召唤、冲撞、砸地、旋转激光、追踪导弹、布雷）；50% 血切 phase 2（速度×1.18、出招间隔×0.72、35% 连招）。
-- **实现方案**（全部走 BT 注册表，零 BT 引擎改动）：
-  1. 新动作：`windup`（前摇 N ms 后执行子动作 + telegraph 事件）、`shootRadial`（依赖 G1：n 发均分圆周）、`shootVolley`（扇形 n 发）、`summon`（按 template/原型在附近生成，数量上限）。
-  2. 新条件：`hpBelow`（阈值百分比，阶段切换）。
-  3. Boss = 普通实体 + 行为树配置（acts 池 = mistreevous 随机装饰器组合），数值走 G5 缩放。
-- **单测**：前摇期间不动、出招后进 CD、radial 弹数与角度、召唤数量上限、hpBelow 只触发一次阶段切换。
+### 3.7 交易（`framework/economy/settle.ts` + `offer.ts`）
 
-## 四、依赖关系与切片顺序
+- **L0 `settle(world, terms)`**：多方原子条款。`SettleTerms = SettlePartyTerms[]`，每方 `{ party, give?, take? }`（give/take 为 `{ container, kind, count }`）。流程：快照全部涉及容器 → 校验全部 give 足额 → 执行 give → 执行 take（剩余即容量不足）→ 任一失败整体回滚。支持任意方数，不做资产硬锁（同 tick 内先验后结）。
+- **L1 报价会话**：`openOffer`（无 Player 标签的方即时确认，confirmedParties 视为已确认，全确认即结算）/ `acceptOffer` / `cancelOffer` / `pruneExpiredOffers` / `getOffer`。会话挂 `world.offerSessions`（运行时状态不入档，重启即作废，与无锁语义一致）。
+- **命令接线**：PlayerCommand 新增 `offer` / `offer-accept` / `offer-cancel`（含 `offer` 条款、`offerId`、`ttlTicks`）；GameSimulation `submitCommand` 分发，发起方本人视为已确认；GameRoom.isPlayerCommand 浅校验（条款内容合法性由仿真层服务端权威校验）。命令成功时缓存 `on-command` 事件，下 tick beforeSystems 冲刷入总线供触发器消费。
+- 覆盖全部参与方组合：玩家↔玩家（双方确认）、NPC/系统↔玩家（非玩家方即时确认）、NPC↔NPC（创建即结算）、多方链式交换。
 
-- **G1 是地基**：G3（技能效果）、G8（弹幕 Boss）、G6（可选）都引用它。
-- **G2、G4、G5 独立**：可先行，成本低（G4/G5 纯配置扩展，G2 激活现成组件）。
-- **G6 依赖** map-system-design.md 提案 7 的 region 元数据（有降级路径）。
-- 建议切片顺序（每片独立可玩 + 测试同步）：**G2 → G4/G5 → G1 → G3 → G7 → G6 → G8**。
+### 3.8 投射物最小集 + 伤害公式抽取
 
-## 五、共同约定（玩法版）
+- `Projectile` SoA 组件（`components/projectile.ts`）：owner/vx/vy/lifeMs/radius。
+- `projectileSystem`（`systems/gameplay/projectileSystem.ts`）：tick 位移 → 目标格不可走（`walkableAt`，与 collisionSystem 同源）销毁 → 同图实体距离接触 → 发 `on-contact` 事件并销毁 → 寿命归零销毁。**命中只发事件，不接伤害闭环**（on-contact → damage 留配方切片）。系统序 `after: ["movement"]`。
+- `spawnProjectile` 生成原语：无 archetype 的框架通用实体（归属随主人地图，kind 通用名 `"projectile"`），瞬态不入档。
+- `computeStandardDamage(base, defense)` 纯函数（`systems/gameplay/damageFormula.ts`）：从 combatSystem.attackTarget 抽取共用，hitscan 与 damage 效果走同一数值路径（custom 公式 RuleModule 逻辑保留在 combatSystem 内）。
 
-- **铁律不变**：以上全部按通用机制进 `framework/`（投射物/状态效果/技能/缩放/流程），游戏名词（武器名/技能名/Boss 名）只出现在 `game/` 配置与 `src/register.ts` 注册参数。
-- **通用的接口、最小的实现**：每条提案的"第一步"都是最小集；demo 的全参数表是扩展目录，不是首期范围。
-- **服务端权威 + 确定性**：所有随机走框架 deriveStream（demo 战斗用 `Math.random` 是反面教材，不学）；客户端只发意图，表现（特效/音效）由客户端按事件自行渲染。
+### 3.9 接线汇总
+
+| 改动 | 位置 |
+|------|------|
+| 效果/触发器装配 | `framework/bootstrap.ts`（registerBuiltinEffects + registerBuiltinTriggers） |
+| 事件总线/报价会话挂载 | `framework/world.ts`（eventBus/offerSessions/nextOfferId） |
+| 帧首清空事件总线 | `framework/bootstrap/GameInstance.ts` |
+| 新组件注册 | `framework/components/registerBuiltin.ts`（Ledger/Projectile/Modifiers/Triggers/ExpiresAt/Interval + Ledger AoS initializer） |
+| 新系统注册 | `framework/systems/registerBuiltinSystems.ts`（projectile after movement；timer after quest；trigger after timer） |
+| 瞬态清单 | `framework/persistence/worldSerializer.ts`（+ExpiresAt/Interval/Projectile） |
+| 同步适配 | `framework/simulation/aosSyncAdapters.ts`（Ledger） |
+| 命令与事件 | `framework/simulation/GameSimulation.ts` + `framework/simulation/types.ts` + `framework/net/colyseus/rooms/GameRoom.ts` |
+| barrel 导出 | `framework/index.ts` |
+
+## 四、G1–G8 落地情况对照
+
+| 提案 | 状态 | 说明 |
+|------|------|------|
+| G1 投射物 | **部分** | 组件/系统/生成原语/on-contact 事件已落地；**PlayerInput 瞄准方向未动**（协议零改动，客户端 schema 副本无需同步）；on-contact → damage 伤害闭环未接 |
+| G2 状态效果 | **部分** | 以 `apply-status` 效果 + Modifiers + timerSystem 实现通用地基（减速/DoT/眩晕均可用配置表达）；现有移动/战斗系统**未接入 computeStat** |
+| G3 技能/闪避 | **未做** | 无 skill/dodge 命令、无 Invulnerable、无资源组件 |
+| G4 武器配置 | **未做** | ItemKindSchema 无 attack 字段（equip 仍为 attackBonus/defenseBonus/gatherMult） |
+| G5 精英缩放 | **未做** | EntityRule 无 scale/elite |
+| G6 房间流程 | **未做** | on-region-enter/clear 事件类型已预留，产生方未接线 |
+| G7 货币商店 | **地基** | ledger 效果 + settle 已构成经济地基；对话 buy/sell 效果、货币拾取入账未接 |
+| G8 Boss 行为 | **未做** | 无 windup/shootRadial/summon/hpBelow |
+
+## 五、实现与原设计的偏离
+
+1. **协议零改动**：原 G1 方案要求扩展 PlayerInput 瞄准方向——本阶段未动 PlayerInput（客户端 schema 副本无需同步）；命令新增走 PlayerCommand 消息（GameRoom 浅校验，非 schema 字段）。
+2. **伤害闭环后置**：投射物命中只发 on-contact 事件（配 on-contact 触发器即可闭环），不在系统内直接扣血——保持「事件驱动、配方组装」的一致性。
+3. **computeStat 未接入现有系统**：避免在无真实玩法需求时改动 movement/combat 的取值路径（接线留配方切片，`apply-status` 效果已可写修饰符）。
+4. **Duration 未激活**：新定时能力走 ExpiresAt/Interval，保留 Duration 原组件不动（其消费者仍为零）。
+5. **无资产硬锁**：offer 会话先验后结、重启即作废（会话表不入档）——与「服务端权威 + 确定性」一致，避免锁标志侵入所有容器操作。
+
+## 六、剩余切片顺序
+
+已落地地基之上，配方切片按依赖推进：
+
+1. **G1 收尾**：PlayerInput 加瞄准方向（唯一协议改动，客户端 schema 副本同步）+ on-contact 触发器 → damage 闭环 + 射速（Cooldown）
+2. **G4/G5**（纯配置扩展，成本低）：ItemKindSchema equip 扩展 attack/category/rarity；EntityRule scale/elite
+3. **G3**：skill/dodge 命令 + Invulnerable + 资源组件（依赖 1 的效果列表）
+4. **G7**：对话 buy/sell 效果（settle 即时确认即商店）+ 货币拾取入账（ledger）
+5. **G6**：on-region-enter/clear 产生方接线（依赖 slot-rooms region 元数据）+ 门格封锁 + 清场奖励
+6. **G8**：BT 新动作/条件（windup/shootRadial/summon/hpBelow），依赖 1 与 5
+
+## 七、共同约定（玩法版）
+
+- **铁律不变**：以上全部按通用机制进 `framework/`（投射物/状态效果/技能/缩放/流程），游戏名词只出现在 `game/` 配置与 `src/register.ts` 注册参数。
+- **通用的接口、最小的实现**：每个新能力的首期都是最小集；demo 的全参数表是扩展目录，不是首期范围。
+- **服务端权威 + 确定性**：所有随机走框架 deriveStream（demo 战斗用 `Math.random` 是反面教材，不学）；客户端只发意图，表现由客户端按事件自行渲染。
 - **数值单位对齐框架现状**（ms、格、像素）；demo 的帧单位（60FPS 假定）换算后再引用。
 - 每项配 vitest 单测（`framework/__tests__/`）；配置改动后 `pnpm tools validate`。
