@@ -1,4 +1,6 @@
-# 地图系统设计补充建议
+# 地图系统设计补充（已实现记录）
+
+> **状态**：本文档已与实现同步（提交 5c5f1d1；aux 槽位池见提交 b35dd1f），后续以代码为准。
 
 ## 一、背景
 
@@ -7,112 +9,169 @@
 当前地图系统分五层：
 
 - `geometry` — 不可变数据层：`tiles`（地形语义字节）、`walkable`（可通行位）、`regionOfTile`（区域索引）、`regions`（区域元数据），外加内容指纹 `version` 和 JSON 快照能力。
-- `generate` — 生成层：注册表 + 有序管道，每个积木拿到独立的确定性随机流和自有参数。
+- `generate` — 生成层：注册表 + 有序管道，每个积木拿到独立的确定性随机流和自有参数；积木间的非地理中间产物经 aux 槽位池传递（见第三节）。
 - `evolution` — 演化层：按实体规则往地图上补差生成实体。
 - `runtime` — 运行时编排：开机构建、出生点、时钟、离线补差。
 - 另有换图与导出。
 
-现有内置积木：噪声地形、气候区域、房间走廊、Tiled 导入。管道执行是**一次性线性**的：跑完所有生成积木就冻结。
+内置积木现为九个（`framework/map/generate/registerBuiltin.ts` 注册）：`noise-terrain`、`climate-regions`、`room-corridor`、`tiled-source`、`region-stats`、`smooth-terrain`、`height-channel`、`height-mask`、`slot-rooms`。管道执行仍是**一次性线性**：按声明顺序跑完所有积木即冻结，没有阶段概念。
 
-## 二、现状的不足
+## 二、当时的不足（已全部解决）
 
-1. **只有"生成"，没有"精修"**。生成完直接冻结，没有连通性整理、小区域剔除、平滑等收尾步骤。
-2. **只有单通道**。一份地图只能表达"每格一个地形语义字节"，放不下高度、湿度、生物群系等额外维度；而且首个积木初始化尺寸后，后续积木无法再叠加新的场。
-3. **区域统计没有统一约定**。区域元数据是一个自由字典，大小、质心、边界、形状指标等没有统一的派生规范。
-4. **管道只跑一遍**。没有"反复施加局部规则直到稳定"这种收敛语义，平滑/修正类逻辑无处安放。
-5. **校验只做结构**。只检查缓冲长度、区域索引越界等，不检查地图是否走得通、有没有不可达区域。
+本文档前身为设计提案，动机是以下五条不足，现均已落地：
 
-## 三、建议
+1. **只有"生成"，没有"精修"**。生成完直接冻结，没有连通性整理、小区域剔除、平滑等收尾步骤。→ 已由 `smooth-terrain`、`region-stats` 两个后处理积木解决（见 4.1、4.3、4.4；小区域剔除未实现）。
+2. **只有单通道**。一份地图只能表达"每格一个地形语义字节"，且首个积木初始化尺寸后，后续积木无法再叠加新的场。→ 已由 aux 槽位池解决（见第三节）。
+3. **区域统计没有统一约定**。→ 已由 `region-stats` 解决（见 4.3）。
+4. **管道只跑一遍**。→ 已按最小实现解决：收敛迭代放在积木内部（见 4.4），管道层未加控制结构。
+5. **校验只做结构**。→ 已由可通行连通性软告警解决（见 4.5）。
 
-### 1. 增加"生成后精修"阶段
-在生成积木之后、冻结之前，允许挂一组"精修/分析积木"，例如连通性整理、小区域剔除、局部平滑。
-**价值**：让"生成"和"打磨"职责分开，地图质量有地方收敛。
-**影响**：管道层新增阶段概念；现有配置不受影响。
-**实现方案**：不引入新的管道概念，精修积木就是普通积木，按顺序排在生成积木之后。新增积木放 `framework/map/generate/blocks/`（如 `smoothTerrain.ts`、`cullSmallRegions.ts`），导出 `MapGenerator` 签名的函数，在 `registerBuiltinMapGenerators` 里注册；配置侧在 `game/maps/registry.json` 的 `pipeline` 末尾追加步骤即可。如果希望配置上显式区分阶段，可给 `MapGenerationStep` 加可选 `stage?: "generate" | "refine"`，由管道执行器按阶段分组执行——属于可选增强，第一步可以不做。
+## 三、公共基础：aux 槽位池
 
-### 2. 引入辅助通道
-给地图草稿/几何数据增加可选的数据通道（如高度、湿度），并允许积木在已有草稿上继续写入，而不是被首个积木独占。
-**价值**：支持多场叠加，是更丰富地形（山地、河流、生物群系）的前提。
-**影响**：需同步修改快照、内容指纹、校验三处，属于较大的模型变更。
-**实现方案**：给 `GeometryDraft` 和 `MapGeometry` 各加可选通道字段（如 `height?: Float32Array`，长度 = width × height、行主序）。改动点固定为：`generate/types.ts`（草稿定义 + `createGeometryDraft`）、`geometry/types.ts`（冻结几何）、`pipeline.ts`（冻结时原样移交）、`snapshot.ts`（快照的序列化/反序列化，类型化数组 ↔ number[]）、`version.ts`（`computeGeometryVersion` 的规范化对象纳入通道）、`validate.ts`（长度校验）。通道分配约定：核心缓冲仍由首个积木分配，辅助通道由需要它的积木按需分配（`if (!draft.height) draft.height = new Float32Array(width * height)`），这样多个场可以叠加，而不必让首个积木独占整份草稿。旧存档缺字段按缺省处理（项目现行约定是旧存档直接废弃，不写兼容代码）。
+对应原提案 2（辅助通道）的落地形态（提交 b35dd1f）。原提案方案是给 `GeometryDraft` 与 `MapGeometry` 各加可选通道字段并同步修改快照、指纹、校验三处；实际**未采纳**，替换为"暂存池"形态：辅助数据不进冻结几何，`MapGeometry` 类型保持不变，三处改动随之不需要。
 
-### 3. 区域统计做成派生层
-为区域统一派生一组统计：大小、质心、边界、形状紧致度等，统一挂到区域元数据里。
-**价值**：后续出生点、生物群系、地形筛选都能直接复用，不必各自重算。
-**影响**：几何数据模型加一层约定，基本是增量。
-**实现方案**：不新增数据类型，复用 `RegionMeta.meta`（`Record<string, unknown>`）。新增一个精修积木（如 `compute-region-stats`），遍历一次 `regionOfTile`，累积每区域的格数、坐标和（质心）、包围盒、边界格数等，写回 `regions.get(name).meta`。注意 `meta` 参与 `computeGeometryVersion` 的规范化序列化，统计写入会让内容指纹变化，属预期。若想类型明确，可在 `geometry/types.ts` 定义 `RegionStats` 供积木与消费方引用，`meta` 仍保持自由字典。
+**落点**：`framework/map/generate/types.ts`。
 
-### 4. 有界收敛循环
-在管道中支持一种"重复施加直到稳定"的执行语义，并设置最大轮数上限。
-**价值**：平滑、连通性修正这类需要反复迭代的规则有标准的落点，同时避免死循环。
-**影响**：管道执行器新增一种控制结构。
-**实现方案**：先按最小实现，把迭代放在积木内部——例如 `smooth-terrain` 自己循环施加局部规则，参数带 `maxRounds`，某一轮没有变化就提前退出。这样不动管道和类型。若后续多个积木都需要收敛语义，再把 `MapGenerator` 返回类型从 `void` 扩展为 `void | boolean`（返回"本轮是否发生变更"，现有积木返回 `void` 视为 `false`，向后兼容），并在 `MapGenerationStep` 加 `repeat` 选项，由 `pipeline.ts` 负责循环到返回 `false` 或达到上限。
+- `GeometryDraft.aux: Map<string, unknown>` — 积木间结构化中间产物暂存池（`createGeometryDraft` 初始化为空池）。
+- `AuxSlot<T>` — branded 槽位键：`name` + `brand` 品牌字段，不同 `T` 的槽位在结构类型检查下互不兼容，跨槽写入编译期报错（运行时品牌字段不参与行为）。
+- `defineAuxSlot<T>(name)` 声明槽位常量；`setAux(draft, slot, value)` 写入（同槽覆盖旧值）；`getAux(draft, slot)` 读取（未写入返回 `undefined`）。
 
-### 5. 连通性与质量校验
-补一层软告警：检查可通行区域是否连通、是否存在不可达的孤立区域。
-**价值**：把"地图能不能正常游玩"变成可检测项，而不是靠人工看图。
-**影响**：校验层新增规则，不阻塞生成。
-**实现方案**：在 `validate.ts` 增加软告警（不抛错）：对 `walkable = 1` 的格做一次 BFS 连通域标记，统计连通域数量与最大连通域占比，存在多个连通域或占比过低时 `logger.warn`。连通性是结构属性、不依赖游戏语义，符合校验器"纯结构、软告警不阻断"的定位，且只读现有字段，不需要新数据。阈值可先硬编码，需要时再给 `validateMapGeometry` 加可选参数。
+**生命周期约定**：aux 仅存在于 `buildMapGeometry` 执行期——**冻结即弃**。防泄漏是结构性保证：`framework/map/generate/pipeline.ts` 冻结处显式挑字段构造 `MapGeometry`（key/grid/tiles/walkable/regions/regionOfTile/version），`aux` 不在其类型图上，因此天然不进快照、不参与内容指纹（`computeGeometryVersion`）与出口校验。
 
-### 6. noise-terrain 采样参数扩展（借鉴 gen-biome）
+**槽位约定**：名称格式 `"<积木名>.<产物>"`；框架不预置任何槽位，槽位常量由各积木自带导出，协作积木双方引用同一常量。当前两个：`HEIGHT_FIELD = "height-channel.field"`（`Float64Array`，见 4.2）、`SLOT_ROOMS = "slot-rooms.rooms"`（`SlotRoomInfo[]`，见 4.7）。
 
-来源：对同路线小型库 `gen-biome` v3.0.5（github.com/neki-dev/gen-biome，值噪声 fBm → 高度分带 → 群系数据）的源码分析。只借鉴其参数化设计与公式，不引入依赖、不改管道模型；以下参数全部为可选项，缺省行为与现状完全一致。
+**测试**：`framework/__tests__/map-generate-aux.test.ts`（生命周期与冻结无泄漏、branded 编译期隔离 `@ts-expect-error` 断言、写 aux 不改变内容指纹）；`framework/__tests__/map-aux-height-channel.test.ts`（管道串接后冻结产物无 aux 泄漏）。
 
-#### 6.1 falloff 径向衰减（岛屿/大陆掩膜）
-在 fBm 采样之后、分带量化之前，按"距边缘的归一化距离"衰减高度。gen-biome 的公式（分轴计算后相乘，四角衰减自然加倍）：`radius = 边长 / 2`，`distance = |radius - offset|`，`target = radius * (1 - falloff)`；`distance < target` 时不衰减，否则乘以 `1 - smootherstep((distance - target) / (radius * falloff))`，其中 `smootherstep(x) = 3x² - 2x³`。
-**价值**：island 图现在的"岛"来自把低噪声带设为不可通行（`bandLevel=0.35` + `nonWalkableSemantics`），地形高度本身不向边缘沉降；falloff 让岛屿/大陆形态成为显式生成参数，海湾、半岛等地貌可稳定出现。
-**影响**：仅 `noise-terrain` 积木内部新增一个可选参数分支，不动管道与数据模型；现有配置不受影响。
-**实现方案**：新增可选参数 `falloff?: number`，入口校验 `0 ≤ falloff ≤ 0.9`（上限对齐 gen-biome），缺省 0 = 现状；应用点在 `sampleFbm` 返回后、band 扫描前；非法值抛错（fail-fast，不做静默 clamp）。参考实现：gen-biome `src/utils/perlin/index.ts:79-83, 104-122`。
-**单测**：缺省时输出与现状逐字节一致；`falloff > 0` 时边缘/四角采样值统计上低于中心；同 seed 确定性不变。
+## 四、已实现能力
 
-#### 6.2 redistribution 高度曲线整形
-分带前对采样值做指数重映射 `level **= exponent`。gen-biome 的 `heightRedistribution ∈ [0.5, 1.5]` 实测效果：0.5 时水域占比约 73%、1.5 时约 14%（默认 1.0 约 52%）。
-**价值**：现在调整水域/陆地占比必须重排 `groundPalette` 全部阈值；一个指数参数即可整体平移占比，色表回归"语义切分"的单一职责。
-**影响**：同 6.1，积木内参数分支；与 falloff 叠加时先 redistribution 后 falloff（与 gen-biome 顺序一致）。
-**实现方案**：新增可选参数 `redistribution?: number`，入口校验 `[0.5, 1.5]`，缺省 1.0 = 现状；越界抛错。
-**单测**：缺省一致；0.5 / 1.5 分别显著提高 / 降低最低带覆盖率；确定性。
+### 4.1 生成后精修积木（原提案 1）
 
-#### 6.3 octaves / baseCellTiles 可配置化
-把 `noiseTerrain.ts` 的常量 `OCTAVES = 4`、`BASE_CELL_TILES = 8` 暴露为可选参数（`GAIN = 0.5` 维持常量，对齐 gen-biome 同样固定 persistence）。gen-biome 的对应设计：倍频数 1–15（`borderSmoothness`，值越大边界越平滑）、基频以"整图格数"表达（1–32，`frequencyChange`，与地图分辨率无关）。
-**价值**：不同尺寸/风格的地图可调噪声粒度与细节量（大图提高 octaves 保留细节，小图降低 octaves 避免碎斑），不必改框架代码。
-**影响**：晶格构建按 `cell = baseCellTiles / 2^o` 递推，现逻辑不变、仅常量参数化；配置侧为可选字段。
-**实现方案**：新增可选参数 `octaves?: number ∈ [1, 8]`（缺省 4）、`baseCellTiles?: number ∈ [2, 64]`（缺省 8）；入口校验抛错。
-**单测**：缺省与现状一致；`octaves: 1` 单层输出；越界参数抛错路径；确定性。
+不引入管道阶段概念，精修积木就是普通积木，按顺序排在生成积木之后，配置侧在 `game/maps/registry.json` 的 `pipeline` 末尾追加步骤即可。原提案的可选增强 `stage?: "generate" | "refine"` 未实现（无真实需求牵引）；示例中的小区域剔除积木也未实现。已落地的精修/分析积木：
 
-#### 6.4 分析后不采纳的部分（记录结论，避免重复调研）
+- `smooth-terrain`（地形平滑，见 4.4）— `framework/map/generate/blocks/smoothTerrain.ts`；
+- `region-stats`（区域统计，见 4.3）— `framework/map/generate/blocks/regionStats.ts`。
+
+### 4.2 辅助通道积木 height-channel / height-mask（原提案 2 的验证实现）
+
+多场叠加能力的验证对：生产者在 aux 写入 height 场，消费者读 aux 落回地理缓冲。注册名 `height-channel` / `height-mask`。
+
+**height-channel**（`framework/map/generate/blocks/heightChannel.ts`）：
+
+- 向 aux 槽位 `HEIGHT_FIELD` 写入 height 场（`Float64Array`，行主序，长度 = width × height，值 ∈ [0, 1)）：单层值噪声生成，晶格随机值取自本步骤派生流，双线性 + smoothstep 插值采样，同 seed 同 params 确定复现。
+- 参数：`cell?: number`（晶格间距 tile 数，正数，缺省 8，非正数抛错）。
+- 只写 aux、不动 tiles/walkable/regions；要求草稿已定尺寸（sizing 积木先行，否则抛错）。
+
+**height-mask**（`framework/map/generate/blocks/heightMask.ts`）：
+
+- 参数：`mode: "mask" | "stats"`（必填，非法值抛错）；`minLevel?/maxLevel?`（∈ [0, 1]，缺省 0/1，须 min ≤ max 否则抛错）。
+- `mode: "mask"`：按高度闭区间重写 walkable — 场值 ∈ [minLevel, maxLevel] → 1，否则 0。
+- `mode: "stats"`：按 regionOfTile 汇总每有覆盖区域的平均高度，写入 `RegionMeta.meta.averageHeight`。
+- 上游依赖 fail-fast：aux 无 height 场或长度不符即抛错（点名依赖的 `height-channel`）。
+
+**测试**：`framework/__tests__/map-aux-height-channel.test.ts`（场形态与确定性、mask/stats 行为、上游缺失抛错、管道串接与无 aux 泄漏）。
+
+### 4.3 区域统计 region-stats（原提案 3）
+
+**落点**：`framework/map/generate/blocks/regionStats.ts`，注册名 `region-stats`。未新增数据类型：统计直接写入各区域 `RegionMeta.meta`（自由字典），随冻结带入 `MapGeometry` 并参与内容指纹（统计写入改变指纹，属预期）。
+
+单次遍历 `regionOfTile`，为每个**有覆盖**的区域写（坐标均为 tile 坐标）：
+
+- `meta.area` — 区域格数（number）；
+- `meta.centroid` — `[cx, cy]` 格坐标均值（浮点）；
+- `meta.bounds` — `{ minX, minY, maxX, maxY }` 最小包围盒（含端点）。
+
+参数：`metrics?: ("area" | "centroid" | "bounds")[]` — 缺省三项全写；提供时须为非空数组、条目全部合法（未知项抛错），重复条目去重。零覆盖区域跳过（不写任何统计键）；meta 同名旧键被覆盖。要求草稿已定尺寸且 regionOfTile 索引合法（否则抛错）。
+
+**测试**：`framework/__tests__/map-block-region-stats.test.ts`（三项数值正确性、metrics 筛选、零覆盖跳过、旧键覆盖、参数校验）。
+
+### 4.4 有界收敛循环（原提案 4）
+
+按原提案的最小实现：迭代放在积木内部，管道与类型未动（`MapGenerator` 仍返回 `void`，无 `repeat` 选项，管道级收敛语义未实现）。
+
+**落点**：`framework/map/generate/blocks/smoothTerrain.ts`，注册名 `smooth-terrain`。局部多数平滑：
+
+- 每轮对每格统计「自身 + 4-邻域」共 5 格的语义众数，最高频语义（并列取语义 id 最小，保证确定性）出现次数严格大于自身语义次数时改写该格；double-buffer 同步更新（整轮基于同一快照）。
+- 定点收敛：`maxRounds?: number`（整数 ≥ 0，缺省 8）为轮数上限，某轮零变更即提前退出；输出恒为平滑算子不动点或恰好 maxRounds 轮后的状态（有界，不依赖收敛性）。
+- `nonWalkableSemantics?: number[]`：提供时平滑结束后按最终 tiles 重派生 walkable（∈ 集合 → 0，否则 1），保证语义 → 通行一致；不提供时 walkable 原样保留。
+- 导出 `smoothRound(tiles, width, height)` 纯函数（单轮算子，返回 `[新缓冲, 变更格数]`）。
+
+**测试**：`framework/__tests__/map-block-smooth-terrain.test.ts`（单轮算子行为与平局规则、不动点、maxRounds 截断与 `maxRounds=0`、缺省 = 8、重派生、管道接入）。
+
+### 4.5 可通行连通性软告警（原提案 5）
+
+**落点**：`framework/map/generate/validate.ts`。对 `walkable = 1` 格做 4-邻接 BFS 连通域标记（`walkableDomains`，模块私有，返回 [域数, 最大域格数]）：
+
+- 无可通行格（walkable 全 0）→ 软告警；
+- **存在多个连通域且最大域占比低于阈值** → 软告警（消息含域数与最大域占比百分比）；
+- 阈值经 `ConnectivityCheckOptions.minMainDomainShare`（∈ [0, 1]）可配置，缺省为导出常量 `DEFAULT_MIN_MAIN_DOMAIN_SHARE = 0.9`；设为 1.0 退化为"多域即告警"。
+
+`validateMapGeometry(input, options?)` 返回全部软告警消息列表（供调用方测试/上报），日志照常逐条 `logger.warn`（scope `"build-map"`）；结构硬错误照旧抛错。管道执行器 `buildMapGeometry` 调用时恒用缺省阈值。与原提案告警条件的差异及原因见第五节 1。
+
+**测试**：`framework/__tests__/map-validate-connectivity.test.ts`（单域无告警、多域告警不抛错、阈值上下两种行为、全图不可通行、软告警不影响硬错误路径、冻结几何同样适用）。
+
+### 4.6 noise-terrain 采样参数（原提案 6，借鉴 gen-biome 的参数化设计）
+
+**落点**：`framework/map/generate/blocks/noiseTerrain.ts`（注册名 `noise-terrain` 不变）。四个可选参数全部在积木入口 fail-fast 校验（越界/类型错误抛错点名参数，不 clamp）；**缺省行为与旧版逐位一致**（缺省 = 现状）：
+
+| 参数 | 取值范围 | 缺省 | 作用 |
+|------|---------|------|------|
+| `falloff` | number ∈ [0, 0.9] | 0 = 关闭 | 径向掩膜：采样值按距边缘的归一化距离衰减 |
+| `redistribution` | number ∈ [0.5, 1.5] | 1 = 现状 | 分带前指数重映射 `level = level ** exponent`，整体平移各带覆盖率（调整占比不必重排 `groundPalette`） |
+| `octaves` | integer ∈ [1, 8] | 4 | fBm 叠加层数 |
+| `baseCellTiles` | integer ∈ [2, 64] | 8 | 基频晶格间距（tile 数，逐层减半） |
+
+应用顺序：fBm 采样后先 `redistribution` 后 `falloff`，再进入 band 扫描——不影响 `bandLevel` / `groundPalette` 的既有校验语义。`GAIN = 0.5` 维持固定常量。
+
+falloff 实现：`d = 最近边距 / (短边之半)`（边缘 0、中心 1）的**单值径向掩膜**——`d ≤ 1 − falloff` 的内圈不衰减，越靠外经五次 smootherstep（`6d⁵ − 15d⁴ + 10d³`）平滑趋零；四角不额外加倍衰减。与原提案引用的 gen-biome 公式的差异及原因见第五节 2。
+
+**测试**：`framework/__tests__/map-block-noise-terrain.test.ts`（缺省与显式缺省值逐位一致、恒值场精确断言、真实随机场统计断言、同 seed 确定性、越界抛错）。
+
+### 4.7 slot-rooms 槽位房间布局（原提案 7，借鉴 demo-e7ae1909 的布局算法）
+
+**落点**：`framework/map/generate/blocks/slotRooms.ts`，注册名 `slot-rooms`。
+
+**sizing 首积木**：整图尺寸由槽位网格决定（width = `slotsX × cellW`，height = `slotsY × cellH`），本积木必须是管道首积木（草稿已初始化即抛错）；tiles 全部初始化为 `solidTile`、walkable 全 0。与原提案的差异见第五节 3。
+
+**结构**（连通性由构造保证：主路径顺序连走廊 + 支线连源房；房间互不重叠由槽位划分 + 房尺寸 ≤ 槽尺寸 − 1 的校验保证）：
+
+- **主路径**：从左缘随机行出发的随机游走，每步向右（权重 2）或上/下、从不向左，到达右缘结束——主路径房间数恒 = slotsX，类型依次 `path-first` → `path-mid`… → `path-last`（末房用固定大尺寸 `lastRoomW × lastRoomH`，首中段房尺寸在 [roomMin*, roomMax*] 随机、槽内居中）。
+- **支线**：至多 `branchCount` 次尝试，从主路径中段房间（不含首尾）向四方向空槽挂出，类型从 `roomTypes.branch` 序列循环取用（slotsX < 3 时无支线）。
+- **走廊**：主路径相邻房间之间、支线房与源房之间连 L 形走廊（中心到中心，先横/先竖随机），厚 `corridorWidth`（向左/上偏移居中），走廊格归属出发房区域；已是地板的格（走廊穿越其他房间）保持原区域归属。
+- **区域与元数据**：每房一个 region（名 `"<type>#<序号>"`，插入序 = 主路径序 → 支线序），未雕挖格归属末尾的 `"walls"` 结构区域（导出常量 `WALLS_REGION`）；每房 meta = `{ center: [px, py], halfW, halfH, doors: [[tx, ty]...], type }`（中心/半宽为像素；门 = 房间外环一 ring 的 walkable 连续段取中位格）。
+- **aux 导出**：房间矩形列表 `SlotRoomInfo[]`（x/y/width/height/slotX/slotY/type/regionIndex）经槽位 `SLOT_ROOMS` 供下游积木消费（仅管道执行期，冻结丢弃）。
+
+**参数**（全部 fail-fast 校验，越界抛错点名参数）：
+
+| 参数 | 约束 | 缺省 |
+|------|------|------|
+| `slotsX` / `slotsY` | 整数 ≥ 2 | 5 / 4 |
+| `cellW` / `cellH` | 整数 ≥ 2 | 15 / 12 |
+| `roomMinW` / `roomMinH` | 整数 ≥ 1 | 9 / 7 |
+| `roomMaxW` / `roomMaxH` | 整数 ∈ [roomMin*, cell*−1] | min(11, cellW−1) / min(9, cellH−1) |
+| `lastRoomW` / `lastRoomH` | 整数 ∈ [1, cell*−1] | 11 / 9 |
+| `corridorWidth` | 整数 ≥ 1 | 3 |
+| `branchCount` | 整数 ∈ [0, 4] | 3 |
+| `roomTypes` | `{ pathFirst?, pathLast?, pathMid?, branch?: string[] }`，非空字符串（数组） | 输出结构类型名本身 |
+| `floorTile` / `solidTile` | [0, 255] 整数且不相等（必填） | — |
+| `tileWidth` / `tileHeight` | 正数（必填） | — |
+
+结构类型名（`path-first`/`path-mid`/`path-last`/`branch`）是纯结构描述；语义命名由配置 `roomTypes` 传入，框架不解释字符串内容（framework 无游戏语义铁律）。与 demo 的其余差异：随机性沿用框架 `deriveStream`（xmur3 + mulberry32，seed + 步骤序号），未引入 demo 的 LCG；demo 把敌人/商店/掉落硬编码进生成器的做法不采纳——积木只产出 tiles + region + meta，内容填充留给 evolution EntityRule（region 过滤已支持）。
+
+**测试**：`framework/__tests__/map-block-slot-rooms.test.ts`（同 seed 逐位一致、尺寸换算与全参数化、房间不重叠、连通域 = 1 的 BFS 断言、meta 齐全、roomTypes 映射、参数越界与非首积木抛错）；`framework/__tests__/map-block-register.test.ts`（`slot-rooms → smooth-terrain → region-stats` 组合管道端到端）。
+
+## 五、实现与原设计的差异
+
+1. **连通性告警条件**（4.5）：原提案为"存在多个连通域**或**占比过低"；实现为"多域**且**最大域占比 < 阈值"（`minMainDomainShare` 可配置，缺省 0.9，设 1.0 退化回"多域即告警"）。原因：正常噪声图常有大湖/海湾造成的孤立可通行域，"多域即告警"会在正常图上持续刷告警，失去信号价值。
+2. **falloff 公式**（4.6）：原提案引用 gen-biome 的分轴计算后相乘（四角衰减自然加倍）与三次曲线（原文将其记作 smootherstep，实为 smoothstep）；实现为"最近边距 / 短边之半"的单值径向掩膜 + 五次 smootherstep（`6d⁵ − 15d⁴ + 10d³`，两端导数为零）。原因：单值径向语义更直（衰减强度只取决于距最近边缘的距离）且实现更简单；五次曲线边缘过渡更平滑。
+3. **slot-rooms 尺寸归属与命名**（4.7）：原提案未指定整图尺寸来源（沿用"首个积木定尺寸"的既有约定但未挑明）；实现为 **sizing 首积木**（整图尺寸 = 槽位网格换算，必须是管道首积木）。demo 的 `boss`/`start` 等游戏词改为结构类型名 `path-first`/`path-mid`/`path-last`，参数 `bossRoomW/H` 相应改名 `lastRoomW/lastRoomH`（首房无独立尺寸参数，用 `roomMin*/roomMax*` 随机区间）；结构类型名只输出结构描述，语义命名经配置 `roomTypes` 传入——framework 无游戏语义铁律。
+
+## 六、gen-biome 调研不采纳记录（历史结论，避免重复调研）
+
 - **高度分带优先级**（gen-biome 的 peakBiome 插入序首匹配 + 双闭区间）：`groundPalette` 的严格校验（`bandLevel` = 最低带界、末位 = 1、错配抛错）优于 gen-biome 的静默空洞（群系不覆盖 [0,1] 时矩阵留下 undefined 洞），维持现状。
 - **种子数组 + offsetX/offsetY 的 chunk 采样**：框架是固定尺寸、开机全图构建并冻结的模型，无限地图不在范围；未来若做 chunk 化再评估。
-- **连通性整理、精修、收敛循环、区域统计**：gen-biome 无对应物，仍按本文件提案 1–5 执行。
+- **连通性整理、精修、收敛循环、区域统计**：gen-biome 无对应物，已按本文第三节、4.1–4.5 落地。
 - **反面印证**：gen-biome 的 `replaceAt` 无边界检查、参数静默 clamp、逐像素配置分配、零测试——与框架现行约定（不可变几何、fail-fast 校验、单测覆盖）方向一致，无需改动。
-
-### 7. slot-rooms 槽位房间布局积木（借鉴 demo-e7ae1909）
-
-来源：对同路线纯前端地牢 roguelike `demo-e7ae1909`（`js/dungeon.js:33-182`）的源码分析。其布局算法：固定槽位网格上的随机游走主路径 + 支线挂接，连通性由构造保证。
-
-#### 7.1 demo 算法要点
-- 5×4 槽位网格，每槽 15×12 tile，整图 75×48 tile；房间居中于槽位（普通 9-11×7-9，Boss 房 11×9），天然互不重叠。
-- 主路径：从左缘随机行出发，每步向右（权重 2）/上/下，从不向左，到达右缘结束；路径房间依次标记 start → combat… → boss。
-- 支线：最多 3 次尝试，从主路径中段房间（不含首尾）四向挂出，类型从 treasure/shop/shrine 洗牌后循环取（每种至多 1 个）。
-- 走廊：相邻路径房、支线与源房的中心之间连 L 型走廊，宽 3 tile；墙体 = 一次八邻接 pass（非地板且邻地板变墙）；门 = 房间边界外一圈紧贴的地板格按方向合并成组。
-- 精修：完全没有——无连通性整理、无小区域剔除、无平滑、无死胡同处理（支线房本身就是有意的死胡同）；连通性由"路径顺序连走廊 + 支线连源房"的构造保证。
-
-#### 7.2 价值
-与 room-corridor（自由挖房 + union-find 连通）互补的第二种布局风格：房间图结构确定、连通性由构造保证、每房产出结构化元数据（中心像素、门格列表、结构类型），后续出生点选择、演化刷怪（region 过滤）、传送门落点、房间级 gameplay 流程都能直接消费，不必各自重算。
-
-#### 7.3 实现方案
-- 新积木 `framework/map/generate/blocks/slotRooms.ts`，导出 `MapGenerator` 签名函数，在 `registerBuiltinMapGenerators` 注册；不新增管道概念，参数全走可选 params，缺省对齐 demo 值：
-  - `slotsX?/slotsY?`（缺省 5/4，校验 ≥2）、`cellW?/cellH?`（缺省 15/12）、`roomMinW/roomMinH/roomMaxW/roomMaxH?`（缺省 9/7/11/9）、`bossRoomW/bossRoomH?`（缺省 11/9）、`corridorWidth?`（缺省 3，即 2w+1）、`branchCount?`（缺省 3，校验 ≤4）。
-  - `roomTypes?: { pathFirst, pathLast, pathMid, branch: string[] }`——结构类型到语义名的映射，**缺省输出结构类型本身**（`path-first`/`path-last`/`path-mid`/`branch`）；demo 的 start/combat/boss/treasure/shop/shrine 属游戏语义，只能出现在 `game/maps/registry.json` 的配置里。
-- 铁律对齐（与 demo 的关键差异）：demo 把敌人表/商店货/掉落硬编码进生成器（gen 期间直接调 `tableFor`/`roll`/`drop` 写全局数组），本框架不学——积木只产出 tiles + 每房一个 region（`regions` Map 插入序 = 房间序）+ region meta（`{ center: [px,py], halfW, halfH, doors: [[tx,ty]...], type: string }`）；内容填充全部留给 evolution EntityRule（region 过滤已支持）。
-- 随机性沿用框架现有 xmur3 + mulberry32 的 `deriveStream`（seed + 步骤序号），**不引入 demo 的 LCG**（1664525/1013904223，仅单 32 位状态，质量低于现有实现）；demo 每层 `seed + floor*7919` 的派生思路与 `deriveStream` 等价，已覆盖。
-- 参数入口 fail-fast 校验（越界抛错，不做静默 clamp）；写入草稿后由 pipeline 统一冻结，积木自身不做结构校验。
-- **单测**（`framework/__tests__/map-block-slot-rooms.test.ts`）：同 seed 确定性（两次生成逐字节一致）；房间两两不重叠；连通域数 = 1（构造保证，BFS 断言）；门格均为地板且八邻接某个房间外圈；region meta 字段完整且中心在房间内；参数越界抛错路径。
-
-#### 7.4 与本文其他提案的关系
-- **不替代提案 5（连通性校验）**：槽位布局虽构造连通，但与噪声地形等其他积木组合、或后续精修积木介入后，仍可能产生孤立区域；软告警校验照常生效，两者互补。
-- 属**生成积木**，与提案 1（精修阶段）正交；与提案 3（区域统计）叠加后，房间 region 可额外获得大小/质心等派生统计。
-- gameplay 侧的配套（房间战斗流程、按房间类型刷怪）不在本文件范围，见 `docs/gameplay-features-design.md`。
 
 ---
 
-**共同约定**：新积木遵守框架现有约定——不含游戏专属语义、参数在积木入口自行校验、每个积木配单测（`framework/__tests__/map-block-*.test.ts`）；配置改动后用 `pnpm tools validate` 校验。
+**共同约定**：生成积木遵守框架现有约定——不含游戏专属语义、参数在积木入口自行校验（fail-fast，不做静默 clamp）、每个积木配单测（`framework/__tests__/map-block-*.test.ts`）；配置改动后用 `pnpm tools validate` 校验，`pnpm tools list-registries` 可查看当前注册积木。
