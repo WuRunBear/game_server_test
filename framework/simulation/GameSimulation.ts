@@ -31,6 +31,8 @@ import type { Repository, WorldRecord } from "framework/repository";
 import type { ServerRule } from "framework/config/schema/RuleSchema";
 import { computeInterest } from "./interest";
 import { createInputGuard, type InputGuard } from "./inputValidation";
+import { openOffer, acceptOffer, cancelOffer } from "framework/economy/offer";
+import { queueEvent } from "framework/simulation/events/eventBus";
 import { createLogger } from "framework/utils/logger";
 
 /** 装配期日志器（world.logger 尚不可用的开机阶段使用）。 */
@@ -150,6 +152,9 @@ export class GameSimulation implements SimulationPort {
   /** 地图 key → 生成配置（演化钩子按图取 seed）。 */
   private mapConfigsByKey = new Map<string, MapConfig>();
 
+  /** 待冲刷的 on-command 事件缓存（submitCommand 间期产生，下一 tick beforeSystems 入队）。 */
+  private pendingCommandEvents: { eid: number; type: string }[] = [];
+
   /**
    * 创建仿真实例。
    *
@@ -196,7 +201,24 @@ export class GameSimulation implements SimulationPort {
 
     // 演化钩子：每 tick 对全部激活图按 (tick-1, tick] 跨度补差（常驻语义 D13）。
     // 注入位置见 GameInstance.beforeSystems——位于 tick 自增与系统拓扑序之间。
-    this.instance.beforeSystems = () => this.evolveActiveMaps();
+    // 命令事件冲刷在同一钩子先行：submitCommand 产生的 on-command 事件在
+    // 帧首事件总线清空**之后**入队，供同 tick 的 trigger 阶段消费。
+    this.instance.beforeSystems = () => {
+      this.flushPendingCommandEvents();
+      this.evolveActiveMaps();
+    };
+  }
+
+  /**
+   * 冲刷待发命令事件：把 submitCommand 间期缓存的 on-command 事件
+   * 注入类型化事件总线（触发器在同一 tick 的固定阶段消费）。
+   */
+  private flushPendingCommandEvents(): void {
+    if (this.pendingCommandEvents.length === 0) return;
+    for (const evt of this.pendingCommandEvents) {
+      queueEvent(this.world, "on-command", evt);
+    }
+    this.pendingCommandEvents = [];
   }
 
   /**
@@ -454,29 +476,61 @@ export class GameSimulation implements SimulationPort {
 
     switch (command.type) {
       case "consume":
-        return consumeSlot(this.world, eid, command.slot ?? -1);
+        return this.finishCommand(eid, command.type, consumeSlot(this.world, eid, command.slot ?? -1));
       case "drop":
-        return dropSlot(this.world, eid, command.slot ?? -1);
+        return this.finishCommand(eid, command.type, dropSlot(this.world, eid, command.slot ?? -1));
       case "transfer":
-        return transferSlot(
-          Inventory[eid]!,
-          command.slot ?? -1,
-          command.toSlot ?? -1,
-          (kind) => this.world.gameDef.itemsByKind?.get(kind)?.maxStack ?? 1,
+        return this.finishCommand(
+          eid,
+          command.type,
+          transferSlot(
+            Inventory[eid]!,
+            command.slot ?? -1,
+            command.toSlot ?? -1,
+            (kind) => this.world.gameDef.itemsByKind?.get(kind)?.maxStack ?? 1,
+          ),
         );
       case "equip":
-        return equipSlot(this.world, eid, command.slot ?? -1);
+        return this.finishCommand(eid, command.type, equipSlot(this.world, eid, command.slot ?? -1));
       case "craft":
-        return craftRecipe(this.world, eid, command.recipe ?? "");
+        return this.finishCommand(eid, command.type, craftRecipe(this.world, eid, command.recipe ?? ""));
       case "place":
-        return placeEntity(this.world, eid, command.slot ?? -1, command.x ?? 0, command.y ?? 0);
+        return this.finishCommand(eid, command.type, placeEntity(this.world, eid, command.slot ?? -1, command.x ?? 0, command.y ?? 0));
       case "deconstruct":
-        return deconstructEntity(this.world, eid, command.target ?? -1);
+        return this.finishCommand(eid, command.type, deconstructEntity(this.world, eid, command.target ?? -1));
       case "dialogue":
-        return advanceDialogue(this.world, eid, command.option ?? -1);
+        return this.finishCommand(eid, command.type, advanceDialogue(this.world, eid, command.option ?? -1));
+      case "offer": {
+        if (!command.offer) return false;
+        const expiresTick =
+          command.ttlTicks !== undefined && command.ttlTicks > 0
+            ? this.world.time.tick + command.ttlTicks
+            : undefined;
+        // 发起方本人视为已确认；无玩家方即时成立（openOffer 语义）
+        const offerId = openOffer(this.world, command.offer, {
+          confirmedParties: [eid],
+          expiresTick,
+        });
+        return this.finishCommand(eid, command.type, offerId !== null);
+      }
+      case "offer-accept":
+        return this.finishCommand(eid, command.type, acceptOffer(this.world, eid, command.offerId ?? -1));
+      case "offer-cancel":
+        return this.finishCommand(eid, command.type, cancelOffer(this.world, eid, command.offerId ?? -1));
       default:
         return false;
     }
+  }
+
+  /**
+   * 命令收尾：成功时缓存一条 on-command 事件（下一 tick beforeSystems 冲刷
+   * 进事件总线，供 on-command 触发器消费），并透传命令结果。
+   */
+  private finishCommand(eid: number, type: string, success: boolean): boolean {
+    if (success) {
+      this.pendingCommandEvents.push({ eid, type });
+    }
+    return success;
   }
 
   /**

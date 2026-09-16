@@ -21,6 +21,9 @@ import { createQuestSystem } from "framework/systems/gameplay/questSystem";
 
 import { setDefaultActionRegistry } from "framework/ai/btFactory";
 import { registerBuiltinActions } from "framework/ai/registerBuiltinActions";
+import { timerSystem } from "framework/simulation/timer/timerSystem";
+import { triggerSystem } from "framework/simulation/triggers/triggerSystem";
+import { projectileSystem } from "framework/systems/gameplay/projectileSystem";
 
 export function registerBuiltinSystems(
   systemRegistry: SystemRegistry,
@@ -122,5 +125,26 @@ export function registerBuiltinSystems(
     id: "quest",
     factory: (_world: GameWorld) => createQuestSystem(),
     after: ["respawn"],
+  });
+
+  // 投射物：直线运动 + 墙阻挡 + 接触事件（命中闭环留配方切片）
+  systemRegistry.register({
+    id: "projectile",
+    factory: (_world: GameWorld) => projectileSystem,
+    after: ["movement"],
+  });
+
+  // 定时器：到期/到周期触发效果引用并清理（先于 trigger，同 tick 事件可被消费）
+  systemRegistry.register({
+    id: "timer",
+    factory: (_world: GameWorld) => timerSystem,
+    after: ["quest"],
+  });
+
+  // 触发器：固定阶段消费事件总线，求值实体 Triggers 声明的效果列表
+  systemRegistry.register({
+    id: "trigger",
+    factory: (_world: GameWorld) => triggerSystem,
+    after: ["timer"],
   });
 }

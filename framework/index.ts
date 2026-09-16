@@ -38,6 +38,60 @@ export { registerAosSyncAdapter, getAosSyncAdapter, type AosSyncAdapter, type Ao
 export { computeInterest } from "framework/simulation/interest";
 export { createInputGuard, type InputGuard } from "framework/simulation/inputValidation";
 
+// 类型化事件总线（tick 内排队、固定阶段消费）
+export {
+  queueEvent, subscribeEvent, drainEvents, dispatchEvents,
+  type QueuedEvent, type TypedEventPayloads, type TypedEventName, type EventHandler,
+} from "framework/simulation/events/eventBus";
+
+// 效果系统（注册表 + 内置效果）
+export {
+  registerEffect, getEffect, hasEffect, listEffects, applyEffectSpecs, positionOfEntity,
+  type EffectContext, type EffectExecutor, type EffectSpec,
+} from "framework/simulation/effects/effectRegistry";
+export { registerBuiltinEffects } from "framework/simulation/effects/builtinEffects";
+
+// 定时器（AoS 组件 + 系统）
+export {
+  ExpiresAt, Interval, setExpiresAt, setIntervalTimer, clearTimers,
+  type ExpiresAtEntry, type IntervalEntry,
+} from "framework/simulation/timer/timer";
+export { timerSystem } from "framework/simulation/timer/timerSystem";
+
+// 修饰符（AoS 组件 + 属性合成）
+export { Modifiers, addModifier, computeStat, type ModifierEntry, type ModifierSet } from "framework/simulation/modifiers/modifiers";
+
+// 触发器（AoS 组件 + 注册表 + 系统）
+export { Triggers, addTrigger, type TriggerEntry } from "framework/simulation/triggers/triggers";
+export {
+  registerTrigger, getTrigger, hasTrigger, listTriggers, registerBuiltinTriggers,
+  type TriggerContext, type TriggerEvaluator,
+} from "framework/simulation/triggers/triggerRegistry";
+export { triggerSystem } from "framework/simulation/triggers/triggerSystem";
+
+// 容器层（统一容器接口 + 转移原语）
+export {
+  queryContainer, insertContainer, removeContainer,
+  transferContainer, swapContainers, snapshotContainer, restoreContainer,
+  type ContainerKind, type ContainerRef, type ContainerSnapshot,
+} from "framework/economy/container";
+
+// 交易（多方结算 + 报价会话）
+export {
+  settle,
+  type TransferAmount, type SettlePartyTerms, type SettleTerms,
+} from "framework/economy/settle";
+export {
+  openOffer, acceptOffer, cancelOffer, getOffer, pruneExpiredOffers,
+  type OfferSession, type OfferStatus, type OpenOfferOptions,
+} from "framework/economy/offer";
+
+// 伤害公式（combat 与 damage 效果共用）
+export { computeStandardDamage } from "framework/systems/gameplay/damageFormula";
+
+// 投射物（组件 + 系统 + 生成原子）
+export { projectileSystem, spawnProjectile } from "framework/systems/gameplay/projectileSystem";
+
 export { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
 export { createFileRepository } from "framework/persistence/fileRepository";
 export type { Repository, WorldRecord, SerializedEntity } from "framework/repository";

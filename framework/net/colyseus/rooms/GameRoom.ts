@@ -59,14 +59,21 @@ function isPlayerCommand(message: unknown): message is PlayerCommand {
       obj.type === "equip" ||
       obj.type === "place" ||
       obj.type === "deconstruct" ||
-      obj.type === "dialogue") &&
+      obj.type === "dialogue" ||
+      obj.type === "offer" ||
+      obj.type === "offer-accept" ||
+      obj.type === "offer-cancel") &&
     (obj.slot === undefined || typeof obj.slot === "number") &&
     (obj.toSlot === undefined || typeof obj.toSlot === "number") &&
     (obj.recipe === undefined || typeof obj.recipe === "string") &&
     (obj.x === undefined || typeof obj.x === "number") &&
     (obj.y === undefined || typeof obj.y === "number") &&
     (obj.target === undefined || typeof obj.target === "number") &&
-    (obj.option === undefined || typeof obj.option === "number")
+    (obj.option === undefined || typeof obj.option === "number") &&
+    // offer 条款结构仅做浅校验（数组形态）；条款内容合法性由仿真层服务端权威校验
+    (obj.offer === undefined || Array.isArray(obj.offer)) &&
+    (obj.offerId === undefined || typeof obj.offerId === "number") &&
+    (obj.ttlTicks === undefined || typeof obj.ttlTicks === "number")
   );
 }
 

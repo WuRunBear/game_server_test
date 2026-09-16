@@ -41,6 +41,9 @@ import type { SerializedEntity, WorldRecord } from "framework/repository";
  * - Kind：由 archetype.kind 承载（序列化用 kind 字段，恢复时 spawnEntity 重写）
  * - NetworkId：单独存于 SerializedEntity.networkId 字段，恢复时显式覆写，故不进组件块
  * - Dialogue：瞬态对话会话（当前对话树/节点/选项），断线重连后重置
+ * - ExpiresAt / Interval：定时器运行时状态（绝对 tick 跨存档失效），
+ *   恢复后由效果/触发配置重建
+ * - Projectile：投射物运行时实体（owner eid 跨存档失效），寿命短暂不入档
  */
 const RUNTIME_ONLY_COMPONENTS = new Set([
   "Velocity",
@@ -54,6 +57,9 @@ const RUNTIME_ONLY_COMPONENTS = new Set([
   "Kind",
   "NetworkId",
   "Dialogue",
+  "ExpiresAt",
+  "Interval",
+  "Projectile",
 ]);
 
 /** 序列化单实体：遍历组件注册表，按 SoA/AoS 读当前值。 */

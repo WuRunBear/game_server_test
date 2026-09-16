@@ -20,6 +20,9 @@ export { ItemMeta, type ItemMetaEntry } from "components/itemMeta";
 export { NetworkId, LastSynced } from "components/network";
 // —— 计时 ——
 export { Cooldown, Duration } from "components/timer";
+// —— 计数账本 / 投射物 ——
+export { Ledger, initLedger, type LedgerRecord } from "components/ledger";
+export { Projectile } from "components/projectile";
 // —— 标签（bitecs 空组件） ——
 export { Player, Enemy, NPC, Item, Resource } from "components/tags";
 // —— 需求/资源/掉落（AoS 数据组件） ——

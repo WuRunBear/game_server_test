@@ -2,6 +2,8 @@ import { createWorld } from "bitecs";
 
 import { createMetrics, type Metrics } from "framework/metrics";
 import { createLogger, type Logger } from "framework/utils/logger";
+import { createEventBus, type EventBus } from "framework/simulation/events/eventBus";
+import type { OfferSession } from "framework/economy/offer";
 import type { MapGeometry } from "framework/map/geometry/types";
 import type { GameEvent } from "framework/events/gameEvents";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
@@ -61,6 +63,12 @@ export type GameWorld = ReturnType<typeof createWorld> & {
   nextNetworkId: number;
   /** 本帧事件队列（帧内事件总线，见 framework/events/gameEvents.ts）。 */
   runtimeEvents: GameEvent[];
+  /** 类型化事件总线（tick 内排队、固定阶段消费；见 simulation/events/eventBus.ts）。 */
+  eventBus: EventBus;
+  /** 交易报价会话表（offerId → 会话；运行时状态，不入档，重启即作废）。 */
+  offerSessions: Map<number, OfferSession>;
+  /** 下一个可用的报价会话 id。 */
+  nextOfferId: number;
 };
 
 /**
@@ -73,7 +81,8 @@ export type System = (world: GameWorld) => GameWorld;
  * 创建空的 GameWorld（仅挂时间/指标/日志/各注册表等基础设施，不含实体）。
  *
  * @param fixedDtMs 固定步长（毫秒），与 gameDef.tickRate 对应
- * @returns 初始 world：tick=0、dtMs=fixedDtMs、从 8 时白天开始、nextNetworkId=1、空事件队列
+ * @returns 初始 world：tick=0、dtMs=fixedDtMs、从 8 时白天开始、nextNetworkId=1、
+ *          空事件队列、空类型化事件总线、空报价会话表
  */
 export function createGameWorld(fixedDtMs: number): GameWorld {
   const world = createWorld({
@@ -91,6 +100,9 @@ export function createGameWorld(fixedDtMs: number): GameWorld {
     systemRuntimes: new Map(),
     nextNetworkId: 1,
     runtimeEvents: [],
+    eventBus: createEventBus(),
+    offerSessions: new Map(),
+    nextOfferId: 1,
   }) as GameWorld;
 
   return world;

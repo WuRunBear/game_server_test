@@ -15,6 +15,7 @@ import {
   Needs, Inventory, ItemMeta, ResourceNode, Portal,
   Dialogue, DialogueSource, Quest, Relation,
 } from "components";
+import { Ledger } from "components/ledger";
 
 /**
  * AoS 适配器的展平输出——纯数据，无 ECS 引用。
@@ -182,6 +183,19 @@ registerAosSyncAdapter("Relation", (_world, eid, fields) => {
     for (const f of fields) {
       if (f === "npcKind") out.strings[`Relation.${i}.npcKind`] = r.npcKind;
       else if (f === "value") out.numbers[`Relation.${i}.value`] = r.value;
+    }
+  }
+  return out;
+});
+
+/** 内建适配器：Ledger（账本条目按 kind 展开——fields 白名单需含 "entries"）。 */
+registerAosSyncAdapter("Ledger", (_world, eid, fields) => {
+  const out = empty();
+  const record = Ledger[eid];
+  if (!record) return out;
+  for (const [kind, count] of Object.entries(record)) {
+    for (const f of fields) {
+      if (f === "entries") out.numbers[`Ledger.${kind}`] = count;
     }
   }
   return out;

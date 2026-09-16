@@ -43,14 +43,37 @@ export interface PlayerInput {
 }
 
 /**
- * 玩家命令——非逐帧的离散操作（背包原子 + 对话选择）。
+ * 交易数量条目（offer 命令条款内）。
+ * container 保持框架通用机制词（inventory 槽位背包 / ledger 计数账本）。
+ */
+export interface TradeAmount {
+  /** 容器种类。 */
+  container: "inventory" | "ledger";
+  /** 物品种类字符串（game/items 配置的 kind）。 */
+  kind: string;
+  /** 数量（> 0）。 */
+  count: number;
+}
+
+/** 交易单方条款（offer 命令条款内）。 */
+export interface TradeParty {
+  /** 参与方实体 eid。 */
+  party: number;
+  /** 该方给出的数量列表（从其容器扣减）。 */
+  give?: TradeAmount[];
+  /** 该方收取的数量列表（插入其容器）。 */
+  take?: TradeAmount[];
+}
+
+/**
+ * 玩家命令——非逐帧的离散操作（背包原子 + 对话选择 + 交易协商）。
  *
  * 与 PlayerInput（脉冲式逐帧移动）区别：命令是即刻执行的服务端权威动作，
  * 不进入 seq 去重 / 帧缓存。type 保持框架通用机制词（consume/drop/transfer/
- * craft/equip/place/deconstruct/dialogue），不含游戏语义。
+ * craft/equip/place/deconstruct/dialogue/offer），不含游戏语义。
  */
 export interface PlayerCommand {
-  type: "consume" | "drop" | "transfer" | "craft" | "equip" | "place" | "deconstruct" | "dialogue";
+  type: "consume" | "drop" | "transfer" | "craft" | "equip" | "place" | "deconstruct" | "dialogue" | "offer" | "offer-accept" | "offer-cancel";
   /** 目标槽索引（consume/drop/equip/place 用）；transfer 的源槽。 */
   slot?: number;
   /** transfer 目标槽。 */
@@ -65,6 +88,12 @@ export interface PlayerCommand {
   target?: number;
   /** 对话选项索引（dialogue 用，推进当前对话节点）。 */
   option?: number;
+  /** 交易条款（offer 用，各方 give/take 列表；发送方本人视为已确认）。 */
+  offer?: TradeParty[];
+  /** 报价会话 id（offer-accept / offer-cancel 用）。 */
+  offerId?: number;
+  /** 报价有效期（offer 用，tick 数；缺省不过期）。 */
+  ttlTicks?: number;
 }
 
 /**

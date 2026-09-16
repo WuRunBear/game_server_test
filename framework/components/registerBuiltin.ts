@@ -32,6 +32,11 @@ import { Relation } from "framework/components/relation";
 import { Intent } from "framework/components/intent";
 import { NetworkId, LastSynced } from "framework/components/network";
 import { Cooldown, Duration } from "framework/components/timer";
+import { Ledger, initLedger } from "framework/components/ledger";
+import { Projectile } from "framework/components/projectile";
+import { Modifiers } from "framework/simulation/modifiers/modifiers";
+import { Triggers } from "framework/simulation/triggers/triggers";
+import { ExpiresAt, Interval } from "framework/simulation/timer/timer";
 import { Player, Enemy, NPC, Item, Resource } from "framework/components/tags";
 import { Kind } from "framework/components/kind";
 
@@ -86,6 +91,15 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("LastSynced", LastSynced);
   registry.register("Cooldown", Cooldown);
   registry.register("Duration", Duration);
+  // 计数账本（AoS，持久化）/ 投射物（SoA，瞬态）
+  registry.register("Ledger", Ledger);
+  registry.register("Projectile", Projectile);
+  // 属性修饰符 / 触发器挂载（AoS，持久化）
+  registry.register("Modifiers", Modifiers);
+  registry.register("Triggers", Triggers);
+  // 定时器（AoS，瞬态——运行时状态，恢复后由效果/触发配置重建）
+  registry.register("ExpiresAt", ExpiresAt);
+  registry.register("Interval", Interval);
   // 标签（bitecs 空组件）
   registry.register("Player", Player);
   registry.register("Enemy", Enemy);
@@ -102,4 +116,5 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.registerAosInitializer("LootTable", initLootTable);
   registry.registerAosInitializer("Portal", initPortal);
   registry.registerAosInitializer("DialogueSource", initDialogueSource);
+  registry.registerAosInitializer("Ledger", initLedger);
 }

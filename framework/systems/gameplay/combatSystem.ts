@@ -4,6 +4,7 @@ import { Cooldown, Transform } from "components";
 import type { GameWorld } from "world";
 import { getRuleModule } from "framework/api";
 import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
+import { computeStandardDamage } from "framework/systems/gameplay/damageFormula";
 import { emitEvent } from "framework/events/gameEvents";
 
 /** 攻击冷却缺省值（毫秒；rules/combat.json 可覆盖）。 */
@@ -102,7 +103,8 @@ export function attackTarget(world: GameWorld, attackerEid: number, targetEid: n
   const targetDefense =
     (Defense.value[targetEid] ?? 0) + getEquipModifiers(world, targetEid).defenseBonus;
 
-  let damage = Math.max(1, attackerDamage - targetDefense);
+  // 标准公式抽为纯函数（damageFormula），与 damage 效果共用同一数值路径
+  let damage = computeStandardDamage(attackerDamage, targetDefense);
 
   if (damageFormula === "custom" && damageFormulaRef) {
     try {

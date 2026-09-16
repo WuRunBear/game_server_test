@@ -15,6 +15,8 @@ import { createGeneratorRegistry } from "map/generate/generatorRegistry";
 import { registerBuiltinMapGenerators } from "map/generate/registerBuiltin";
 import { registerBuiltinRuleSchemas } from "framework/config/schema/ruleSchemas";
 import { registerBuiltinSpawnConditions } from "framework/systems/gameplay/spawnConditions";
+import { registerBuiltinEffects } from "framework/simulation/effects/builtinEffects";
+import { registerBuiltinTriggers } from "framework/simulation/triggers/triggerRegistry";
 
 /** 注册表聚合容器（组件/系统/动作/原型/生成积木）。 */
 export interface FrameworkRegistries {
@@ -54,6 +56,8 @@ export function bootstrapFramework(): FrameworkRegistries {
 
   registerBuiltinRuleSchemas();
   registerBuiltinSpawnConditions();
+  registerBuiltinEffects();
+  registerBuiltinTriggers();
 
   registries = { componentRegistry, systemRegistry, actionRegistry, archetypeRegistry, mapGeneratorRegistry };
   return registries;

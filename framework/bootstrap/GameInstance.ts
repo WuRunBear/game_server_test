@@ -87,6 +87,9 @@ export function createGameInstance(gameDef: LoadedGameDefinition, bootDeps: Boot
       // 帧首清空事件队列：事件只在产生它的那一帧有效（未消费不跨帧堆积）
       world.runtimeEvents = [];
 
+      // 类型化事件总线同帧清空（tick 内排队、固定阶段消费，未消费不跨帧）
+      world.eventBus.queue.length = 0;
+
       // 演化钩子：位于 tick 自增与系统拓扑序之间（step 之前调会得到 (n→n)
       // 零跨度空转，step 之后调则系统已跑完——见计划 todo 9⑦）
       instance.beforeSystems?.(world);
