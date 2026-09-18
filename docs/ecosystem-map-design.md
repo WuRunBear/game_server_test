@@ -21,6 +21,7 @@ island 仅 4 气候区且规则全部挤在 `plain`，9 个内置积木只有 4 
 | 地图尺寸 | 全部由 `game/maps/registry.json` 配置决定，框架零默认值（island 目标 192×192） |
 | 内容深度 | 变体优先：新物种 = 现有组件/行为的参数变体；仅缺能力时新增通用组件 |
 | 村庄生成 | 双轨：规则生成（template 规则实体组）/ 整村模板盖印 / 混合模式 |
+| 规则组织 | 生态声明层 **B1 编译器模式**：`ecosystems.json` 声明 density 生物分布，boot 期展开合并；exact/template 结构规则留在 `entity-rules.json` |
 
 ## 3. 分层职责（不变式）
 
@@ -34,7 +35,7 @@ island 仅 4 气候区且规则全部挤在 `plain`，9 个内置积木只有 4 
 
 | 切片 | 内容 | 框架改动 |
 |---|---|---|
-| ① 生态分区与地基 | island 192×192、5 气候区 + wilderness + 模板区、区域×物种表；新积木 `stamp-template` | `canPlace` 多格占用、占用/计数索引化、重复规则身份校验、新档随机种子入口 |
+| ① 生态分区与地基 | island 192×192、5 气候区 + wilderness + 模板区、区域×物种表；新积木 `stamp-template` | `canPlace` 多格占用、占用/计数索引化、重复规则身份校验、新档随机种子入口、生态声明层展开器（B1） |
 | ② setpiece 与子地图 | template 规则实战化（房屋组/营地）；新增 swamp/ruins 子图；portal 网络 | 按需小增量 |
 | ③ 动态机制 | 巢穴（蜘蛛巢/蜂巢式母体）、周期袭击、时段条件扩展 | `Nest` 通用组件 + gameplay 巢穴系统；`spawnConditions` 扩展 |
 
@@ -73,7 +74,7 @@ island 仅 4 气候区且规则全部挤在 `plain`，9 个内置积木只有 4 
 | 5 | swamp_mud | 是 |
 | 6 | rock | 是 |
 
-**区域×物种表**（entity-rules.json 从 16 条扩到约 40 条；新物种全部为参数变体）：
+**区域×物种表**（生物分布由 `ecosystems.json` 声明，见 §5.5；entity-rules.json 仅留结构规则）：
 
 | 区域 | 新增变体（复用基础） | 沿用实体 |
 |---|---|---|
@@ -146,11 +147,48 @@ island 仅 4 气候区且规则全部挤在 `plain`，9 个内置积木只有 4 
    是固定值时可省略，新档未声明 seed 时随机生成并随首存快照固化，读档复用快照 seed
    （旧存档直接废弃、无兼容负担——项目既定约定）。
 
-### 5.5 交付物与验证
+### 5.5 生态声明层（B1 编译器模式）
 
-- registry.json island 重配置（192×192、5 气候区 + wilderness + 模板区、stamp 步骤）；entity-rules 按区展开
-- 新模板文件 2~3 个（`game/maps/templates/pig-village.json` 等）
-- 框架修复 4 项 + 各自单测
+**动机**：切片①物种表将达 ~40 条平铺规则，配置膨胀成为第一个真实痛点。经确认采纳生态
+声明层，范围限定为 **B1 编译器模式**——生物分布（density 类）按 biome 聚合声明，
+exact/template 结构规则（portal/建筑组）与 biome 概念不契合，留在 entity-rules.json。
+B2（全面接管、废弃 entity-rules.json）已讨论并否决：portal 的固定落点、房屋组模板与
+"生物群落"无关，硬塞进生态文件只有文件数收益，无概念聚合收益。
+
+**配置形态**（新增 `game/ecosystems.json`，game.json 的 `map` 段新增 `ecosystems` 路径键）：
+
+```jsonc
+{
+  "ecosystems": [
+    {
+      "biome": "forest",                      // 对应 MapGeometry.regions 键
+      "spawnTable": [
+        { "kind": "tree",     "density": 0.02 },                          // 密度式：max = floor(区域面积 × density)
+        { "kind": "mushroom", "max": 6, "every": 20 },                    // 显式式：原样展开
+        { "kind": "spider",   "max": 4, "every": 300, "condition": "isNight" }
+      ]
+    }
+  ]
+}
+```
+
+**展开时机（关键设计点）**：`density` 声明需查区域面积，而几何在 bootMaps 才生成/回填——
+因此展开器挂在 **bootMaps 内、每图几何就绪后、evolve 之前**执行（不在 loadGameDefinition
+加载期）。展开为标准 `EntityRule` 数组并与静态规则合并，产物只进内存不落盘（展开是纯
+函数，同输入同输出，确定性成立）。
+
+**框架改动面**：新增 ecosystems schema（zod）+ 展开器 + bootMaps 一处挂钩。演化引擎、
+出口校验、U5 引用校验、存档链路全部零改动（合并后的规则统一走现有校验与演化路径）。
+
+**未来扩展（不在本次范围）**：spawnTable 支持 `group` 条目（template 组按 biome 撒，
+如"森林散落废墟组"）——B1 不锁死演进路径。
+
+### 5.6 交付物与验证
+
+- registry.json island 重配置（192×192、5 气候区 + wilderness + 模板区、stamp 步骤）
+  - 新增 `game/ecosystems.json`（区域×物种表迁移至此）；entity-rules.json 仅留 portal/结构规则
+  - 新模板文件 2~3 个（`game/maps/templates/pig-village.json` 等）
+  - 框架修复 5 项（§5.4 四项 + §5.5 展开器）+ 各自单测
 - 验证：`pnpm tools validate` → `pnpm tools export-map island --out out/` PNG 前后对比 →
   boot 冒烟 → `pnpm test` 全绿 → 性能抽查（boot 生成耗时、20tps 稳定性）
 
@@ -173,23 +211,33 @@ island 仅 4 气候区且规则全部挤在 `plain`，9 个内置积木只有 4 
 - **时段条件扩展**：`spawnConditions` 注册表新增 `isDay`/`isWinter` 等（isNight 同款机制）。
 - 蜂场/蜘蛛巢与 Nest 组件配合；切片②的模板直接复用。
 
+**资源再生哲学（对比饥荒的显式取舍）**：本系统的演化引擎是"均衡态"——实体数量按
+`every` 周期补回 `max`（生态弹回设定值）；饥荒的核心张力则是"消耗性世界"（怪死大多
+不重生、资源越采越少，逼迫玩家迁徙）。引擎零改动即可逼近后者：把目标物种的 `every`
+调到极长周期即为准不可再生。两种哲学可按物种在同一世界并存（如浆果丛快速回补、
+金矿近乎不可再生）——是否采用消耗性节奏属内容配置决策，不引入新框架能力。
+
 ## 8. 验证策略（每切片）
 
 `pnpm tools validate` → `pnpm tools export-map <key> --out out/` PNG 前后对比 →
 boot 冒烟 → `pnpm test` 全绿 → 性能抽查（192×192 boot 生成耗时、20tps 稳定性）。
 
-## 9. 拒绝的替代方案
+## 9. 讨论过的替代方案与结论
 
-- **生态声明层**（framework 引入 biome→物种表中间概念）：与 entity-rules 现有模型重叠，违反
-  "真实需求牵引"；若切片③规则配置爆炸再议。
-- **全图区块拼贴**（饥荒原生做法）：重写生成层成本最大；stamp-template 已满足设计感需求。
-- **生态系统仿真 / GOAP**：无真实需求，YAGNI。
+- **方案 B2（生态声明层全面接管，废弃 entity-rules.json）**：已讨论并否决——portal 固定
+  落点、房屋组模板与 biome 概念不契合，单文件聚合无概念收益；采纳其温和形态 B1
+  （编译器模式，见 §5.5）。
+- **全图区块拼贴（饥荒原生做法）**：已讨论并否决——重写生成层成本最大；stamp-template
+  盖印已满足设计感需求，噪声有机地形保留。
+- **方案 A/C 纯粹形态**：已讨论，最终取混合（§2 生成哲学行）。
+
+> 记录原则：本节只列实际讨论过并形成结论的方案；未经讨论的想法不入档。
 
 ## 10. 风险
 
 | 风险 | 缓解 |
 |---|---|
 | 192×192 离线补差单次 evolve 跨度成本 | 早退不变式已有界；索引化（修复项 2）先于扩内容落地 |
-| entity-rules 条目膨胀（~40 条） | 平铺数组可接受，不引入 $ref 机制（YAGNI） |
+| 区域×物种表条目多（~40 条） | 已由生态声明层（§5.5）聚合化解：density 按 biome 聚合声明，结构规则量小 |
 | Tiled 模板制作工作量 | 第一版仅 2~3 个模板，模板即内联 JSON 可程序生成后再手修 |
 | 语义 id 表漂移（配置与模板不一致） | 模板 ground 值域校验 + validate 出口校验 + export-map PNG 人工对比 |
