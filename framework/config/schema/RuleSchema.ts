@@ -107,3 +107,29 @@ export const ServerRuleSchema = z.object({
 
 /** 服务端规则的类型推断（即 game/rules/server.json）。 */
 export type ServerRule = z.infer<typeof ServerRuleSchema>;
+
+/**
+ * 周期袭击全局规则（rules/raid.json）：作用于 raidSystem。
+ *
+ * 各字段语义游戏无关（"袭击"是通用机制词——谁袭击谁、什么物种由 game/ 配置）：
+ * - `intervalTicks`：门控周期（tick，对齐槽 world.time.tick % intervalTicks === 0）
+ * - `waveSize`：缺省波成员数（waveRef 接管波构建时忽略）
+ * - `kinds`：缺省波成员的原型 kind 池（每成员确定性挑一）
+ * - `radiusTiles`：落位搜索半径（tile，缺省 4）
+ * - `condition`：整波刷怪条件名（spawnConditions 注册表引用，如 isNight；
+ *   未知名求值时抛错）
+ * - `waveRef`：可选规则模块引用（registerRuleModule 扩展点）——模块
+ *   (world, playerEid, ctx) 返回 Array<{ kind, x?, y? }> 完全接管缺省波构建器
+ *   （x/y 缺省时仍走玩家附近随机合法落位）；未知模块 id 求值时抛错
+ */
+export const RaidRuleSchema = z.object({
+  intervalTicks: z.number().int().min(1),
+  waveSize: z.number().int().min(0),
+  kinds: z.array(z.string()).min(1),
+  radiusTiles: z.number().int().positive().optional(),
+  condition: z.string().optional(),
+  waveRef: z.string().optional(),
+}).passthrough();
+
+/** 周期袭击规则的类型推断（即 game/rules/raid.json）。 */
+export type RaidRule = z.infer<typeof RaidRuleSchema>;

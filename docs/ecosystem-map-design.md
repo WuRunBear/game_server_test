@@ -266,3 +266,49 @@ island 62% 陆地、单一连通域。实施中固化如下决策与偏差（后
    0.012 / rock 0.045 / boar 0.017）；grassland 1820 格同法上调。地图管线：noise-terrain →
    smooth-terrain → climate-regions → stamp×2（pig-village / stone-circle 均 region 模式，
    确定性落点）→ region-stats。
+
+## 12. 实施记录（切片②，2026-09-18 完成）
+
+658 项测试全绿；boot 实体 island 343 / swamp 14 / ruins 6（6500-tick 夜相探针：ruins
+tentacle 0→11 / spider 0→4，isNight 门控 + 区域均衡回补实测通过）；headless avg tick
+1.99ms（5 图常驻，20tps 预算的 4%）。固化决策：
+
+1. **templateRef 具名模板组**（§5.3「同一份条目组跨规则复用」）：entity-rules.json 顶层
+   `templates` 字典 + 规则 `templateRef` 引用（schema 层强制与 inline `template` 二选一），
+   loader 解析为标准 inline 形态——引擎零改动。house 组跨 village/grassland 复用、camp 组
+   forest 撒营地。
+2. **slot-rooms region 实名是 `<type>#<index>`**（非裸 roomTypes 名）；collectMapRegionNames
+   收集裸名（诊断超集）+ 实名 + walls。ruins 的生态/规则 biome 用实名——**仅在固定 seed
+   90210 与现参数下稳定**，改 seed/参数须按 gen-map 输出重推。
+3. **区域命名隔离**：swamp 图 biome 用 `marsh`（生态条目按 biome 逐图匹配，与 island 的
+   `swamp` 同名会串图）；ruins 不跑 climate-regions（其 rebuild 会整体重写 regionOfTile、
+   毁掉房间区域）。
+4. **portal 网络**：island↔swamp↔ruins 四个新实体（island 双 portal：cave + swamp）；全部
+   落点 Chebyshev=2（32px > AABB 触发半径 ~24px）且偏离对端本格，U5 配对校验通过。
+5. **难度梯度标定**（常驻敌对 / 区域可走格）：grassland boar ≈0.0011 → marsh tentacle
+   ≈0.0036 → ruins hall tentacle 7 + spider 4（isNight）/ 382 ≈0.029；vault gold_rock 3
+   准不可再生（every = initialAgeTicks，§11.3 双重门控约定）。
+6. swamp 4 连通域（最大 82.8%）为水域图设计意图，接受连通性告警。
+
+## 13. 实施记录（切片③，2026-09-18 完成，全设计实施完毕）
+
+677 项测试全绿；巢穴探针：2 蛛巢 600 tick 补满 8 蛛、蛙巢补满 2 蛙，`Nest.current` 镜像
+语义按契约滞后一门；headless avg tick 2.94ms（5 图常驻 + nest/raid 系统，20tps 预算的
+5.9%）。固化决策：
+
+1. **Nest AoS**（`{spawnKind, capacity, intervalTicks, current}`，与 §7 字段一致）：无
+   netSync 适配器（服务端权威，客户端只见刷出的实体）；不在 RUNTIME_ONLY 清单——随存档
+   自动持久化；`current` = 槽 gate 时补种**前**的存活镜像（滞后一门，测试钉死）。
+2. **nestSystem**：`tick % intervalTicks` 对齐槽；存活计数 = 半径内同图同 kind 线性扫描
+   （AoS 不可查询，post-filter 惯例）；补种合法性走放置链同一套语义（walkableAt +
+   footprintOf + AABB 重叠/阻挡），巢与演化引擎共用一套 footprint 约定；确定性 rng 由
+   `(tick, eid, attempt)` 派生（无 Math.random）；巢实体被摧毁即停产（destroyEntity 清
+   AoS 残留），零独立存活状态——与 §7 设计完全一致。
+3. **raid**：`rules/raid.json`（intervalTicks 48000 / waveSize 3 / kinds 三敌对系，无
+   condition——袭击是跨昼夜的玩家邻近压力机制，与生态驻留的 isNight 语义区分）；
+   `waveRef` 走既有 registerRuleModule 扩展点可完全接管波次组成——框架零新概念。
+4. **isDay 已加**（isNight 同款一行）；**isWinter 暂缓**——`world.time` 无季节时钟，加了
+   必是恒 false 的死配置；待季节系统出现真实需求时同机制补一行。
+5. **内容**：nest_spider（forest max 2）/ nest_frog（marsh max 1）按 §11.3 双重门控
+   `every = 图 initialAgeTicks`——巢被摧毁后准永久；巢为可攻击中性结构（Enemy tag 使其
+   可被攻击，无 team 不入怪物感知）。

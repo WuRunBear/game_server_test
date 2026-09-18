@@ -22,17 +22,30 @@
               "5": 0.8,
               "6": 1
             },
-            "nonWalkableSemantics": [1]
+            "nonWalkableSemantics": [
+              1
+            ]
           }
         },
         {
           "generator": "smooth-terrain",
-          "params": { "maxRounds": 4, "nonWalkableSemantics": [1] }
+          "params": {
+            "maxRounds": 4,
+            "nonWalkableSemantics": [
+              1
+            ]
+          }
         },
         {
           "generator": "climate-regions",
           "params": {
-            "names": ["beach", "grassland", "forest", "swamp", "rocky"],
+            "names": [
+              "beach",
+              "grassland",
+              "forest",
+              "swamp",
+              "rocky"
+            ],
             "style": "noise",
             "minArea": 800
           }
@@ -73,7 +86,9 @@
             "groundPalette": {
               "1": 1
             },
-            "nonWalkableSemantics": [1]
+            "nonWalkableSemantics": [
+              1
+            ]
           }
         },
         {
@@ -90,7 +105,9 @@
         {
           "generator": "climate-regions",
           "params": {
-            "names": ["plain"],
+            "names": [
+              "plain"
+            ],
             "style": "noise"
           }
         }
@@ -100,6 +117,100 @@
       "kind": "tiled",
       "path": "tiled-demo.json",
       "initialAgeTicks": 0
+    },
+    "swamp": {
+      "kind": "pipeline",
+      "seed": 20260918,
+      "initialAgeTicks": 51840000,
+      "pipeline": [
+        {
+          "generator": "noise-terrain",
+          "params": {
+            "width": 96,
+            "height": 96,
+            "tileWidth": 16,
+            "tileHeight": 16,
+            "bandLevel": 0.5,
+            "falloff": 0.25,
+            "baseCellTiles": 18,
+            "groundPalette": {
+              "1": 0.5,
+              "2": 0.66,
+              "3": 0.76,
+              "4": 0.86,
+              "5": 0.94,
+              "6": 1
+            },
+            "nonWalkableSemantics": [
+              1
+            ]
+          }
+        },
+        {
+          "generator": "smooth-terrain",
+          "params": {
+            "maxRounds": 8,
+            "nonWalkableSemantics": [
+              1
+            ]
+          }
+        },
+        {
+          "generator": "climate-regions",
+          "params": {
+            "names": [
+              "marsh"
+            ],
+            "style": "noise",
+            "minArea": 600
+          }
+        },
+        {
+          "generator": "region-stats",
+          "params": {}
+        }
+      ]
+    },
+    "ruins": {
+      "kind": "pipeline",
+      "seed": 90210,
+      "initialAgeTicks": 51840000,
+      "pipeline": [
+        {
+          "generator": "slot-rooms",
+          "params": {
+            "slotsX": 4,
+            "slotsY": 4,
+            "cellW": 16,
+            "cellH": 16,
+            "roomMinW": 8,
+            "roomMinH": 7,
+            "roomMaxW": 12,
+            "roomMaxH": 12,
+            "lastRoomW": 12,
+            "lastRoomH": 12,
+            "corridorWidth": 2,
+            "branchCount": 3,
+            "roomTypes": {
+              "pathFirst": "entrance",
+              "pathMid": "hall",
+              "pathLast": "vault",
+              "branch": [
+                "vault",
+                "hall"
+              ]
+            },
+            "floorTile": 6,
+            "solidTile": 1,
+            "tileWidth": 16,
+            "tileHeight": 16
+          }
+        },
+        {
+          "generator": "region-stats",
+          "params": {}
+        }
+      ]
     }
   }
 }

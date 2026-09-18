@@ -18,6 +18,8 @@ import { equipmentSystem } from "framework/systems/gameplay/equipmentSystem";
 import { dayNightCycleSystem } from "framework/systems/gameplay/dayNightCycleSystem";
 import { portalSystem } from "framework/systems/gameplay/portalSystem";
 import { createQuestSystem } from "framework/systems/gameplay/questSystem";
+import { createNestSystem } from "framework/systems/gameplay/nestSystem";
+import { raidSystem } from "framework/systems/gameplay/raidSystem";
 
 import { setDefaultActionRegistry } from "framework/ai/btFactory";
 import { registerBuiltinActions } from "framework/ai/registerBuiltinActions";
@@ -146,5 +148,19 @@ export function registerBuiltinSystems(
     id: "trigger",
     factory: (_world: GameWorld) => triggerSystem,
     after: ["timer"],
+  });
+
+  // 巢穴：周期在巢周围把 spawnKind 实体补到容量（radiusTiles/maxAttempts 走 systems[].config）
+  systemRegistry.register({
+    id: "nest",
+    factory: (_world: GameWorld, config?: Record<string, unknown>) => createNestSystem(config),
+    after: ["combat"],
+  });
+
+  // 周期袭击：rules/raid.json 驱动，按玩家位置周期刷敌对波（waveRef 规则模块可接管波构建）
+  systemRegistry.register({
+    id: "raid",
+    factory: (_world: GameWorld) => raidSystem,
+    after: ["combat"],
   });
 }

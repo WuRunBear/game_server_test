@@ -1,0 +1,7 @@
+{
+  "kind": "portal_ruins",
+  "components": {
+    "Size": { "w": 32, "h": 32 },
+    "Portal": { "targetMap": "ruins", "x": 152, "y": 120 }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "kind": "portal_swamp",
+  "components": {
+    "Size": { "w": 32, "h": 32 },
+    "Portal": { "targetMap": "swamp", "x": 904, "y": 536 }
+  }
+}

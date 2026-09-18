@@ -17,6 +17,7 @@ import { EntityMap } from "framework/components/entityMap";
 import { SpawnPoint } from "framework/components/spawnPoint";
 import { Needs, initNeeds } from "framework/components/needs";
 import { ResourceNode, initResourceNode } from "framework/components/resourceNode";
+import { Nest, initNest } from "framework/components/nest";
 import { LootTable, initLootTable } from "framework/components/loot";
 import { Perception } from "framework/components/perception";
 import { Equipment } from "framework/components/equipment";
@@ -67,6 +68,8 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("Needs", Needs);
   registry.register("ResourceNode", ResourceNode);
   registry.register("LootTable", LootTable);
+  // 巢穴生产（AoS）：周期在巢周围补足 spawnKind 实体至容量（gameplay/nestSystem）
+  registry.register("Nest", Nest);
   // 感知
   registry.register("Perception", Perception);
   // 装备/合成/光源/放置/网格占用
@@ -113,6 +116,7 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.registerAosInitializer("Inventory", initInventory);
   registry.registerAosInitializer("Needs", initNeeds);
   registry.registerAosInitializer("ResourceNode", initResourceNode);
+  registry.registerAosInitializer("Nest", initNest);
   registry.registerAosInitializer("LootTable", initLootTable);
   registry.registerAosInitializer("Portal", initPortal);
   registry.registerAosInitializer("DialogueSource", initDialogueSource);

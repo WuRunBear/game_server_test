@@ -1,4 +1,4 @@
-import { PHASE_NIGHT, type GameWorld } from "world";
+import { PHASE_DAY, PHASE_NIGHT, type GameWorld } from "world";
 
 /**
  * 刷怪条件模块注册表（名 → 判定函数）。
@@ -35,4 +35,5 @@ export function hasSpawnCondition(name: string): boolean {
 /** 注册内建刷怪条件。由 bootstrapFramework 调用。 */
 export function registerBuiltinSpawnConditions(): void {
   registerSpawnCondition("isNight", (world) => world.time.timeOfDay.phase === PHASE_NIGHT);
+  registerSpawnCondition("isDay", (world) => world.time.timeOfDay.phase === PHASE_DAY);
 }

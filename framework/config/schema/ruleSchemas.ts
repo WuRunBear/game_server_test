@@ -5,6 +5,7 @@ import {
   CraftingRuleSchema,
   DayNightRuleSchema,
   ServerRuleSchema,
+  RaidRuleSchema,
 } from "framework/config/schema/RuleSchema";
 import { PlayerRuleSchema } from "framework/config/schema/PlayerRuleSchema";
 
@@ -48,4 +49,5 @@ export function registerBuiltinRuleSchemas(): void {
   registerRuleSchema("daynight", DayNightRuleSchema);
   registerRuleSchema("server", ServerRuleSchema);
   registerRuleSchema("player", PlayerRuleSchema);
+  registerRuleSchema("raid", RaidRuleSchema);
 }

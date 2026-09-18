@@ -1,0 +1,10 @@
+{
+  "kind": "nest_frog",
+  "tags": ["Enemy"],
+  "components": {
+    "Size": { "w": 20, "h": 20 },
+    "Collider": { "shape": 1, "halfW": 10, "halfH": 10 },
+    "Health": { "current": 40, "max": 40 },
+    "Nest": { "spawnKind": "frog", "capacity": 2, "intervalTicks": 400 }
+  }
+}

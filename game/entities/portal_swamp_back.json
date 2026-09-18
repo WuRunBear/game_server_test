@@ -1,0 +1,7 @@
+{
+  "kind": "portal_swamp_back",
+  "components": {
+    "Size": { "w": 32, "h": 32 },
+    "Portal": { "targetMap": "island", "x": 2248, "y": 2632 }
+  }
+}

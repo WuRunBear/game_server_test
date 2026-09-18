@@ -1,0 +1,10 @@
+{
+  "kind": "nest_spider",
+  "tags": ["Enemy"],
+  "components": {
+    "Size": { "w": 24, "h": 24 },
+    "Collider": { "shape": 1, "halfW": 12, "halfH": 12 },
+    "Health": { "current": 60, "max": 60 },
+    "Nest": { "spawnKind": "spider", "capacity": 4, "intervalTicks": 600 }
+  }
+}

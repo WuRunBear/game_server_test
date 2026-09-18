@@ -13,3 +13,5 @@ export { aiSystem, setEntityKind } from "framework/systems/gameplay/aiSystem";
 export { combatSystem, createCombatSystem } from "framework/systems/gameplay/combatSystem";
 export { inventorySystem } from "framework/systems/gameplay/inventorySystem";
 export { interactionSystem } from "framework/systems/gameplay/interactionSystem";
+export { nestSystem, createNestSystem } from "framework/systems/gameplay/nestSystem";
+export { raidSystem, createRaidSystem, type RaidWaveMember, type RaidWaveContext } from "framework/systems/gameplay/raidSystem";

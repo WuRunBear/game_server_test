@@ -1,0 +1,7 @@
+{
+  "kind": "portal_ruins_back",
+  "components": {
+    "Size": { "w": 32, "h": 32 },
+    "Portal": { "targetMap": "swamp", "x": 1256, "y": 712 }
+  }
+}

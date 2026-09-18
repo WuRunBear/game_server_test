@@ -17,6 +17,8 @@
     { "id": "movement" },
     { "id": "collision" },
     { "id": "combat" },
+    { "id": "nest" },
+    { "id": "raid" },
     { "id": "needDecay" },
     { "id": "inventory" },
     { "id": "gathering" },

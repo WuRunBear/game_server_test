@@ -10,7 +10,6 @@
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { resolve, dirname, basename } from "node:path";
-import { z } from "zod";
 import {
   GameDefinitionSchema,
   type LoadedGameDefinition,
@@ -26,11 +25,17 @@ import {
   EcosystemsSchema,
   type EcosystemsJson,
 } from "framework/config/schema/EcosystemsSchema";
-import { EntityRuleSchema, type EntityRule } from "map/evolution/schema";
+import {
+  EntityRulesDocumentSchema,
+  ruleIdentity,
+  type EntityRule,
+  type EntityRulesDocument,
+} from "map/evolution/schema";
 import type { PlayerRule } from "framework/config/schema/PlayerRuleSchema";
 import { getRuleSchema } from "framework/config/schema/ruleSchemas";
 import { hasSpawnCondition } from "framework/systems/gameplay/spawnConditions";
 import { WILDERNESS } from "map/generate/blocks/climateRegions";
+import { WALLS_REGION } from "map/generate/blocks/slotRooms";
 import { tiledRegionNames } from "map/generate/blocks/tiledSource";
 import { stampTemplateRegionNames } from "map/generate/blocks/stampTemplate";
 import type { MapGenerationStep } from "map/generate/types";
@@ -253,15 +258,59 @@ function resolveMapConfigs(baseDir: string, mapRegistryPath?: string): MapConfig
   return configs;
 }
 
-/** 加载实体演化规则文件（{ rules: EntityRule[] }），逐条 zod 校验。 */
+/**
+ * 解析实体规则文档中的命名模板组引用（加载器级展开，纯函数不改输入）：
+ * - templateRef 规则查文档 templates 字典 → 展开为标准 inline `template`
+ *   形态（条目深拷贝——多条规则共享同一组不产生别名引用）；
+ * - 未知组名 → 抛错点名 ref 与规则身份（map|region|kind|mode，schema.ts
+ *   ruleIdentity）与已声明的组名集合；
+ * - density/exact 与 inline template 规则原样透传——输出形状与历史 loader
+ *   产物完全一致（引擎与下游零感知，只认 inline 形态）。
+ */
+function resolveTemplateRefs(doc: EntityRulesDocument, source: string): EntityRule[] {
+  const templates = doc.templates ?? {};
+  return doc.rules.map((rule) => {
+    if (rule.mode !== "template") return rule;
+    const { templateRef, ...rest } = rule;
+    if (templateRef === undefined) {
+      // inline 形态：schema 层 superRefine 已保证与 templateRef 恰好声明其一，防御性兜底
+      if (!rest.template) {
+        throw new Error(
+          `${source}: template rule on map "${rule.map}" region "${rule.region}" kind "${rule.kind}" declares neither "template" nor "templateRef"`,
+        );
+      }
+      return { ...rest, template: rest.template };
+    }
+    const group = templates[templateRef];
+    if (group === undefined) {
+      const declared = Object.keys(templates)
+        .map((name) => `"${name}"`)
+        .join(", ");
+      // ruleIdentity 只读 map|region|kind|mode——文档形态规则补齐 template
+      // 形参即可复用同一身份函数（不复制身份格式）
+      const identity = ruleIdentity({ ...rule, template: [] });
+      throw new Error(
+        `${source}: template rule \`${identity}\` references unknown templateRef "${templateRef}" (declared groups: ${declared || "none"})`,
+      );
+    }
+    return { ...rest, template: group.map((entry) => ({ ...entry })) };
+  });
+}
+
+/**
+ * 加载实体演化规则文档（{ templates?, rules: [...] }）：整体 zod 校验
+ * （template 规则的 template/templateRef 恰好声明其一在 schema 层 fail-fast）
+ * 后，将 templateRef 规则解析为标准 inline template 形态。解析先于
+ * validateIntegrity——模板条目的 kind 引用校验自动覆盖命名组条目。
+ */
 function loadEntityRules(baseDir: string, entityRulesPath?: string): EntityRule[] {
   if (!entityRulesPath) return [];
   const fullPath = resolve(baseDir, entityRulesPath);
   if (!existsSync(fullPath)) return [];
 
   const raw = readJsonFile(fullPath);
-  const parsed = z.object({ rules: z.array(EntityRuleSchema) }).parse(raw);
-  return parsed.rules;
+  const parsed = EntityRulesDocumentSchema.parse(raw);
+  return resolveTemplateRefs(parsed, entityRulesPath);
 }
 
 /**
@@ -284,6 +333,7 @@ function loadEcosystemsFile(baseDir: string, ecosystemsPath?: string): Ecosystem
  * - climate-regions 步骤的 params.names（命名区域）；
  * - tiled-source 步骤 zones 层产出的区域名（与积木同源解析）；
  * - stamp-template 步骤模板 zones 层产出的区域名（与积木同源解析）；
+ * - slot-rooms 步骤的房间区域（"<类型>#<房序>"）与 walls 结构区；
  * - 隐式兜底区 wilderness（未被命名区域认领的格子归属，恒合法）。
  *
  * 只做名字收集，不校验各积木参数形状——参数错误由积木在生成期自行抛错。
@@ -306,9 +356,52 @@ function collectMapRegionNames(config: MapConfig): Set<string> {
       for (const name of stampTemplateRegionNames(step.params.tiled, config.key)) {
         names.add(name);
       }
+    } else if (step.generator === "slot-rooms") {
+      collectSlotRoomsRegionNames(step.params, names);
     }
   }
   return names;
+}
+
+/**
+ * slot-rooms 步骤的区域名收集（加载期超集近似，积木参数形状不在此校验）：
+ * 实际区域键 = 每房一个 `"<类型>#<房序>"`（插入序 = 主路径序 → 支线序）+
+ * 末尾 walls 结构区（WALLS_REGION，未雕挖格归属）。房序上界 = 主路径房数
+ * （恒 = slotsX）+ 支线尝试上限（branchCount，实际可能更少）——加载期无法
+ * 知道实际房数，收集上界内全部 `"<类型>#<i>"` 名字作为合法集合（超集，
+ * 不存在的序号由开机 U5 对真实几何的校验兜底）。同时收集裸类型名（诊断
+ * 友好；实际 region 键恒带 # 序号）。类型名来源 = roomTypes 映射（未配置
+ * 的字段用结构名 path-first/path-mid/path-last/branch）。
+ */
+function collectSlotRoomsRegionNames(params: unknown, names: Set<string>): void {
+  const raw = (typeof params === "object" && params !== null ? params : {}) as Record<string, unknown>;
+  const slotsX =
+    typeof raw.slotsX === "number" && Number.isInteger(raw.slotsX) && raw.slotsX >= 2 ? raw.slotsX : 5;
+  const branchCount =
+    typeof raw.branchCount === "number" && Number.isInteger(raw.branchCount) && raw.branchCount >= 0
+      ? raw.branchCount
+      : 3;
+  const types = new Set<string>(["path-first", "path-mid", "path-last", "branch"]);
+  const roomTypes = raw.roomTypes;
+  if (typeof roomTypes === "object" && roomTypes !== null && !Array.isArray(roomTypes)) {
+    const rt = roomTypes as Record<string, unknown>;
+    for (const key of ["pathFirst", "pathMid", "pathLast"] as const) {
+      if (typeof rt[key] === "string" && (rt[key] as string).length > 0) types.add(rt[key] as string);
+    }
+    if (Array.isArray(rt.branch)) {
+      for (const name of rt.branch) {
+        if (typeof name === "string" && name.length > 0) types.add(name);
+      }
+    }
+  }
+  const roomCountMax = slotsX + branchCount;
+  for (const type of types) {
+    names.add(type);
+    for (let i = 0; i < roomCountMax; i++) {
+      names.add(`${type}#${i}`);
+    }
+  }
+  names.add(WALLS_REGION);
 }
 
 /**
@@ -320,8 +413,8 @@ function collectMapRegionNames(config: MapConfig): Set<string> {
  * itemKind/victimKind/奖励。
  *
  * region 校验针对「生成后将存在的完整区域集合」（climate 命名区 ∪ 隐式
- * wilderness ∪ tiled zones ∪ stamp-template 模板 zones），任一来源合法即可；
- * exact 落点是否合法依赖生成后
+ * wilderness ∪ tiled zones ∪ stamp-template 模板 zones ∪ slot-rooms 房间区
+ * 与 walls 结构区），任一来源合法即可；exact 落点是否合法依赖生成后
  * 的几何，由开机全局校验负责，此处不查。
  *
  * 若框架尚未 bootstrap（注册表不可用，如纯类型测试场景）则静默跳过校验。

@@ -1,0 +1,5 @@
+{
+  "intervalTicks": 48000,
+  "waveSize": 3,
+  "kinds": ["spider", "wolf", "tentacle"]
+}

@@ -78,12 +78,66 @@ export type ExactRule = z.infer<typeof ExactRuleSchema>;
 export type TemplateRule = z.infer<typeof TemplateRuleSchema>;
 export type EntityRule = z.infer<typeof EntityRuleSchema>;
 
+// ---------------------------------------------------------------------------
+// 文档形态（entity-rules.json 原始形态，templateRef 尚未解析）
+// ---------------------------------------------------------------------------
+
+/**
+ * 文档形态 template 规则：inline `template` 与命名组 `templateRef` **恰好
+ * 声明其一**——双声明/均缺省在 schema 层 fail-fast，错误消息点名违规规则的
+ * map/region/kind。
+ *
+ * 命名组引用由加载器（loadGameDefinition.loadEntityRules）解析为标准
+ * inline `template` 形态；引擎与下游只见解析后的 TemplateRuleSchema 形态
+ * （演化零改动）。命名组是模板条目的复用单元：同一份条目组（如一栋建筑的
+ * 相对布局）可被跨 region/跨图的多条 template 规则引用而不产生复制漂移。
+ */
+export const TemplateRuleSourceSchema = EntityRuleBaseSchema.extend({
+  mode: z.literal("template"),
+  /** inline 模板条目（至少一条）；与 templateRef 恰好声明其一。 */
+  template: z.array(TemplateEntrySchema).min(1).optional(),
+  /** 命名模板组引用（文档顶层 templates 字典键，非空）；与 template 恰好声明其一。 */
+  templateRef: z.string().min(1).optional(),
+}).superRefine((rule, ctx) => {
+  const hasInline = rule.template !== undefined;
+  const hasRef = rule.templateRef !== undefined;
+  if (hasInline === hasRef) {
+    ctx.addIssue({
+      code: "custom",
+      message: `template rule on map "${rule.map}" region "${rule.region}" kind "${rule.kind}": declare exactly one of "template" (inline entries) or "templateRef" (named group)`,
+    });
+  }
+});
+
+/** 文档形态规则联合（解析前；density/exact 与标准形态同构，仅 template 分支放宽）。 */
+export const EntityRuleSourceSchema = z.discriminatedUnion("mode", [
+  DensityRuleSchema,
+  ExactRuleSchema,
+  TemplateRuleSourceSchema,
+]);
+
+/**
+ * entity-rules.json 文档 schema：可选的命名模板组字典（组名 → 非空条目数组）
+ * + 规则数组。文档不带 templates 段即无命名组（纯 inline 形态，向后兼容）。
+ */
+export const EntityRulesDocumentSchema = z.object({
+  /** 命名模板组字典：组名（非空）→ 模板条目数组（非空）。 */
+  templates: z.record(z.string().min(1), z.array(TemplateEntrySchema).min(1)).optional(),
+  /** 实体演化规则数组（template 规则可为 templateRef 文档形态）。 */
+  rules: z.array(EntityRuleSourceSchema),
+});
+
+export type TemplateRuleSource = z.infer<typeof TemplateRuleSourceSchema>;
+export type EntityRuleSource = z.infer<typeof EntityRuleSourceSchema>;
+export type EntityRulesDocument = z.infer<typeof EntityRulesDocumentSchema>;
+
 /**
  * 规则身份键：选点流派生的 ruleId 输入（见 placement.ts derivePlacementSeed）。
  *
  * 规则无显式 id 字段，身份由内容键（map|region|kind|mode）派生——同身份恒同
  * 候选序列（U4），内容变化即换流。配置不应声明身份键完全相同的两条规则
- * （引用完整性校验归后续 todo）。
+ * （开机去重校验见 boot.ts assertUniqueRuleIdentity；加载期 templateRef
+ * 解析失败的错误消息也引用本键）。
  */
 export function ruleIdentity(rule: EntityRule): string {
   return `${rule.map}|${rule.region}|${rule.kind}|${rule.mode}`;

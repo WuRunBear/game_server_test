@@ -28,6 +28,7 @@ export { Player, Enemy, NPC, Item, Resource } from "components/tags";
 // —— 需求/资源/掉落（AoS 数据组件） ——
 export { Needs, initNeeds, type Need } from "components/needs";
 export { ResourceNode, initResourceNode, type ResourceNodeState } from "components/resourceNode";
+export { Nest, initNest, type NestState } from "components/nest";
 export { LootTable, initLootTable, type LootEntry } from "components/loot";
 // —— 感知 ——
 export { Perception } from "components/perception";
