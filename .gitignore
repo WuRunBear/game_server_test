@@ -10,4 +10,6 @@ logs
 data/saves
 .omo
 out/
-.well-knowntmp/
+.well-known
+tmp/
+
