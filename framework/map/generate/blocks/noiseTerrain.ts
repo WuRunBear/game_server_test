@@ -262,16 +262,16 @@ function smootherstep(t: number): number {
 /**
  * 径向掩膜衰减系数：按"距地图边缘的归一化距离"衰减采样值。
  *
- * d = 最近边距 / (较短边长的一半)，边缘 0、地图中心 1；falloff 控制掩膜
- * 从边缘向内覆盖的归一化宽度——d ≤ 1 - falloff 的内圈不衰减，越靠外
- * 衰减越强，边缘处经 smootherstep 平滑趋零。同 (width, height, falloff)
- * 的系数是纯几何函数，与随机流无关。
+ * d = 最近边距 / (较短边长的一半)，边缘 0、地图中心 1；falloff 即海洋环带
+ * 的归一化宽度——d ≥ falloff 的内部不衰减（系数 1），d ∈ [0, falloff) 的
+ * 环带内越靠边缘衰减越强，边缘处经 smootherstep 平滑趋零。同
+ * (width, height, falloff) 的系数是纯几何函数，与随机流无关。
  */
 function falloffFactor(x: number, y: number, width: number, height: number, falloff: number): number {
   const halfMin = Math.min(width, height) / 2;
   const edgeDist = Math.min(x, y, width - 1 - x, height - 1 - y);
   const d = Math.min(1, edgeDist / halfMin);
-  const t = Math.min(1, Math.max(0, (d - (1 - falloff)) / falloff));
+  const t = Math.min(1, d / falloff);
   return smootherstep(t);
 }
 

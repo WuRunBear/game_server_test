@@ -26,8 +26,12 @@ export const MapGenerationStepSchema = z.object({
 /** 管道地图条目：seed + 初始演化跨度 + 积木管道。 */
 export const PipelineMapEntrySchema = z.object({
   kind: z.literal("pipeline"),
-  /** 随机种子（各管道步骤经 seed + 步骤序号派生独立流，同 seed 同产出）。 */
-  seed: z.number(),
+  /**
+   * 随机种子（各管道步骤经 seed + 步骤序号派生独立流，同 seed 同产出）。
+   * 可省略：省略时新档开机随机生成并随首存快照固化（WorldRecord.mapSeeds），
+   * 读档复用快照 seed（见 boot.ts 的解析流程与 map/runtime/mapSeeds.ts）。
+   */
+  seed: z.number().optional(),
   /** 开机初始演化跨度（tick）：无档启动时该图从 0 演化到该时刻。 */
   initialAgeTicks: z.number().int().min(0),
   /** 生成积木管道（按声明顺序执行，至少一步）。 */
@@ -73,8 +77,11 @@ export type TiledMapEntryJson = z.infer<typeof TiledMapEntrySchema>;
 export interface MapConfig {
   /** 地图 key（registry 中的稳定标识，运行时命名空间键）。 */
   key: string;
-  /** 随机种子。 */
-  seed: number;
+  /**
+   * 随机种子（配置声明值；可缺省——缺省时 bootMaps 按
+   * record.mapSeeds → config.seed → 随机 的顺序解析，见 mapSeeds.ts）。
+   */
+  seed?: number;
   /** 开机初始演化跨度（tick）。 */
   initialAgeTicks: number;
   /** 生成积木管道。 */

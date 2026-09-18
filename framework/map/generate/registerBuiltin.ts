@@ -13,13 +13,14 @@ import { noiseTerrain } from "map/generate/blocks/noiseTerrain";
 import { regionStats } from "map/generate/blocks/regionStats";
 import { roomCorridor } from "map/generate/blocks/roomCorridor";
 import { slotRooms } from "map/generate/blocks/slotRooms";
+import { stampTemplate } from "map/generate/blocks/stampTemplate";
 import { smoothTerrain } from "map/generate/blocks/smoothTerrain";
 import { tiledSource } from "map/generate/blocks/tiledSource";
 
 /**
  * 注册全部内置生成积木（"noise-terrain" / "climate-regions" /
  * "room-corridor" / "tiled-source" / "region-stats" / "smooth-terrain" /
- * "height-channel" / "height-mask" / "slot-rooms"）。
+ * "height-channel" / "height-mask" / "slot-rooms" / "stamp-template"）。
  *
  * @param registry 生成积木注册表（由 bootstrap 创建后传入）
  */
@@ -33,4 +34,5 @@ export function registerBuiltinMapGenerators(registry: GeneratorRegistry): void 
   registry.register("height-channel", heightChannel);
   registry.register("height-mask", heightMask);
   registry.register("slot-rooms", slotRooms);
+  registry.register("stamp-template", stampTemplate);
 }

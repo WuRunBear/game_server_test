@@ -572,9 +572,11 @@ describe("Slice 4：真实 game 配置（昼夜 + 条件刷怪 + 光源 + 放置
     const daynight = def.resolvedRules["daynight"] as { cycleLengthSec: number };
     expect(daynight.cycleLengthSec).toBe(600);
 
-    // 存在引用 isNight 条件的演化规则（真实配置加载即校验通过）
-    const conditioned = def.resolvedEntityRules.filter((r) => r.condition === "isNight");
-    expect(conditioned.length).toBeGreaterThan(0);
+    // isNight 条件刷怪已迁入 ecosystems.json（加载期同链校验通过）
+    const ecoConditioned = (def.resolvedEcosystems?.ecosystems ?? []).some((e) =>
+      e.spawnTable.some((s) => "condition" in s && s.condition === "isNight"),
+    );
+    expect(ecoConditioned).toBe(true);
 
     const kit = def.resolvedItems.find((i) => i.kind === "campfire_kit");
     expect(kit?.place?.archetype).toBe("campfire");

@@ -22,12 +22,18 @@ import { ItemKindSchema, type ItemKindSpec } from "framework/config/schema/ItemK
 import { DialogueRegistrySchema, type DialogueTreeJson } from "framework/config/schema/DialogueSchema";
 import { QuestRegistrySchema, type QuestDefinitionJson } from "framework/config/schema/QuestSchema";
 import { MapRegistrySchema, type MapConfig } from "framework/config/schema/MapRegistrySchema";
+import {
+  EcosystemsSchema,
+  type EcosystemsJson,
+} from "framework/config/schema/EcosystemsSchema";
 import { EntityRuleSchema, type EntityRule } from "map/evolution/schema";
 import type { PlayerRule } from "framework/config/schema/PlayerRuleSchema";
 import { getRuleSchema } from "framework/config/schema/ruleSchemas";
 import { hasSpawnCondition } from "framework/systems/gameplay/spawnConditions";
 import { WILDERNESS } from "map/generate/blocks/climateRegions";
 import { tiledRegionNames } from "map/generate/blocks/tiledSource";
+import { stampTemplateRegionNames } from "map/generate/blocks/stampTemplate";
+import type { MapGenerationStep } from "map/generate/types";
 import { getRegistries } from "framework/bootstrap";
 import type { ArchetypeSpec } from "framework/entities/archetypeRegistry";
 
@@ -160,9 +166,50 @@ function loadQuestsFile(baseDir: string, pattern?: string): QuestDefinitionJson[
 }
 
 /**
+ * 内联管道步骤的 tiledPath 模板（stamp-template 的加载期约定，积木零
+ * 文件 I/O）：读文件 → params.tiled，删除 tiledPath。路径相对地图注册表
+ * 文件所在目录解析（与 kind:"tiled" 的 path 一致）。缺文件/解析失败/
+ * 与 tiled 同时声明/tiledPath 非字符串 → 抛错点名地图 key、步骤与路径。
+ */
+function inlineTemplateTiled(
+  key: string,
+  stepIndex: number,
+  step: MapGenerationStep,
+  registryDir: string,
+): MapGenerationStep {
+  const params = step.params;
+  if (!params || params.tiledPath === undefined) return step;
+  if (params.tiled !== undefined) {
+    throw new Error(
+      `map "${key}" pipeline step ${stepIndex} (${step.generator}): params declare both "tiled" and "tiledPath" — declare exactly one`,
+    );
+  }
+  if (typeof params.tiledPath !== "string") {
+    throw new Error(
+      `map "${key}" pipeline step ${stepIndex} (${step.generator}): params.tiledPath must be a string path, got ${String(params.tiledPath)}`,
+    );
+  }
+  let tiledJson: unknown;
+  try {
+    tiledJson = readJsonFile(resolve(registryDir, params.tiledPath));
+  } catch (err) {
+    throw new Error(
+      `map "${key}" pipeline step ${stepIndex} (${step.generator}): template "${params.tiledPath}" failed to load: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+  const inlined: Record<string, unknown> = { ...params, tiled: tiledJson };
+  delete inlined.tiledPath;
+  return { ...step, params: inlined };
+}
+
+/**
  * 解析地图注册表：返回全部地图生成配置（key = 地图 registry key）。
  * Tiled 条目在此读取其 JSON 文件并内联进 tiled-source 积木参数——缺文件/
- * 解析失败在此处报错（积木本身不做文件 I/O）；无注册表/无地图时返回空。
+ * 解析失败在此处报错（积木本身不做文件 I/O）；管道步骤的 tiledPath 模板
+ * 同样在此读文件内联为 params.tiled（stamp-template 加载期约定）；无
+ * 注册表/无地图时返回空。
  */
 function resolveMapConfigs(baseDir: string, mapRegistryPath?: string): MapConfig[] {
   if (!mapRegistryPath) return [];
@@ -172,10 +219,11 @@ function resolveMapConfigs(baseDir: string, mapRegistryPath?: string): MapConfig
   const raw = readJsonFile(fullPath);
   const registry = MapRegistrySchema.parse(raw);
   const configs: MapConfig[] = [];
+  const registryDir = dirname(fullPath);
 
   for (const [key, entry] of Object.entries(registry.maps)) {
     if (entry.kind === "tiled") {
-      const tiledPath = resolve(dirname(fullPath), entry.path);
+      const tiledPath = resolve(registryDir, entry.path);
       let tiledJson: unknown;
       try {
         tiledJson = readJsonFile(tiledPath);
@@ -197,7 +245,7 @@ function resolveMapConfigs(baseDir: string, mapRegistryPath?: string): MapConfig
         key,
         seed: entry.seed,
         initialAgeTicks: entry.initialAgeTicks,
-        pipeline: entry.pipeline,
+        pipeline: entry.pipeline.map((step, stepIndex) => inlineTemplateTiled(key, stepIndex, step, registryDir)),
       });
     }
   }
@@ -217,9 +265,25 @@ function loadEntityRules(baseDir: string, entityRulesPath?: string): EntityRule[
 }
 
 /**
+ * 加载生态声明层文件（{ ecosystems: EcosystemEntry[] }，B1 编译器模式的
+ * 声明源）：整体 zod 校验（strictObject——未知字段即抛错，拼写错误在加载
+ * 期 fail-fast）。展开本身归 bootMaps（density 需查区域面积，几何在开机
+ * 期才生成/回填），此处只加载声明。路径缺省/文件不存在返回 undefined
+ * （与 entityRules 的缺省约定一致：未声明即无生态层）。
+ */
+function loadEcosystemsFile(baseDir: string, ecosystemsPath?: string): EcosystemsJson | undefined {
+  if (!ecosystemsPath) return undefined;
+  const fullPath = resolve(baseDir, ecosystemsPath);
+  if (!existsSync(fullPath)) return undefined;
+
+  return EcosystemsSchema.parse(readJsonFile(fullPath));
+}
+
+/**
  * 收集一张地图生成后将存在的全部区域名（实体演化规则 region 引用的合法集合）：
  * - climate-regions 步骤的 params.names（命名区域）；
  * - tiled-source 步骤 zones 层产出的区域名（与积木同源解析）；
+ * - stamp-template 步骤模板 zones 层产出的区域名（与积木同源解析）；
  * - 隐式兜底区 wilderness（未被命名区域认领的格子归属，恒合法）。
  *
  * 只做名字收集，不校验各积木参数形状——参数错误由积木在生成期自行抛错。
@@ -238,6 +302,10 @@ function collectMapRegionNames(config: MapConfig): Set<string> {
       for (const name of tiledRegionNames(step.params.tiled, config.key)) {
         names.add(name);
       }
+    } else if (step.generator === "stamp-template" && step.params?.tiled !== undefined) {
+      for (const name of stampTemplateRegionNames(step.params.tiled, config.key)) {
+        names.add(name);
+      }
     }
   }
   return names;
@@ -252,7 +320,8 @@ function collectMapRegionNames(config: MapConfig): Set<string> {
  * itemKind/victimKind/奖励。
  *
  * region 校验针对「生成后将存在的完整区域集合」（climate 命名区 ∪ 隐式
- * wilderness ∪ tiled zones），任一来源合法即可；exact 落点是否合法依赖生成后
+ * wilderness ∪ tiled zones ∪ stamp-template 模板 zones），任一来源合法即可；
+ * exact 落点是否合法依赖生成后
  * 的几何，由开机全局校验负责，此处不查。
  *
  * 若框架尚未 bootstrap（注册表不可用，如纯类型测试场景）则静默跳过校验。
@@ -315,6 +384,36 @@ function validateIntegrity(data: LoadedGameDefinition): void {
         throw new Error(
           `Entity rule for "${rule.kind}" on map "${rule.map}" references unknown region "${rule.region}" (not produced by any generation source)`,
         );
+      }
+    }
+
+    // 生态声明层（B1）引用校验：biome 须至少落在**一张**配置图的区域集合内
+    // （同 biome 跨图声明合法——展开器按图各自展开，不要求全部图都有）；
+    // kind ∈ 原型（density 条目为普通 kind，无 template 子条目）；
+    // condition ∈ spawnConditions 注册表。错误消息点名 biome/kind 与文件路径。
+    const ecosystemsPath = data.map?.ecosystems;
+    for (const eco of data.resolvedEcosystems?.ecosystems ?? []) {
+      const biomeExists = data.resolvedMapConfigs.some((config) =>
+        collectMapRegionNames(config).has(eco.biome),
+      );
+      if (!biomeExists) {
+        throw new Error(
+          `Ecosystem biome "${eco.biome}" (${ecosystemsPath}) does not match any configured map's regions`,
+        );
+      }
+      for (const entry of eco.spawnTable) {
+        const kindExists = data.resolvedEntities.some((e) => e.kind === entry.kind) ||
+          archetypeRegistry.has(entry.kind);
+        if (!kindExists) {
+          throw new Error(
+            `Ecosystem entry for biome "${eco.biome}" (${ecosystemsPath}) references unknown kind "${entry.kind}"`,
+          );
+        }
+        if ("condition" in entry && entry.condition && !hasSpawnCondition(entry.condition)) {
+          throw new Error(
+            `Ecosystem entry for biome "${eco.biome}" (${ecosystemsPath}) references unknown condition "${entry.condition}"`,
+          );
+        }
       }
     }
 
@@ -477,9 +576,12 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
   const resolvedQuests = loadQuestsFile(baseDir, gameDef.quests);
   const resolvedMapConfigs = resolveMapConfigs(baseDir, gameDef.map?.registry);
   const resolvedEntityRules = loadEntityRules(baseDir, gameDef.map?.entityRules);
+  const resolvedEcosystems = loadEcosystemsFile(baseDir, gameDef.map?.ecosystems);
   const resolvedPlayerRule = resolvedRules["player"] as PlayerRule | undefined;
 
-  // 合并为最终定义：主配置字段 + 各 resolved* 资源数据 + 地图生成配置
+  // 合并为最终定义：主配置字段 + 各 resolved* 资源数据 + 地图生成配置。
+  // 规则双列表：resolvedStaticEntityRules 保持 entity-rules.json 原样（pristine），
+  // resolvedEntityRules 为合并/活列表——boot 期由静态列表 + 生态展开产物重算。
   const loaded: LoadedGameDefinition = {
     ...gameDef,
     resolvedEntities,
@@ -490,6 +592,8 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
     resolvedQuests,
     resolvedMapConfigs,
     resolvedEntityRules,
+    resolvedStaticEntityRules: resolvedEntityRules,
+    resolvedEcosystems,
     resolvedPlayerRule,
   };
 
@@ -528,5 +632,9 @@ export function createDefaultGameDefinition(): LoadedGameDefinition {
     resolvedQuests: [],
     resolvedMapConfigs: [],
     resolvedEntityRules: [],
+    // 注意：此处故意不赋 resolvedStaticEntityRules（可选字段）——手工构造的
+    // def（含本缺省定义）通常只填 resolvedEntityRules，bootMaps 首次开机把
+    // 它固化为静态基准；若此处赋空数组会把"静态为空"误当成 pristine 基准，
+    // 开机时清掉调用方写入 resolvedEntityRules 的规则。
   };
 }

@@ -3,8 +3,9 @@
  *
  * 客户端经 PlayerCommand `place` 调用 placeEntity；服务端校验并变更：
  * 物品 kind 声明 `place.archetype`（要放置成哪种实体）→ 校验占位尺寸来源
- * （Placeable 组件配置，回退 Size）→ 距离 / 实体重叠 / 地图阻挡校验（零副作用）
- * → 消耗 1 个该物品 → spawnEntity 目标 archetype。
+ * （Placeable 组件配置，未声明按 16×16 兜底——与演化链 footprint 同源，
+ * 见 components/placeable.ts 的 footprintOf）→ 距离 / 实体重叠 / 地图阻挡
+ * 校验（零副作用）→ 消耗 1 个该物品 → spawnEntity 目标 archetype。
  *
  * S6 扩展（建造闭环）：
  * - 网格对齐：rules/place.json 的 `gridSnap`（缺省 false 保持旧行为）开启时，
@@ -17,10 +18,10 @@
  * 校验全部在消耗之前完成：任一校验失败即拒绝，不留半成品状态。
  * 放置范围经 rules/place.json 的 placeRange 配置（缺省 64）。
  */
-import { Transform, Inventory, NetworkId, Placeable, GridOccupancy, entityMapOf } from "components";
+import { Transform, Inventory, NetworkId, Placeable, GridOccupancy, entityMapOf, footprintOf } from "components";
 import { spawnEntity } from "framework/entities/spawn";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
-import type { ArchetypeRegistry, ArchetypeSpec } from "framework/entities/archetypeRegistry";
+import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import {
   overlapsAnyEntity,
   overlapsMapBlocked,
@@ -36,19 +37,6 @@ interface PlaceRule {
 }
 
 const DEFAULT_PLACE_RANGE = 64;
-const FALLBACK_FOOTPRINT = 16;
-
-/** 目标 archetype 的占位尺寸：Placeable 组件配置优先，回退 Size，再回退兜底值。 */
-function footprintOf(archetype: ArchetypeSpec): { w: number; h: number } {
-  const placeable = archetype.components["Placeable"] as
-    | { footprintW?: number; footprintH?: number }
-    | undefined;
-  const size = archetype.components["Size"] as { w?: number; h?: number } | undefined;
-  return {
-    w: placeable?.footprintW ?? size?.w ?? FALLBACK_FOOTPRINT,
-    h: placeable?.footprintH ?? size?.h ?? FALLBACK_FOOTPRINT,
-  };
-}
 
 /**
  * 放置原子：把玩家背包 slot 中的可放置物品放置到 (x, y)。

@@ -1,0 +1,14 @@
+{
+  "kind": "mushroom",
+  "tags": ["Resource"],
+  "components": {
+    "Size": { "w": 16, "h": 16 },
+    "ResourceNode": {
+      "remaining": 3,
+      "max": 3,
+      "amountPerHit": 1,
+      "regenMs": 90000,
+      "yieldsKind": "berry"
+    }
+  }
+}

@@ -35,7 +35,11 @@ export { Perception } from "components/perception";
 export { Equipment } from "components/equipment";
 export { CraftingStation } from "components/craftingStation";
 export { LightSource } from "components/lightSource";
-export { Placeable } from "components/placeable";
+export {
+  Placeable,
+  FALLBACK_FOOTPRINT,
+  footprintOf,
+} from "components/placeable";
 export { GridOccupancy } from "components/gridOccupancy";
 // —— 传送门/对话/任务/好感/意图/种类（AoS 数据组件） ——
 export { Portal, initPortal, type PortalState } from "components/portal";

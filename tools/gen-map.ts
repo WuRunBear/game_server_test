@@ -33,7 +33,11 @@ export function genMap(argv: string[]): void {
       throw new Error(`地图 "${mapKey}" 未在配置中找到。可用: ${available}`);
     }
 
-    const geometry = buildMapGeometry(config, getRegistries().mapGeneratorRegistry);
+    // seed 缺省的图按 0 生成（工具侧无存档快照可回读；boot 侧随机解析见 mapSeeds.ts）
+    const geometry = buildMapGeometry(
+      { key: config.key, seed: config.seed ?? 0, pipeline: config.pipeline },
+      getRegistries().mapGeneratorRegistry,
+    );
     const snapshot = serializeGeometry(geometry);
 
     const outDir = resolve(process.cwd(), args.out ?? "out");

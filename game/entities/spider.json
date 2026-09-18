@@ -1,0 +1,16 @@
+{
+  "kind": "spider",
+  "tags": ["NPC", "Enemy"],
+  "components": {
+    "Size": { "w": 16, "h": 12 },
+    "Velocity": {},
+    "Collider": { "shape": 1, "halfW": 8, "halfH": 6 },
+    "Health": { "current": 45, "max": 45 },
+    "Attack": { "value": 7, "range": 28 },
+    "Cooldown": {},
+    "Perception": { "visionRadius": 160, "hostilityRange": 90 },
+    "LootTable": [{ "kind": "raw_meat", "qty": 1, "chance": 1.0 }]
+  },
+  "behavior": "wolf-night",
+  "team": 2
+}

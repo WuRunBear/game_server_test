@@ -25,6 +25,7 @@ import { Player } from "framework/components/tags";
 import { spawnEntity } from "framework/entities/spawn";
 import { destroyEntity } from "framework/entities/destroyEntity";
 import { serializeGeometry, type SerializedMapGeometry } from "map/geometry/snapshot";
+import { getMapSeeds } from "map/runtime/mapSeeds";
 import type { GameWorld } from "framework/world";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { SerializedEntity, WorldRecord } from "framework/repository";
@@ -106,6 +107,9 @@ export function serializeWorld(world: GameWorld, id: string): WorldRecord {
   for (const [key, geometry] of Object.entries(world.maps)) {
     maps[key] = serializeGeometry(geometry);
   }
+  // 每图 seed 解析结果固化进存档（bootMaps 两条开机分支写入弱表；读档路径
+  // 据此恢复演化选点流——快照回填不重建几何，但演化流须与存档世界同 seed）
+  const mapSeeds = getMapSeeds(world);
   return {
     id,
     savedAt: Date.now(),
@@ -113,6 +117,7 @@ export function serializeWorld(world: GameWorld, id: string): WorldRecord {
     nextNetworkId: world.nextNetworkId,
     timeOfDay: { ...world.time.timeOfDay },
     maps,
+    ...(mapSeeds ? { mapSeeds: { ...mapSeeds } } : {}),
     entities,
   };
 }

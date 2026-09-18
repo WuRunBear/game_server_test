@@ -98,7 +98,13 @@ function waitForListen(server: http.Server): Promise<void> {
  * （服务端同配置重建）及仿真 world.maps（bootMaps 同配置构建）同源同内容。
  */
 function expectedSnapshot(config: MapConfig): SerializedMapGeometry {
-  return serializeGeometry(buildMapGeometry(config, getRegistries().mapGeneratorRegistry));
+  // seed 缺省回退 0——与端点数据源（server.ts 同款回退）保持同源
+  return serializeGeometry(
+    buildMapGeometry(
+      { key: config.key, seed: config.seed ?? 0, pipeline: config.pipeline },
+      getRegistries().mapGeneratorRegistry,
+    ),
+  );
 }
 
 /** 请求 /maps/runtime（mapId 省略则不拼查询参数），附 x-map-version 响应头。 */
@@ -188,8 +194,8 @@ describe("地图 HTTP 端点（/maps/runtime 与 /maps/meta）", () => {
     // 真实配置的已知尺寸与 kind 钉死
     expect(meta.maps.find((m) => m.id === "island")).toMatchObject({
       kind: "noise-terrain",
-      width: 96,
-      height: 96,
+      width: 192,
+      height: 192,
       tileWidth: 16,
       tileHeight: 16,
     });
@@ -252,7 +258,7 @@ describe("地图 HTTP 端点（/maps/runtime 与 /maps/meta）", () => {
     const island = await getRuntime("island");
     const cave = await getRuntime("cave");
     expect(island.body.key).toBe("island");
-    expect(island.body.grid).toEqual({ width: 96, height: 96, tileWidth: 16, tileHeight: 16 });
+    expect(island.body.grid).toEqual({ width: 192, height: 192, tileWidth: 16, tileHeight: 16 });
     expect(cave.body.key).toBe("cave");
     expect(cave.body.grid).toEqual({ width: 64, height: 64, tileWidth: 16, tileHeight: 16 });
     expect(island.body.version).not.toBe(cave.body.version);

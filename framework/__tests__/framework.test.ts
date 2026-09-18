@@ -191,11 +191,11 @@ describe("loadGameDefinition (Item 1: sub-config loading)", () => {
     expect(combatRules.friendlyFire).toBe(false);
   });
 
-  // 演化规则：旧 spawns 规则已迁入 maps/entity-rules.json（resolvedEntityRules）
+  // 演化规则：density 类已迁入 ecosystems.json，静态规则（maps/entity-rules.json）仅剩 portal 结构规则
   it("should load entity rules from game/ directory", () => {
     const gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
     expect(gameDef.resolvedEntityRules.length).toBeGreaterThan(0);
-    expect(gameDef.resolvedEntityRules[0].kind).toBe("villager");
+    expect(gameDef.resolvedEntityRules[0].kind).toBe("portal");
   });
 
   // 地图配置：按 maps/registry.json 解析出管道生成配置

@@ -1,0 +1,14 @@
+{
+  "kind": "reed",
+  "tags": ["Resource"],
+  "components": {
+    "Size": { "w": 16, "h": 16 },
+    "ResourceNode": {
+      "remaining": 4,
+      "max": 4,
+      "amountPerHit": 1,
+      "regenMs": 60000,
+      "yieldsKind": "berry"
+    }
+  }
+}

@@ -20,9 +20,12 @@
  * 计数查询惰性到首个槽：同图同 kind 的多条规则按槽序处理时，后者的计数才能
  * 反映前者本调用内的产出。
  *
- * 读经 deps 注入（countByKind/isOccupied——真实实现 = bitecs query + Kind +
- * EntityMap + GridOccupancy，须反映本调用此前的 spawn 结果），引擎不做任何
- * 直接组件查询；写唯一通道 = deps.spawn（缺省实现走 spawnEntity 链，无旁路）。
+ * 读经 deps 注入（countByKind/canPlace——真实实现 = bitecs query + Kind +
+ * EntityMap + footprint 占用索引，须反映本调用此前的 spawn 结果），引擎不做
+ * 任何直接组件查询；写唯一通道 = deps.spawn（缺省实现走 spawnEntity 链，
+ * 无旁路）。落点合法性统一经 deps.canPlace(kind, x, y) 判定：按 kind 原型
+ * footprint 展开整矩形逐格检查（界内 + 可走 + 未占用）——多格放置物
+ * 不再只查中心格。
  *
  * condition 每 evolve 调用对每条规则求值一次（经 spawnConditions 注册表，
  * 未注册条件名抛错——配置错误尽早暴露）；求值结果对本调用内全部 timeSlot
@@ -32,7 +35,6 @@ import { spawnEntity } from "framework/entities/spawn";
 import { getSpawnCondition } from "framework/systems/gameplay/spawnConditions";
 import { createLogger } from "framework/utils/logger";
 import type { GameWorld } from "framework/world";
-import { walkableAt } from "map/geometry/query";
 import type { MapGeometry } from "map/geometry/types";
 import { pickPoint, placementCandidates } from "map/evolution/placement";
 import type { DensityRule, EntityRule, ExactRule, TemplateRule } from "map/evolution/schema";
@@ -50,20 +52,24 @@ export interface EvolutionDeps {
   seed: number;
   /** 统计 mapKey 图 region 区域内 kind 实体数（须单调反映本调用的 spawn）。 */
   countByKind(mapKey: string, region: string, kind: string): number;
-  /** tile 是否被占用（须反映本调用此前的 spawn 结果——同槽多次补足依赖它去重）。 */
-  isOccupied(mapKey: string, x: number, y: number): boolean;
+  /**
+   * kind 原型能否落位在 mapKey 图的 (x, y) 中心 tile：按原型 footprint 展开
+   * 整矩形逐格检查（界内 + 可走 + 未占用；须反映本调用此前的 spawn 结果——
+   * 同槽多次补足依赖它去重）。单格原型退化为旧的单格检查。
+   */
+  canPlace(mapKey: string, kind: string, x: number, y: number): boolean;
   /** 实体写入通道；缺省实现 = spawnEntity（overrides.mapId → EntityMap[eid]=mapKey）。 */
   spawn?: SpawnFn;
 }
 
-/** 模式分派辅助函数的共享上下文（单次 evolve 调用内不变）。 */
+/** 模式分派辅助函数的共享上下文（单次 evolve 调用内不变；mapKey 已绑定）。 */
 interface EvolutionContext {
   geometry: MapGeometry;
   mapKey: string;
   ruleId: string;
   seed: number;
   spawn: SpawnFn;
-  isOccupied: (x: number, y: number) => boolean;
+  canPlace: (kind: string, x: number, y: number) => boolean;
 }
 
 /** 活跃规则游标：k 路合并的处理单元。 */
@@ -95,7 +101,7 @@ function createDefaultSpawn(world: GameWorld): SpawnFn {
 function spawnDensity(rule: DensityRule, need: number, ctx: EvolutionContext, slot: number): number {
   let spawned = 0;
   for (let i = 0; i < need; i++) {
-    const point = pickPoint(ctx.geometry, rule.region, ctx.ruleId, slot, ctx.seed, ctx.isOccupied);
+    const point = pickPoint(ctx.geometry, rule.region, ctx.ruleId, slot, ctx.seed, rule.kind, ctx.canPlace);
     if (!point) break;
     ctx.spawn(rule.kind, ctx.mapKey, point.x, point.y);
     spawned += 1;
@@ -105,12 +111,13 @@ function spawnDensity(rule: DensityRule, need: number, ctx: EvolutionContext, sl
 
 /**
  * exact 补足：固定落点 at，每 timeSlot 至多尝试一次（同一落点单槽内至多
- * 合法容纳一个实体）。落点非法（不可走或被占用）→ 跳过并 warn；
- * 静态 exact 项的落点合法性由开机校验兜底（见计划 todo 9/11）。
+ * 合法容纳一个实体）。落点非法（按 kind footprint 整矩形：任一覆盖格越界/
+ * 不可走/被占用）→ 跳过并 warn；静态 exact 项的落点合法性由开机校验兜底
+ * （见计划 todo 9/11）。
  */
 function spawnExact(rule: ExactRule, ctx: EvolutionContext, slot: number): number {
   const { x, y } = rule.at;
-  if (walkableAt(ctx.geometry, x, y) && !ctx.isOccupied(x, y)) {
+  if (ctx.canPlace(rule.kind, x, y)) {
     ctx.spawn(rule.kind, ctx.mapKey, x, y);
     return 1;
   }
@@ -126,9 +133,10 @@ function spawnExact(rule: ExactRule, ctx: EvolutionContext, slot: number): numbe
 }
 
 /**
- * template 补足：确定性选模板原点，**先校验整组落点**（全部可走、未被占用、
- * 组内不共格）——全部合法才成组生成；任一非法换下一候选原点（候选序列不变，
- * 占用只过滤），候选耗尽则整组放弃（永不产生半座结构）。
+ * template 补足：确定性选模板原点，**先校验整组落点**（每条目按各自 kind 的
+ * footprint 经 canPlace 判定，且组内中心格互不重复）——全部合法才成组生成；
+ * 任一非法换下一候选原点（候选序列不变，占用只过滤），候选耗尽则整组放弃
+ * （永不产生半座结构）。
  *
  * 返回本槽新增的锚 kind（rule.kind）实体数 = 成组数 × 每组锚条目数。
  */
@@ -144,8 +152,7 @@ function spawnTemplate(rule: TemplateRule, groups: number, ctx: EvolutionContext
         y: origin.y + entry.dy,
       }));
       const distinct = new Set(parts.map((p) => `${p.x},${p.y}`)).size === parts.length;
-      const allLegal =
-        distinct && parts.every((p) => walkableAt(ctx.geometry, p.x, p.y) && !ctx.isOccupied(p.x, p.y));
+      const allLegal = distinct && parts.every((p) => ctx.canPlace(p.kind, p.x, p.y));
       if (!allLegal) continue;
       for (const part of parts) {
         ctx.spawn(part.kind, ctx.mapKey, part.x, part.y);
@@ -182,7 +189,7 @@ export function evolve(
 
   const mapKey = geometry.key;
   const spawn = deps.spawn ?? createDefaultSpawn(world);
-  const isOccupied = (x: number, y: number): boolean => deps.isOccupied(mapKey, x, y);
+  const canPlace = (kind: string, x: number, y: number): boolean => deps.canPlace(mapKey, kind, x, y);
 
   // 本图规则预过滤：map 归属 → condition 一次性门控 → template 锚可满足性
   const cursors: RuleCursor[] = [];
@@ -197,7 +204,7 @@ export function evolve(
       continue;
     }
     cursors.push({
-      ctx: { geometry, mapKey, ruleId: ruleIdentity(rule), seed: deps.seed, spawn, isOccupied },
+      ctx: { geometry, mapKey, ruleId: ruleIdentity(rule), seed: deps.seed, spawn, canPlace },
       rule,
       count: null,
       nextSlot: Math.floor(fromTick / rule.every) * rule.every + rule.every,

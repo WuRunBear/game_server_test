@@ -41,6 +41,13 @@ export interface WorldRecord {
    * 生成+初始演化分支）。
    */
   maps?: Record<string, SerializedMapGeometry>;
+  /**
+   * 每图随机种子表（key = 地图 registry key；新档随机种子入口，§5.4 修复
+   * 项 4）。无档启动时配置缺省 seed 的图随机生成并随首存快照固化；读档
+   * 路径据此恢复演化选点流（快照回填不重建几何，但每 tick/离线补差的
+   * evolve 流必须与存档世界一致）。缺省视为旧格式存档（回退配置 seed）。
+   */
+  mapSeeds?: Record<string, number>;
   /** 存活实体清单。 */
   entities: SerializedEntity[];
 }

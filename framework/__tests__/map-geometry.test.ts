@@ -198,4 +198,32 @@ describe("地理查询越界安全", () => {
 
     expect(regionOf(geometry, 0, 2)).toBeUndefined();
   });
+
+  it("POSITIVE：regionOf 数组直查与线性遍历参照实现逐格一致（含越界/未知索引）", () => {
+    const geometry = makeGeometry();
+
+    // 参照实现 = 优化前语义：regions 键按插入序线性遍历解析区域索引
+    const reference = (g: MapGeometry, x: number, y: number): string | undefined => {
+      if (x < 0 || y < 0 || x >= g.grid.width || y >= g.grid.height) return undefined;
+      const regionIndex = g.regionOfTile[y * g.grid.width + x] ?? -1;
+      let cursor = 0;
+      for (const name of g.regions.keys()) {
+        if (cursor === regionIndex) return name;
+        cursor += 1;
+      }
+      return undefined;
+    };
+
+    // 全格 + 越界圈逐格比对（数组直查路径与参照实现同判）
+    for (let y = -1; y <= geometry.grid.height; y++) {
+      for (let x = -1; x <= geometry.grid.width; x++) {
+        expect(regionOf(geometry, x, y)).toEqual(reference(geometry, x, y));
+      }
+    }
+
+    // 未知区域索引（≥ regions 数量）→ undefined，两实现同判
+    geometry.regionOfTile[8] = 9;
+    expect(regionOf(geometry, 0, 2)).toBeUndefined();
+    expect(reference(geometry, 0, 2)).toBeUndefined();
+  });
 });

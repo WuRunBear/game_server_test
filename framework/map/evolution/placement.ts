@@ -7,14 +7,14 @@
  * 同四参数跨运行/跨实例恒产生同一候选序列（U4）。
  *
  * 占用状态只**过滤**候选（pickPoint 取第一个通过合法性检查的候选），
- * 永不改变候选序列本身。合法性 = walkableAt（map/geometry/query）且未被占用
- * （回调注入）；区域归属由构造保证（候选只从区域 tile 池采样）。
+ * 永不改变候选序列本身。合法性完全由注入的 canPlace 回调判定（真实实现 =
+ * 按原型 footprint 展开的「界内 + 可走 + 未占用」逐格检查，见
+ * map/runtime/evolveDeps.ts）；区域归属由构造保证（候选只从区域 tile 池采样）。
  *
  * 单次放置至多尝试 PLACEMENT_MAX_ATTEMPTS 个候选，耗尽即放弃本次放置
  * （区域饱和时不会死循环）。
  */
 import { createRng } from "map/generate/rng";
-import { walkableAt } from "map/geometry/query";
 import type { MapGeometry } from "map/geometry/types";
 
 /** 单次放置的候选尝试硬上限。 */
@@ -57,13 +57,30 @@ function regionIndexOf(geometry: MapGeometry, region: string): number {
   return -1;
 }
 
+/**
+ * 区域 tile 池缓存（WeakMap 按 geometry 弱引用，MapGeometry 保持冻结语义）：
+ * regionTiles 每次 pickPoint/placementCandidates 都会重建全图扫描结果，
+ * 缓存后每 (geometry, region) 只扫一次。
+ */
+const regionTilesCache = new WeakMap<MapGeometry, Map<string, number[]>>();
+
 /** 收集区域全部 tile 索引（行主序 = 确定性顺序）；区域未注册或无格返回 []。 */
 function regionTiles(geometry: MapGeometry, region: string): number[] {
-  const regionIndex = regionIndexOf(geometry, region);
-  const tiles: number[] = [];
-  if (regionIndex < 0) return tiles;
-  for (let i = 0; i < geometry.regionOfTile.length; i++) {
-    if (geometry.regionOfTile[i] === regionIndex) tiles.push(i);
+  let byRegion = regionTilesCache.get(geometry);
+  if (!byRegion) {
+    byRegion = new Map<string, number[]>();
+    regionTilesCache.set(geometry, byRegion);
+  }
+  let tiles = byRegion.get(region);
+  if (!tiles) {
+    const regionIndex = regionIndexOf(geometry, region);
+    tiles = [];
+    if (regionIndex >= 0) {
+      for (let i = 0; i < geometry.regionOfTile.length; i++) {
+        if (geometry.regionOfTile[i] === regionIndex) tiles.push(i);
+      }
+    }
+    byRegion.set(region, tiles);
   }
   return tiles;
 }
@@ -97,9 +114,10 @@ export function placementCandidates(
 }
 
 /**
- * 从候选序列中取第一个合法落点（可走且未被占用）；候选耗尽返回 undefined。
+ * 从候选序列中取第一个合法落点（canPlace 通过：真实实现 = 按 kind 原型
+ * footprint 展开的「界内 + 可走 + 未占用」逐格检查）；候选耗尽返回 undefined。
  *
- * 占用回调只过滤候选，不改变候选序列（U4）：被占用的候选被跳过，
+ * 占用回调只过滤候选，不改变候选序列（U4）：非法的候选被跳过，
  * 后续候选仍按同一序列依次尝试。
  */
 export function pickPoint(
@@ -108,10 +126,11 @@ export function pickPoint(
   ruleId: string,
   timeSlot: number,
   seed: number,
-  isOccupied: (x: number, y: number) => boolean,
+  kind: string,
+  canPlace: (kind: string, x: number, y: number) => boolean,
 ): PlacementPoint | undefined {
   for (const candidate of placementCandidates(geometry, region, ruleId, timeSlot, seed)) {
-    if (walkableAt(geometry, candidate.x, candidate.y) && !isOccupied(candidate.x, candidate.y)) {
+    if (canPlace(kind, candidate.x, candidate.y)) {
       return candidate;
     }
   }

@@ -12,6 +12,25 @@
 import type { MapGeometry } from "map/geometry/types";
 
 /**
+ * 区域名数组缓存（按 geometry 弱引用；MapGeometry 约定不可变，regions 的
+ * 插入序即 regionOfTile 的索引序，故数组缓存与位图恒一致）。
+ *
+ * 供 regionOf 把「regions 键线性遍历」降为一次数组下标访问；本模块不向
+ * geometry 写入任何数据（WeakMap 挂在模块侧，MapGeometry 保持冻结语义）。
+ */
+const regionNamesCache = new WeakMap<MapGeometry, string[]>();
+
+/** 取 geometry 的区域名数组（下标 = regionOfTile 的区域索引），带缓存。 */
+function regionNamesOf(geometry: MapGeometry): string[] {
+  let names = regionNamesCache.get(geometry);
+  if (!names) {
+    names = [...geometry.regions.keys()];
+    regionNamesCache.set(geometry, names);
+  }
+  return names;
+}
+
+/**
  * 把 tile 坐标换算为展平数组索引；越界返回 -1。
  *
  * 非整数/NaN 坐标虽通过范围检查，但后续类型化数组按此类索引取值恒为
@@ -39,7 +58,8 @@ export function walkableAt(geometry: MapGeometry, x: number, y: number): boolean
 /**
  * 查询 (x, y) 格所属区域。
  *
- * regionOfTile 存的是 regions 插入顺序的索引，此处按序遍历区域名解析。
+ * regionOfTile 存的是 regions 插入顺序的索引，据此直查区域名数组
+ * （数组经 WeakMap 按 geometry 缓存，避免每次线性遍历区域键）。
  *
  * @param geometry 地图几何数据
  * @param x tile 列坐标
@@ -50,13 +70,8 @@ export function regionOf(geometry: MapGeometry, x: number, y: number): string | 
   const index = tileIndexOf(geometry, x, y);
   if (index < 0) return undefined;
   const regionIndex = geometry.regionOfTile[index] ?? -1;
-
-  let cursor = 0;
-  for (const name of geometry.regions.keys()) {
-    if (cursor === regionIndex) return name;
-    cursor += 1;
-  }
-  return undefined;
+  // 负值/越界索引在数组下标访问下自然得到 undefined，与线性遍历同判
+  return regionNamesOf(geometry)[regionIndex];
 }
 
 /**

@@ -8,27 +8,52 @@
         {
           "generator": "noise-terrain",
           "params": {
-            "width": 96,
-            "height": 96,
+            "width": 192,
+            "height": 192,
             "tileWidth": 16,
             "tileHeight": 16,
             "bandLevel": 0.35,
+            "falloff": 0.25,
             "groundPalette": {
               "1": 0.35,
-              "2": 0.5,
-              "3": 0.62,
-              "4": 0.8,
-              "5": 1
+              "2": 0.45,
+              "3": 0.55,
+              "4": 0.68,
+              "5": 0.8,
+              "6": 1
             },
-            "nonWalkableSemantics": [1, 2]
+            "nonWalkableSemantics": [1]
           }
+        },
+        {
+          "generator": "smooth-terrain",
+          "params": { "maxRounds": 4, "nonWalkableSemantics": [1] }
         },
         {
           "generator": "climate-regions",
           "params": {
-            "names": ["beach", "plain", "forest", "mountain"],
-            "style": "noise"
+            "names": ["beach", "grassland", "forest", "swamp", "rocky"],
+            "style": "noise",
+            "minArea": 800
           }
+        },
+        {
+          "generator": "stamp-template",
+          "params": {
+            "tiledPath": "templates/pig-village.json",
+            "region": "grassland"
+          }
+        },
+        {
+          "generator": "stamp-template",
+          "params": {
+            "tiledPath": "templates/stone-circle.json",
+            "region": "rocky"
+          }
+        },
+        {
+          "generator": "region-stats",
+          "params": {}
         }
       ]
     },

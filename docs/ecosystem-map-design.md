@@ -241,3 +241,28 @@ boot 冒烟 → `pnpm test` 全绿 → 性能抽查（192×192 boot 生成耗时
 | 区域×物种表条目多（~40 条） | 已由生态声明层（§5.5）聚合化解：density 按 biome 聚合声明，结构规则量小 |
 | Tiled 模板制作工作量 | 第一版仅 2~3 个模板，模板即内联 JSON 可程序生成后再手修 |
 | 语义 id 表漂移（配置与模板不一致） | 模板 ground 值域校验 + validate 出口校验 + export-map PNG 人工对比 |
+
+## 11. 实施记录（切片①，2026-09-18 完成）
+
+649 项测试全绿；boot 实体 island 280 / cave 17；headless avg tick 1.2ms（20tps 预算的 2.4%）；
+island 62% 陆地、单一连通域。实施中固化如下决策与偏差（后续切片以此为准）：
+
+1. **falloff 掩膜形状修复**：原实现把 d ≤ 1−falloff 整块硬归零、仅中心爬升，陆地半径被数学
+   封死（≈0.6×半短边，任何 falloff 都造不出环带大岛）。改为「边缘趋零、d ≥ falloff 平坦不
+   衰减」——falloff 语义 = 海洋环带归一化宽度。island 实配 falloff 0.25 +
+   smooth-terrain maxRounds 4（兼消噪点湖碎片）。
+2. **生态展开面积语义**：density 的 max 按 region 的**可走**格数推导（region 覆盖全图含
+   洋面，按总格数会把 max 膨胀 ~10×）。
+3. **`every` 双重门控**：every 同时门控首刷与再生。准不可再生物种（§7）的 every 取
+   initialAgeTicks（island 155520000）——boot 首刷必进档，再生周期 ≈90 天。
+4. **占位语义收窄**：footprint 只认 `Placeable.footprintW/H`（16px 兜底）；Size 是碰撞盒
+   语义不入占位。按 Size 展开曾把 Size 32×32 的回程门判成 2×2 非法落位 → 每槽重试告警
+   风暴（logs/game.log 涨到 40GB）。
+5. **portal 落点约定**：传送落点必须偏离对端 portal 本格（Chebyshev ≤ 2 内选邻格）——
+   落在本格会落地即回传（乒乓）。island portal (96,96) ↔ portal_back 落点 (98,96)；
+   cave 落点 (30,32)。规则 region 与实际落点区域对齐（island rocky / cave wilderness）
+   以消除每槽重数告警。
+6. **内容密度标定**：cave plain 可走仅 179 格，密度按原始数量反推（berry 0.017 / tree
+   0.012 / rock 0.045 / boar 0.017）；grassland 1820 格同法上调。地图管线：noise-terrain →
+   smooth-terrain → climate-regions → stamp×2（pig-village / stone-circle 均 region 模式，
+   确定性落点）→ region-stats。

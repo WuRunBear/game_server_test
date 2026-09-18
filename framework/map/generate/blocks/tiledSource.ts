@@ -19,6 +19,10 @@
  * loadGameDefinition 在加载期读文件内联进配置）——本积木不做任何文件 I/O，
  * 拒绝 path 形式的参数。Tiled 导入完全由其 JSON 决定，不使用 ctx.rng。
  *
+ * 共享解析原语：parseDimensions / parseLayers / extractZones 同时导出给
+ * stamp-template 积木复用（stamp-template 的重名 zone 语义不同——同键合并
+ * 而非抛错——故重名检查归 parseZones，由本积木独有）。
+ *
  * 区域兜底：不被任何 zone 覆盖的格子指向隐式兜底区 "wilderness"（追加在
  * 全部 zone 之后；若某 zone 已占用该名字，则该 zone 即兜底区）——几何模型
  * 要求每格区域索引可解析。
@@ -55,7 +59,7 @@ type TiledObject = {
 };
 
 /** Tiled 网格图层（data 为按行展平的 tile id 数组，0 表示空 tile）。 */
-type TiledTileLayer = {
+export type TiledTileLayer = {
   type: "tilelayer";
   name: string;
   width: number;
@@ -71,7 +75,7 @@ type TiledObjectGroupLayer = {
 };
 
 /** 图层联合类型（tile 网格 或 对象组）。 */
-type TiledLayer = TiledTileLayer | TiledObjectGroupLayer;
+export type TiledLayer = TiledTileLayer | TiledObjectGroupLayer;
 
 /** Tiled 导出 JSON 的顶层结构（只取本模块关心的字段）。 */
 type TiledMap = {
@@ -83,7 +87,7 @@ type TiledMap = {
 };
 
 /** 解析后的区域（写入 regions 前的中间形态）。 */
-type ParsedZone = {
+export type ParsedZone = {
   /** 区域名（regions Map 的键）。 */
   name: string;
   /** Tiled zoneId（保留进 RegionMeta.meta，供下游引用）。 */
@@ -136,13 +140,14 @@ function getProp(props: TiledProperty[] | undefined, name: string): unknown {
 
 /**
  * 校验并归一化 Tiled 顶层尺寸字段（迁移自 mapRuntimeFromTiled 的尺寸读取，
- * 由「静默兜底」改为「畸形即抛错」）。
+ * 由「静默兜底」改为「畸形即抛错」）。供 tiled-source 与 stamp-template
+ * 共用（同一套 Tiled 解析约定）。
  *
  * @param map 内联 Tiled JSON 对象
  * @param key 地图 key（错误消息用）
  * @returns 归一化后的 width/height（≥1 的整数）与 tileWidth/tileHeight
  */
-function parseDimensions(
+export function parseDimensions(
   map: Record<string, unknown>,
   key: string,
 ): { width: number; height: number; tileWidth: number; tileHeight: number } {
@@ -174,12 +179,13 @@ function parseDimensions(
 
 /**
  * 校验并取出 layers 数组（旧实现缺省视为空数组；积木侧按畸形输入抛错）。
+ * 供 tiled-source 与 stamp-template 共用（同一套 Tiled 解析约定）。
  *
  * @param map 内联 Tiled JSON 对象
  * @param key 地图 key（错误消息用）
  * @returns 校验后的图层数组
  */
-function parseLayers(map: Record<string, unknown>, key: string): TiledLayer[] {
+export function parseLayers(map: Record<string, unknown>, key: string): TiledLayer[] {
   const layers = map.layers;
   if (!Array.isArray(layers)) {
     throw new Error(`map "${key}": params.tiled is missing a "layers" array`);
@@ -193,15 +199,16 @@ function parseLayers(map: Record<string, unknown>, key: string): TiledLayer[] {
 }
 
 /**
- * 从 Tiled 地图中解析 zones 对象层（迁移自 tiled.ts parseZones，逻辑一致）。
+ * 从 Tiled 图层数组中提取 zones 对象层的全部 zone 对象（纯提取：type="zone"
+ * 且带 properties.zoneId；有 polygon 用多边形顶点，否则退回矩形兜底）。
+ *
+ * 重名语义归各积木自己的约定，本函数不做处理：tiled-source 视重名为畸形
+ * 抛错（parseZones），stamp-template 视重名为同键合并。
  *
  * @param layers 图层数组
- * @param key 地图 key（错误消息用）
  * @returns 按声明顺序排列的区域列表
- * @throws Error 当两个 zone 对象解析出相同区域名时（新模型以名字为区域键，
- *   重名无法表达，按畸形输入拒绝）
  */
-function parseZones(layers: TiledLayer[], key: string): ParsedZone[] {
+export function extractZones(layers: TiledLayer[]): ParsedZone[] {
   const zones: ParsedZone[] = [];
   const zoneLayer = layers.find((l): l is TiledObjectGroupLayer => {
     return l.type === "objectgroup" && l.name === "zones";
@@ -216,9 +223,6 @@ function parseZones(layers: TiledLayer[], key: string): ParsedZone[] {
     if (zoneId === null) continue;
 
     const name = asString(getProp(obj.properties, "name")) ?? obj.name ?? `zone_${zoneId}`;
-    if (zones.some((z) => z.name === name)) {
-      throw new Error(`map "${key}": params.tiled zones layer has duplicate zone name "${name}"`);
-    }
 
     const polygon: Array<{ x: number; y: number }> = [];
     if (obj.polygon && obj.polygon.length > 0) {
@@ -235,6 +239,25 @@ function parseZones(layers: TiledLayer[], key: string): ParsedZone[] {
     zones.push({ name, zoneId, polygon });
   }
 
+  return zones;
+}
+
+/**
+ * 从 Tiled 地图中解析 zones 对象层（tiled-source 语义：两个 zone 对象解析出
+ * 相同区域名 → 抛错——新模型以名字为区域键，重名无法表达，按畸形输入拒绝）。
+ *
+ * @param layers 图层数组
+ * @param key 地图 key（错误消息用）
+ * @returns 按声明顺序排列的区域列表
+ * @throws Error 当两个 zone 对象解析出相同区域名时
+ */
+function parseZones(layers: TiledLayer[], key: string): ParsedZone[] {
+  const zones = extractZones(layers);
+  for (const zone of zones) {
+    if (zones.some((z) => z.name === zone.name && z !== zone)) {
+      throw new Error(`map "${key}": params.tiled zones layer has duplicate zone name "${zone.name}"`);
+    }
+  }
   return zones;
 }
 

@@ -6,6 +6,7 @@
   "map": {
     "registry": "./maps/registry.json",
     "entityRules": "./maps/entity-rules.json",
+    "ecosystems": "./ecosystems.json",
     "default": "island"
   },
   "systems": [

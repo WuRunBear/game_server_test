@@ -2,8 +2,8 @@
  * 内置生成积木注册测试（framework/__tests__/map-block-register.test.ts）。
  *
  * 覆盖计划 todo 3 注册接线验收：
- * - registerBuiltinMapGenerators 注册九个内置积木 id（has 全真）；
- * - 注册表恰好含这九条（all 长度 = 9 且 id 集合一致）；
+ * - registerBuiltinMapGenerators 注册十个内置积木 id（has 全真）；
+ * - 注册表恰好含这十条（all 长度 = 10 且 id 集合一致）；
  * - 端到端：注册表 + buildMapGeometry 跑 noise-terrain → climate-regions
  *   管道产出合法 MapGeometry（证明注册的是真实积木而非占位）；
  * - 新积木端到端：slot-rooms 首积木 + region-stats 精修 + smooth-terrain
@@ -16,7 +16,7 @@ import { createGeneratorRegistry } from "map/generate/generatorRegistry";
 import { buildMapGeometry } from "map/generate/pipeline";
 import type { MapGenerationConfig } from "map/generate/types";
 
-/** 九个内置积木的注册名（与 registerBuiltin.ts 一一对应）。 */
+/** 十个内置积木的注册名（与 registerBuiltin.ts 一一对应）。 */
 const BLOCK_IDS = [
   "noise-terrain",
   "climate-regions",
@@ -27,10 +27,11 @@ const BLOCK_IDS = [
   "height-channel",
   "height-mask",
   "slot-rooms",
+  "stamp-template",
 ] as const;
 
 describe("registerBuiltinMapGenerators", () => {
-  it("注册九个内置积木 id（has 全真）", () => {
+  it("注册十个内置积木 id（has 全真）", () => {
     const registry = createGeneratorRegistry();
     registerBuiltinMapGenerators(registry);
     for (const id of BLOCK_IDS) {
@@ -38,11 +39,11 @@ describe("registerBuiltinMapGenerators", () => {
     }
   });
 
-  it("注册表恰好含这九条（all 长度 = 9 且 id 集合一致）", () => {
+  it("注册表恰好含这十条（all 长度 = 10 且 id 集合一致）", () => {
     const registry = createGeneratorRegistry();
     registerBuiltinMapGenerators(registry);
     const entries = registry.all();
-    expect(entries).toHaveLength(9);
+    expect(entries).toHaveLength(10);
     expect(entries.map((entry) => entry.id).sort()).toEqual([...BLOCK_IDS].sort());
   });
 

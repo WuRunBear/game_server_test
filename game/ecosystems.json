@@ -1,0 +1,167 @@
+{
+  "ecosystems": [
+    {
+      "biome": "beach",
+      "spawnTable": [
+        {
+          "kind": "shell_node",
+          "density": 0.004
+        },
+        {
+          "kind": "crab",
+          "density": 0.0015,
+          "every": 300
+        }
+      ]
+    },
+    {
+      "biome": "grassland",
+      "spawnTable": [
+        {
+          "kind": "carrot_patch",
+          "density": 0.003
+        },
+        {
+          "kind": "berry_bush",
+          "density": 0.004
+        },
+        {
+          "kind": "rabbit",
+          "density": 0.002,
+          "every": 300
+        },
+        {
+          "kind": "boar",
+          "density": 0.0015,
+          "every": 400
+        },
+        {
+          "kind": "villager",
+          "density": 0.0006,
+          "every": 600
+        }
+      ]
+    },
+    {
+      "biome": "forest",
+      "spawnTable": [
+        {
+          "kind": "tree",
+          "density": 0.02
+        },
+        {
+          "kind": "mushroom",
+          "density": 0.003
+        },
+        {
+          "kind": "spider",
+          "max": 6,
+          "every": 300,
+          "condition": "isNight"
+        },
+        {
+          "kind": "wolf",
+          "density": 0.0006,
+          "every": 300
+        }
+      ]
+    },
+    {
+      "biome": "swamp",
+      "spawnTable": [
+        {
+          "kind": "reed",
+          "density": 0.004
+        },
+        {
+          "kind": "frog",
+          "density": 0.001,
+          "every": 300
+        },
+        {
+          "kind": "water_pool",
+          "density": 0.0006
+        }
+      ]
+    },
+    {
+      "biome": "rocky",
+      "spawnTable": [
+        {
+          "kind": "gold_rock",
+          "max": 7,
+          "every": 155520000
+        },
+        {
+          "kind": "rock",
+          "max": 18,
+          "every": 155520000
+        },
+        {
+          "kind": "wolf",
+          "max": 1,
+          "every": 155520000,
+          "condition": "isNight"
+        }
+      ]
+    },
+    {
+      "biome": "wilderness",
+      "spawnTable": [
+        {
+          "kind": "tree",
+          "max": 3,
+          "every": 155520000
+        },
+        {
+          "kind": "rock",
+          "max": 3,
+          "every": 155520000
+        }
+      ]
+    },
+    {
+      "biome": "village",
+      "spawnTable": [
+        {
+          "kind": "villager",
+          "max": 4,
+          "every": 600
+        },
+        {
+          "kind": "campfire",
+          "max": 2,
+          "every": 20
+        }
+      ]
+    },
+    {
+      "biome": "plain",
+      "spawnTable": [
+        {
+          "kind": "berry_bush",
+          "density": 0.017
+        },
+        {
+          "kind": "tree",
+          "density": 0.012
+        },
+        {
+          "kind": "rock",
+          "density": 0.045
+        },
+        {
+          "kind": "boar",
+          "density": 0.017,
+          "every": 300
+        },
+        {
+          "kind": "wolf",
+          "max": 2,
+          "every": 240,
+          "condition": "isNight"
+        }
+      ]
+    }
+  ]
+}

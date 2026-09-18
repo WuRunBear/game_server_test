@@ -14,6 +14,15 @@
  * （常驻语义：空图也照常运行演化/碰撞）。收尾做全局引用校验（U5）：规则
  * map/region/kind 存在性、exact 落点在生成后几何上可走、Portal 配对坐标互指。
  *
+ * 另两项开机编排（map-system 设计 §5.4/§5.5）：
+ * - 生态声明层展开（B1 编译器模式）：每图几何就绪后（回填/生成都算就绪）、
+ *   该图演化前，把 ecosystems 声明展开为标准 EntityRule 与静态规则合并成
+ *   resolvedEntityRules 活列表（每次 boot 由 pristine 静态列表重算，共享
+ *   gameDef 的多次开机不累积）；合并后先做重复规则身份校验再演化。
+ * - 新档随机种子入口：每图 seed 按 record.mapSeeds → config.seed → 随机
+ *   解析（两条分支同流程），解析结果写入 mapSeeds 弱表——读档不重建几何，
+ *   但每 tick/离线补差的演化流须与存档世界同 seed；首存快照固化解析结果。
+ *
  * deps 为读档**单一通道** { loadRecord, saveRecord }（同步闭包，boot 内禁止
  * 等待 Promise）；record 的预载由 GameSimulation 装配处完成。
  */
@@ -23,8 +32,11 @@ import { deserializeGeometry } from "map/geometry/snapshot";
 import { walkableAt } from "map/geometry/query";
 import type { MapGeometry } from "map/geometry/types";
 import { evolve } from "map/evolution/engine";
+import { ruleIdentity } from "map/evolution/schema";
+import { expandEcosystemsForMap } from "map/evolution/ecosystems";
 import type { ExactRule, EntityRule } from "map/evolution/schema";
 import { createMapEvolveDeps } from "map/runtime/evolveDeps";
+import { randomUint32, setMapSeeds } from "map/runtime/mapSeeds";
 import { advanceTickTo } from "map/runtime/clock";
 import { serializeWorld } from "framework/persistence/worldSerializer";
 import { createLogger } from "framework/utils/logger";
@@ -141,15 +153,43 @@ function chebyshev(a: { x: number; y: number }, b: { x: number; y: number }): nu
 }
 
 /**
+ * 重复规则身份校验（map-system 设计 §5.4 修复项 3，schema.ts 遗留 todo）：
+ * ruleIdentity = map|region|kind|mode，身份完全相同的两条规则共享同一选点流
+ * 且互相重复补种——配置错误，开机即抛（消息点名重复身份）。
+ *
+ * 校验点在静态规则与生态展开产物**合并之后**、本图初始演化之前——单点
+ * 覆盖 static-static、expanded-expanded、static-expanded 三类冲突。
+ */
+function assertUniqueRuleIdentity(rules: EntityRule[]): void {
+  const seen = new Set<string>();
+  for (const rule of rules) {
+    const identity = ruleIdentity(rule);
+    if (seen.has(identity)) {
+      throw new Error(`重复规则身份 \`${identity}\`（entity-rules/ecosystems 展开产物冲突）`);
+    }
+    seen.add(identity);
+  }
+}
+
+/**
  * 开机全量构建地图（唯一开机分支归属地）。
  *
  * @param world 目标世界（maps/activeMaps/defaultMapId 在此填充）
- * @param gameDef 已加载游戏定义（resolvedMapConfigs/resolvedEntityRules/规则）
+ * @param gameDef 已加载游戏定义（resolvedMapConfigs/resolvedEntityRules/规则；
+ *   resolvedEntityRules 会被本函数重算为静态规则 + 生态展开产物的合并列表）
  * @param deps 读档单一通道
  */
 export function bootMaps(world: GameWorld, gameDef: LoadedGameDefinition, deps: BootDeps): void {
   const configs = gameDef.resolvedMapConfigs ?? [];
-  const rules = gameDef.resolvedEntityRules ?? [];
+  // 静态规则保持 pristine（entity-rules.json 原样加载）；resolvedEntityRules
+  // 是合并/活列表——每次 boot 由静态列表 + 生态展开产物重算（多次开机不累积）。
+  // 手工构造的 def 若未赋静态列表，首次 boot 把当时的 resolvedEntityRules
+  // 固化为 pristine 基准（此后重算只从该基准出发，共享 def 的多次开机不累积）。
+  if (gameDef.resolvedStaticEntityRules === undefined) {
+    gameDef.resolvedStaticEntityRules = gameDef.resolvedEntityRules ?? [];
+  }
+  const staticRules = gameDef.resolvedStaticEntityRules;
+  gameDef.resolvedEntityRules = [...staticRules];
   const registry = world.generators;
   const record = deps.loadRecord();
   const snapshotMaps = record?.maps;
@@ -169,29 +209,65 @@ export function bootMaps(world: GameWorld, gameDef: LoadedGameDefinition, deps: 
     }
   }
 
+  // 每图 seed 解析结果（两条分支统一在此解析；收尾写入弱表供
+  // serializeWorld 固化 / GameSimulation 每 tick 与离线补差共用）
+  const mapSeeds: Record<string, number> = {};
+
   let maxInitialAge = 0;
   for (const config of configs) {
+    // 新档随机种子入口：读档优先用快照固化 seed（旧格式存档缺 mapSeeds 时
+    // 回退配置 seed），无档用配置 seed，两者皆缺随机生成——同图同 seed 同产出
+    const seed = record?.mapSeeds?.[config.key] ?? config.seed ?? randomUint32();
+    mapSeeds[config.key] = seed;
+
+    let geometry: MapGeometry;
     const snapshot = snapshotMaps?.[config.key];
     if (snapshot) {
       // 快照回填：反序列化后做结构完整性校验（截断/缺字段在此抛错）
-      const geometry = deserializeGeometry(snapshot);
+      geometry = deserializeGeometry(snapshot);
       validateMapGeometry(geometry);
       world.maps[config.key] = geometry;
     } else {
-      // 无快照（无档，或配置新增图）：生成 → 出口校验（buildMapGeometry 内置）→ 初始演化
-      const geometry = buildMapGeometry(config, registry);
+      // 无快照（无档，或配置新增图）：用解析后的 seed 生成（配置缺省 seed
+      // 时随机值同样参与几何生成）→ 出口校验（buildMapGeometry 内置）
+      geometry = buildMapGeometry({ key: config.key, seed, pipeline: config.pipeline }, registry);
       world.maps[config.key] = geometry;
-      evolve(world, geometry, rules, 0, config.initialAgeTicks, createMapEvolveDeps(world, geometry, config.seed));
+    }
+
+    // 生态声明层展开（B1 编译器模式）：density 声明需查区域面积，几何在
+    // 此刻才生成/回填——两条分支（快照图同样带 regions）都在几何就绪后
+    // 展开。产物并入活列表（biome 不在本图的条目由展开器跳过）。
+    gameDef.resolvedEntityRules = [
+      ...gameDef.resolvedEntityRules,
+      ...expandEcosystemsForMap(config.key, geometry, gameDef.resolvedEcosystems?.ecosystems ?? []),
+    ];
+    // 重复规则身份校验：合并后、本图演化前（含静态-静态/展开-展开/静态-展开冲突）
+    assertUniqueRuleIdentity(gameDef.resolvedEntityRules);
+
+    if (!snapshot) {
+      // 无快照才执行初始演化（演化流 seed 与几何生成同源——解析后的 seed）
+      evolve(
+        world,
+        geometry,
+        gameDef.resolvedEntityRules,
+        0,
+        config.initialAgeTicks,
+        createMapEvolveDeps(world, geometry, seed),
+      );
       if (config.initialAgeTicks > maxInitialAge) maxInitialAge = config.initialAgeTicks;
       logger.info("map generated and initially evolved", {
         map: config.key,
-        seed: config.seed,
+        seed,
         initialAgeTicks: config.initialAgeTicks,
       });
     }
     // 常驻语义：全部配置图开机即激活（空图也照常运行演化/碰撞）
     world.activeMaps.add(config.key);
   }
+
+  // 解析结果挂弱表：serializeWorld 据此写 WorldRecord.mapSeeds（首存固化），
+  // GameSimulation 每 tick/离线补差据此取演化流 seed（读档路径 seed 来自快照）
+  setMapSeeds(world, mapSeeds);
 
   if (!record) {
     // 无档路径：tick 推进到最大初始年龄（首个运行 tick 恰好衔接 initialAge→initialAge+1），
@@ -201,5 +277,5 @@ export function bootMaps(world: GameWorld, gameDef: LoadedGameDefinition, deps: 
     deps.saveRecord(serializeWorld(world, serverRules?.saveId ?? ""));
   }
 
-  validateRuleReferences(world, configs, rules);
+  validateRuleReferences(world, configs, gameDef.resolvedEntityRules);
 }

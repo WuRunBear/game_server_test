@@ -59,6 +59,10 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
   // /maps/* 端点数据源：加载期游戏定义（resolvedMapConfigs）按固定 seed
   // 确定性重建几何，与仿真 world.maps 同源同内容（bootMaps 用同一配置与
   // 同一积木注册表构建）。几何不可变，按 key 惰性构建并缓存快照。
+  // 已知局限：seed 缺省的图在仿真侧走「快照固化/开机随机」解析（弱表挂
+  // GameWorld，本端点拿不到该 world），此处回退 0——registry 声明固定 seed
+  // 的图两端同源，缺省 seed 的图 HTTP 视图可能与存档世界分歧（调试视图，
+  // 不影响仿真权威状态）。
   const gameDef = loadGameDefinition({ gameJsonPath: options.gameJsonPath });
   const geometryCache = new Map<string, MapGeometry>();
   const mapIds = gameDef.resolvedMapConfigs.map((config) => config.key);
@@ -66,7 +70,10 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
   const geometryOf = (config: MapConfig): MapGeometry => {
     const cached = geometryCache.get(config.key);
     if (cached) return cached;
-    const geometry = buildMapGeometry(config, getRegistries().mapGeneratorRegistry);
+    const geometry = buildMapGeometry(
+      { key: config.key, seed: config.seed ?? 0, pipeline: config.pipeline },
+      getRegistries().mapGeneratorRegistry,
+    );
     geometryCache.set(config.key, geometry);
     return geometry;
   };

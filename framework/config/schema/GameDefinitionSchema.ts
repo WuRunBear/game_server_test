@@ -5,6 +5,7 @@ import type { DialogueTreeJson } from "framework/config/schema/DialogueSchema";
 import type { QuestDefinitionJson } from "framework/config/schema/QuestSchema";
 import type { MapConfig } from "framework/config/schema/MapRegistrySchema";
 import type { EntityRule } from "map/evolution/schema";
+import type { EcosystemsJson } from "framework/config/schema/EcosystemsSchema";
 import type { PlayerRule } from "framework/config/schema/PlayerRuleSchema";
 
 /**
@@ -67,6 +68,8 @@ export const GameDefinitionSchema = z.object({
     default: z.string().optional(),
     /** 实体演化规则文件路径（maps/entity-rules.json，补差引擎的规则源）。 */
     entityRules: z.string().optional(),
+    /** 生态声明层文件路径（game/ecosystems.json，B1 编译器模式——boot 期展开合并）。 */
+    ecosystems: z.string().optional(),
   }).optional(),
   systems: z.array(SystemEnableEntrySchema).optional(),
   entities: z.string().optional(),
@@ -99,8 +102,20 @@ export interface BehaviorDefinition {
 export interface LoadedGameDefinition extends GameDefinition {
   /** 全部地图生成配置（maps/registry.json 解析；Tiled 条目已内联 JSON）。 */
   resolvedMapConfigs: MapConfig[];
-  /** 实体演化规则表（maps/entity-rules.json，补差引擎规则源）。 */
+  /**
+   * 实体演化规则表（合并/活列表）：bootMaps 每次 boot 由静态列表 +
+   * 生态展开产物重算赋值（多次 createGameSimulation 共享同一 gameDef
+   * 不会累积重复）。补差引擎与本文件内校验均读本列表。
+   */
   resolvedEntityRules: EntityRule[];
+  /**
+   * 静态实体规则表（maps/entity-rules.json 原样加载，保持 pristine——合并的
+   * 基准）。loadGameDefinition 恒赋值；手工构造的 def 可缺省——bootMaps 首次
+   * 开机把当时的 resolvedEntityRules 固化为静态基准。
+   */
+  resolvedStaticEntityRules?: EntityRule[];
+  /** 生态声明层配置（game/ecosystems.json 解析结果；未配置时缺省）。 */
+  resolvedEcosystems?: EcosystemsJson;
   /** 玩家规则（rules/player.json；缺省未配置）。 */
   resolvedPlayerRule?: PlayerRule;
   /** 实体原型定义表（来自 game/entities/*.json）。 */

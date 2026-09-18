@@ -126,7 +126,10 @@ describe("开机逐图分支（boot.ts per-map branch）", () => {
     expect(world.maps[MAP_A]!.walkable[0]).toBe(mutatedSnapshot.walkable[0]);
 
     // 配置新增图：mapB 生成且与同配置现算几何一致，并完成初始演化（规则实体就位）
-    const expectedB = buildMapGeometry(mapConfig(MAP_B, 43), getRegistries().mapGeneratorRegistry);
+    const expectedB = buildMapGeometry(
+      { key: MAP_B, seed: 43, pipeline: mapConfig(MAP_B, 43).pipeline },
+      getRegistries().mapGeneratorRegistry,
+    );
     expect(serializeGeometry(world.maps[MAP_B]!)).toEqual(serializeGeometry(expectedB));
     expect(countKind(world, KIND_B)).toBe(2);
     // 回填图不执行初始演化：mapA 无规则实体（实体恢复归 restoreWorld，不在 boot 分支）

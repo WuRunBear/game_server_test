@@ -1,0 +1,13 @@
+{
+  "kind": "crab",
+  "tags": ["NPC", "Enemy"],
+  "components": {
+    "Size": { "w": 14, "h": 8 },
+    "Velocity": {},
+    "Collider": { "shape": 1, "halfW": 7, "halfH": 4 },
+    "Health": { "current": 15, "max": 15 },
+    "Perception": { "visionRadius": 100, "hostilityRange": 50 }
+  },
+  "behavior": "rabbit-flee",
+  "team": 2
+}

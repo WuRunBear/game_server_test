@@ -1,0 +1,14 @@
+{
+  "kind": "gold_rock",
+  "tags": ["Resource"],
+  "components": {
+    "Size": { "w": 16, "h": 16 },
+    "ResourceNode": {
+      "remaining": 10,
+      "max": 10,
+      "amountPerHit": 2,
+      "regenMs": 120000,
+      "yieldsKind": "stone"
+    }
+  }
+}

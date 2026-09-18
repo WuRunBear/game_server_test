@@ -25,6 +25,7 @@ import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
 import { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
 import { evolve } from "map/evolution/engine";
 import { createMapEvolveDeps } from "map/runtime/evolveDeps";
+import { mapSeedOf } from "map/runtime/mapSeeds";
 import { advanceTickTo, computeOfflineTicks } from "map/runtime/clock";
 import { noopBootDeps, type BootDeps } from "map/runtime/boot";
 import type { Repository, WorldRecord } from "framework/repository";
@@ -224,6 +225,10 @@ export class GameSimulation implements SimulationPort {
   /**
    * 逐图演化：对 world.activeMaps 中每张已构建图调用 evolve，跨度
    * (fromTick, toTick]。规则/配置缺图时跳过该图。
+   *
+   * seed 源：bootMaps 解析并写入弱表的每图 seed（读档路径 = 快照固化值，
+   * 新档 = 配置值或开机随机值）——快照回填不重建几何，但每 tick/离线补差
+   * 的演化选点流必须与存档世界同源；弱表未命中回退配置 seed。
    */
   private evolveMaps(fromTick: number, toTick: number): void {
     const rules = this.world.gameDef.resolvedEntityRules ?? [];
@@ -233,7 +238,8 @@ export class GameSimulation implements SimulationPort {
       const geometry = this.world.maps[mapKey];
       const config = this.mapConfigsByKey.get(mapKey);
       if (!geometry || !config) continue;
-      evolve(this.world, geometry, rules, fromTick, toTick, createMapEvolveDeps(this.world, geometry, config.seed));
+      const seed = mapSeedOf(this.world, mapKey) ?? config.seed ?? 0;
+      evolve(this.world, geometry, rules, fromTick, toTick, createMapEvolveDeps(this.world, geometry, seed));
     }
   }
 
