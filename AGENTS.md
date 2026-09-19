@@ -59,7 +59,7 @@ framework/    ← 框架核心 — 游戏无关，所有通用逻辑
 game/         ← 游戏配置 — 纯 JSON：实体、行为、地图、规则、物品、对话、任务
 ```
 
-**依赖方向严格自上而下**：`tools → framework`、`src → framework`。`framework` 不反向依赖任何游戏代码或工具代码。`game/` 目录是数据（非 TS），由 `loadGameDefinition` 按路径加载。文件级目录树与逐行注释见 `README.md` §目录结构。
+**依赖方向严格自上而下**：`tools → framework`、`src → framework`。`framework` 不反向依赖任何游戏代码或工具代码。`game/` 目录是数据（非 TS），由 `loadGameDefinition` 按路径加载。文件级目录树与逐行注释见 `docs/architecture.md` §目录结构。
 
 ## 文档与代码索引
 
@@ -68,8 +68,9 @@ game/         ← 游戏配置 — 纯 JSON：实体、行为、地图、规则�
 | 你要找 | 去这里 |
 |--------|--------|
 | 架构机制（GameWorld / 各 Registry / 扩展点 / 配置模型） | 读 `framework/` 源码：`world.ts`、`bootstrap.ts`、各 `*Registry.ts` 与 `registerBuiltin*.ts` |
-| 目录结构详图、tsconfig、路径别名 | `README.md` §目录结构 + `tsconfig.json` 的 `paths` |
+| 目录结构详图、tsconfig、路径别名 | `docs/architecture.md` §目录结构 + `tsconfig.json` 的 `paths` |
 | 系统覆盖现状、缺口、待修缺陷、分阶段路线图 | `docs/ROADMAP.md` |
+| 地图生态化设计契约与实施记录（三切片 §11-13） | `docs/ecosystem-map-design.md` |
 | 人类快速上手、工具命令、技术栈一览 | `README.md` |
 | 当前游戏内容（实体 / 行为 / 地图 / 规则） | `game/*.json` |
 | 当前真实注册的组件/系统/动作/原型/生成积木 | `pnpm tools list-registries` 或读 `framework/*/registerBuiltin*.ts` |
@@ -81,7 +82,7 @@ game/         ← 游戏配置 — 纯 JSON：实体、行为、地图、规则�
 - **每 tick**：`GameRoom` 收输入写 `Velocity` → `gameInstance.step(dtMs)`：tick 自增后、系统循环前先跑 beforeSystems 演化钩子（对每张激活图 `evolve(tick-1, tick)`）→ 按拓扑序跑系统 → 把 ECS 状态派生为 Colyseus `RoomState` → 调试快照节流推送。
 - **地图系统（五层，`framework/map/`）**：
   - `geometry/` — MapGeometry 数据层（types/query/snapshot/version；regions Map 插入序 = regionOfTile 索引序；fnv1a32 内容指纹 version）。
-  - `generate/` — 生成层（GeometryDraft/GenerationContext、管道执行器 buildMapGeometry(config, registry)、validate 结构校验、生成积木注册表、rng 种子派生；内置积木 blocks/：noise-terrain（bandLevel+groundPalette+nonWalkableSemantics）、climate-regions（names[] 序 = 区域索引序，隐式 wilderness）、room-corridor（地形级雕挖 + union-find 连通）、tiled-source（Tiled JSON 加载期内联降级为积木，积木无文件 I/O））。
+  - `generate/` — 生成层（GeometryDraft/GenerationContext、管道执行器 buildMapGeometry(config, registry)、validate 结构校验、生成积木注册表、rng 种子派生；内置十积木 blocks/：noise-terrain（bandLevel+groundPalette+nonWalkableSemantics）、climate-regions（names[] 序 = 区域索引序，隐式 wilderness）、room-corridor（地形级雕挖 + union-find 连通）、tiled-source（Tiled JSON 加载期内联降级为积木，积木无文件 I/O）、region-stats（区域面积/质心入 meta）、smooth-terrain（多数平滑 + walkable 重派生）、height-channel/height-mask（aux 高度场生产/遮罩消费）、slot-rooms（槽位网格房间 + walls 结构区）、stamp-template（Tiled 模板盖印——ground/collision/zones 三层约定，tiledPath 加载期内联））。
   - `evolution/` — 演化层（EntityRule: map/region/kind/max/every/mode=density|exact|template/condition/template/at；placement pickPoint 候选序列是 (seed, mapKey, ruleId, timeSlot) 纯函数 + 32 次尝试上限；engine evolve 槽绝对对齐 timeSlot、(from, to] 槽边界、只增不删早退不变式、template 整组原子）。
   - `runtime/` — 运行时（boot.ts bootMaps 开机唯一分支地 + 引用校验 + 首份 WorldRecord 装配；spawn.ts pickSpawnPosition random/seededRandom/exact；clock.ts 复用 world.time.tick + computeOfflineTicks；evolveDeps.ts 真实依赖装配 tile↔像素换算）。
   - `switchMap.ts`（movePlayerToMap）、`exportGenerated.ts`（exportGeometryArtifacts JSON+PNG）。
@@ -91,7 +92,7 @@ game/         ← 游戏配置 — 纯 JSON：实体、行为、地图、规则�
 
 ## 扩展点速查
 
-注册扩展都在 `src/register.ts`；完整代码示例见 `README.md` §扩展指南。
+注册扩展都在 `src/register.ts`；完整代码示例见 `docs/architecture.md` §扩展指南。
 
 | 扩展点 | 注册函数 | 配置中引用 |
 |--------|---------|-----------|
@@ -99,7 +100,7 @@ game/         ← 游戏配置 — 纯 JSON：实体、行为、地图、规则�
 | Component | `registerComponent()` | `entities/*.json` 的 `components` 块 |
 | Action | `registerAction()` | `behaviors/*.json` 的 `action.name` |
 | RuleModule | `registerRuleModule()` | `rules/*.json` 的 `xxxRef` 字段 |
-| 生成积木 | `framework/map/generate/registerBuiltin.ts` 的 `registerBuiltinMapGenerators`（框架内置四积木；自定义积木经同一注册表实例 `getRegistries().mapGeneratorRegistry.register()` 注册） | `game/maps/registry.json` 的 `pipeline[].generator` |
+| 生成积木 | `framework/map/generate/registerBuiltin.ts` 的 `registerBuiltinMapGenerators`（框架内置十积木，清单见上「核心运行机制」；自定义积木经同一注册表实例 `getRegistries().mapGeneratorRegistry.register()` 注册） | `game/maps/registry.json` 的 `pipeline[].generator` |
 | Archetype | 自动加载 | `entities/*.json` |
 
 ### 扩展硬边界
@@ -113,7 +114,7 @@ game/         ← 游戏配置 — 纯 JSON：实体、行为、地图、规则�
 
 易踩、且看代码未必能发现：
 
-- **AoS 组件家族**：`Inventory` / `Kind` / `Needs` / `ResourceNode` / `ItemMeta` / `Intent` / `EntityMap` / `SpawnPoint` 都是普通 JS 数组（`[] as T[]`，按 eid 索引），与其余 SoA（bitecs 数值数组）不一致。它们**不是 bitecs 组件**——不能 `addComponent`、不能进 `query`。spawn 经组件注册表的 **AoS 初始化钩子**（`registerAosInitializer`）按 archetype 配置写入；netSync 经 **AoS 同步适配器**（`registerAosSyncAdapter`，按 `tags` 限定查询）展平为 numbers/strings。扩展此类组件时注意访问方式与查询方式。例外注意 `EntityMap` 与 `SpawnPoint`：**均无 archetype initializer**（运行时地图 id / 出生点依赖几何查询，静态原型配置表达不了，由 spawn 链或 addPlayer 直接写入）；`EntityMap` 不注册 aosSyncAdapter，随实体自动入档（`worldSerializer` AoS 分支），实体缺失条目时由 `entityMapOf(world, eid)` 回退 `world.defaultMapId`。
+- **AoS 组件家族**：`Inventory` / `Kind` / `Needs` / `ResourceNode` / `ItemMeta` / `Intent` / `Nest` / `EntityMap` / `SpawnPoint` 都是普通 JS 数组（`[] as T[]`，按 eid 索引），与其余 SoA（bitecs 数值数组）不一致。它们**不是 bitecs 组件**——不能 `addComponent`、不能进 `query`。spawn 经组件注册表的 **AoS 初始化钩子**（`registerAosInitializer`）按 archetype 配置写入；netSync 经 **AoS 同步适配器**（`registerAosSyncAdapter`，按 `tags` 限定查询）展平为 numbers/strings（未注册适配器的 AoS 组件在快照中被静默跳过，如 `Nest`——服务端权威即可）。扩展此类组件时注意访问方式与查询方式。例外注意 `EntityMap` 与 `SpawnPoint`：**均无 archetype initializer**（运行时地图 id / 出生点依赖几何查询，静态原型配置表达不了，由 spawn 链或 addPlayer 直接写入）；`EntityMap` 不注册 aosSyncAdapter，随实体自动入档（`worldSerializer` AoS 分支），实体缺失条目时由 `entityMapOf(world, eid)` 回退 `world.defaultMapId`。
 - **多图访问**：`world.maps` 是 `Record<string, MapGeometry>`（registry key → 几何）；新代码经 `world.maps[key]` / `world.defaultMapId`（来自 game.json 的 `map.default`）/ `entityMapOf` 访问。mapId 解析不到已构建图时，gameplay 系统记 error 并跳过该实体（不再静默踢回默认图）；collision/placement 对未知 mapId 直接抛错（空串 mapId 视为无图配置世界的缺省归属，返回无几何）。
 - **常驻模拟语义**：全部配置图开机即构建（bootMaps）并常驻 `world.activeMaps`——空图也照常演化/碰撞（`ensureMapActive`/`spawnInitialNpcs` 已删除）。实体生产唯一路径 = 演化引擎 `evolve`：开机初始演化（0 → initialAgeTicks）、每 tick 补差（(tick-1, tick]）、离线补差共用同一引擎，无开机特殊分支。
 - **S5 持久化陷阱**：`repository.ts` 接口是**世界快照**（`Repository.saveWorld/loadWorld(WorldRecord)`）；`WorldRecord` 含 `maps`（`Record<string, SerializedMapGeometry>`，地理快照与实体同盘）并复用 `savedAt/tick/timeOfDay`，旧 `mapId` 字段已删除（实体归属唯一来源 = 各实体 `EntityMap`）。默认后端是 `createFileRepository`（`data/saves/`，`SAVE_DIR` 覆盖），**postgres/redis 仍为 stub**（无驱动依赖，不要假设可用）。存档序列化**跳过瞬态组件**（Velocity/Target/AIState/BlackboardRef/Cooldown/Duration/Intent/LastSynced/Kind/NetworkId/Dialogue），恢复后由系统与输入自然重建；恢复出的玩家实体由 `addPlayer` 复用绑定（networkId 保留），`removePlayer` 仍删除实体（断线后进度以最近存档为准）。离线补差 = `computeOfflineTicks`（上限 `DEFAULT_MAX_OFFLINE_TICKS = 1,728,000` ≈ 24h@20tps，超限截断 + 告警）→ 单次 `evolve` → `advanceTickTo` 落边界；**旧存档直接废弃，无兼容代码**。`createGameSimulation(gameDef, options?)` 是 **async**（装配处预载存档，经 `BootDeps { loadRecord, saveRecord }` 单一通道注入 bootMaps 与 restoreWorld），`options` 含 `repository/saveId`。

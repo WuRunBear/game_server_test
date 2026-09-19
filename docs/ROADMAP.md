@@ -1,8 +1,8 @@
 # 通用 2D 游戏框架系统路线图
 
 > 目标：将当前框架演进为通用 2D 游戏框架。
-> Phase 0（切片前止血）已完成 5 个框架级缺陷修复；Slice 1（生存循环）、Slice 2（战斗闭环）、Slice 3（合成与装备）、Slice 4（世界氛围）、Slice 5（联机完整度）、Slice 6（建造与场景切换）、Slice 7（社交进度）、Slice 8（per-player 地图）与地图系统重设计（MapGeometry 五层架构）已完成。
-> 现状：16 个内置系统（spawningSystem 已退役——实体生产职责移交地图演化引擎，见下文地图系统重设计条目）；crafting / placeable / deconstruct / dialogue 为命令驱动的原子模块（无 tick 体，inventoryOps 先例）；persistence / interest / 输入校验为仿真层能力（定时存档 / 视野裁剪 / 输入拦截——异步 I/O 与输入校验不入 ECS tick 系统）。
+> Phase 0（切片前止血）已完成 5 个框架级缺陷修复；Slice 1（生存循环）、Slice 2（战斗闭环）、Slice 3（合成与装备）、Slice 4（世界氛围）、Slice 5（联机完整度）、Slice 6（建造与场景切换）、Slice 7（社交进度）、Slice 8（per-player 地图）、地图系统重设计（MapGeometry 五层架构）与生态化地图系统三切片（stamp-template / 子图 portal 网络 / 巢穴袭击，详见 `docs/ecosystem-map-design.md`）已完成。
+> 现状：18 个内置系统（spawningSystem 已退役——实体生产职责移交地图演化引擎；nest / raid 为生态化地图切片③新增，见下文生态化地图系统条目）；crafting / placeable / deconstruct / dialogue 为命令驱动的原子模块（无 tick 体，inventoryOps 先例）；persistence / interest / 输入校验为仿真层能力（定时存档 / 视野裁剪 / 输入拦截——异步 I/O 与输入校验不入 ECS tick 系统）。
 > 详见下文「已有系统状态」。
 
 ## 一、核心仿真
@@ -95,7 +95,7 @@
 - spawning condition（Slice 4：SpawnRuleJson 可选 `condition` 字段 → spawnConditions 注册表（isNight 内建）；condition 不满足不刷但不重置计时器；validateIntegrity 校验。**现状**：SpawnRule 已随 spawningSystem 退役删除，condition 门控机制由 EntityRule.condition 继承——经同一 spawnConditions 注册表求值，每 evolve 调用一次）
 - placeable（Slice 4：placeEntity 原子模块，PlayerCommand `place` 驱动；ItemKindSchema.place 声明目标 archetype；距离（rules/place.json）/实体重叠/地图阻挡校验零副作用 → 消耗 1 → spawn）
 - 光源机制（Slice 4）：LightSource（radius/fuelRemainingMs，≤0 熄灭）+ Placeable（footprintW/H/canCollide）；火光回避 = 感知侧通用约定（目标在有效光源半径内不可感知）
-- AoS 组件家族（Inventory / Kind / Needs / ResourceNode / ItemMeta / Intent / LootTable）+ spawn AoS 初始化钩子（Inventory/Needs/ResourceNode/LootTable 注册了钩子；ItemMeta/Intent/Kind 由运行时写入）
+- AoS 组件家族（Inventory / Kind / Needs / ResourceNode / ItemMeta / Intent / LootTable / Nest）+ spawn AoS 初始化钩子（Inventory/Needs/ResourceNode/LootTable/Nest 注册了钩子；ItemMeta/Intent/Kind 由运行时写入）
 - SoA 组件补充（Slice 3/4）：Equipment（weapon/tool/armor 三槽引用 inventory 槽 idx，-1=空）、CraftingStation（stationType: ui32，0=通用手搓）、LightSource、Placeable
 - BT 通用节点（Slice 2/4）：conditions IsTargetInVision/InAttackRange/IsNight/IsInLight + actions Chase/Flee/Attack/Sleep（Sleep 为 SUCCEEDED 语义——树每 tick 重置，条件变化即时改判；ActionFactory 放宽为 `State | boolean`；btFactory/validateIntegrity 支持 mistreevous while/until guard 条件收集（单对象形态））
 - items 加载段（game/items/*.json + ItemKindSchema，Slice 3 加 equip 穿戴效果，Slice 4 加 place 放置声明）+ 通用规则 schema 注册表（combat/needs/crafting/daynight/server）
@@ -162,7 +162,14 @@
 > - **网络接口**：/maps/meta 与 /maps/runtime 由 MapGeometry 提供数据（`x-map-version` 缓存响应头，未知图 404，缺省回退默认图）。
 > - **工具链**：gen-map（管道 JSON 快照）/ export-map（真实开机 + JSON+PNG，色表为工具参数）/ validate（每图管道链 + 实体规则数）/ list-registries（「生成积木」段）；`registerGenerator`/`listRegisteredGenerators` 公共 API 删除，自定义积木经 `getRegistries().mapGeneratorRegistry.register()` 注册。
 > - **已知局限（潜在，未触发）**：template 规则锚点跨区域计数边界——spawnTemplate 只校验偏移格可走/未占（可落出 rule.region），而 countByKind 按区域计数，锚点落出区域时每次 evolve 调用会误判「低于 max」再补一组（跨调用无界增长）。当前游戏配置无 template 规则，触发前无影响；修复方向 = 锚点限定区域内或 template 锚计数改全图。
+> - （**状态注记**：切片②起 template 规则已实战——house/camp 共 5 条；boot 探针证明当前配置未触发（计数恰到 max、锚点均落区内），但隐患随实战激活，修复列为候选小切片。）
 > - 验证：最终验证波 F1–F4 全部 APPROVE；`pnpm test` 452/452 绿（41 文件，U1–U7/I1–I5 编号覆盖矩阵）+ `pnpm build` + `pnpm tools validate` 全绿；旧符号残留 grep（MapRuntime/ensureMapActive/spawnInitialNpcs/world.map 等）零命中。
+>
+> **生态化地图系统（三切片）已完成**：设计契约与实施决策详见 `docs/ecosystem-map-design.md`（§11-13 实施记录）——
+> - **切片① 生态分区与地基**：新积木 stamp-template（模板盖印——ground/collision/zones 三层约定 + tiledPath 加载期内联 + 四层防线 + 确定性 region 选点）；canPlace 多格占用（footprint 仅认 Placeable.footprintW/H，16px 兜底——修 Size 展开卡死回程门的每槽告警风暴）+ 占用/计数索引化（tile 索引 Set + (region,kind) O(1) 计数 + regionOf/regionTiles WeakMap 缓存）；WorldRecord.mapSeeds 随机种子入口（WeakMap 侧信道，生成与演化流双路接入）；重复规则身份 boot 校验；ecosystems.json B1 生态声明层（zod schema + 纯展开器 bootMaps 挂钩，density 按区域**可走**面积推导）；island 重配 192×192 五气候区 + 双模板盖印 + smooth-terrain 去碎片（修 falloff 掩膜形状反转——原实现陆地半径被数学封死，任何参数出不了环带大岛）。
+> - **切片② setpiece 与子地图**：具名模板组 templateRef（entity-rules 顶层 templates 字典 + loader 解析为 inline 形态，引擎零改动；house 组跨 village/grassland 复用）；swamp 子图（noise 多水 + marsh 区，与 island 的 swamp biome 命名隔离防生态条目串图）+ ruins 子图（slot-rooms 首次实战——实名区域 `<type>#<index>` + walls 结构区，collectMapRegionNames 收录）；portal 网络 island↔swamp↔ruins（落点 Chebyshev=2 偏离对端本格防乒乓）；村庄混合模式落地。
+> - **切片③ 动态机制**：Nest AoS 组件（{spawnKind,capacity,intervalTicks,current}，随存档持久化，无 netSync 适配器）+ 巢穴系统（对齐槽周期/半径内存活计数/canPlace 补种/确定性 rng/巢毁即停产零独立状态）；周期袭击（rules/raid.json + waveRef 走既有 ruleModule 扩展点，框架零新概念）；spawnConditions 新增 isDay（isWinter 暂缓——无季节时钟，避免恒 false 死配置）。
+> - 验收：`pnpm test` 677 项全绿 + `tsc --noEmit` + `pnpm tools validate` 全绿，`framework/` 游戏词 grep 空；boot 探针 island 343 / swamp 14 / ruins 6 实体、夜间刷怪与巢穴补种实测；headless avg tick 2.94ms（20tps 预算 5.9%，5 图常驻）。
 
 **切片内待补全（非框架缺陷）**：
 - （已补全）inventorySystem：堆叠/丢弃/使用已落地（Slice 1）

@@ -101,7 +101,7 @@ export function newGame(argv: string[]): void {
     writeFileSync(registerPath, `import { bootstrapFramework } from "framework";
 
 // 注册游戏独有的组件/系统/动作/规则/生成器
-// 参考 README.md §扩展指南
+// 参考 docs/architecture.md §扩展指南
 
 bootstrapFramework();
 `, "utf8");
