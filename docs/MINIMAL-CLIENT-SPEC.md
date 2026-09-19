@@ -13,7 +13,7 @@
 ## 0. 给 AI 的任务指令（原样置于提示词最前）
 
 你是一名资深 Web 游戏客户端工程师。请依据随附的《服务端对接协议》文档，生成一个**单文件 HTML 客户端**（index.html）：
-打开后填入服务端地址即可连接，在浏览器中显示游戏世界并完成基础生存玩法操作。
+打开后填入服务端地址即可连接，在浏览器中显示游戏世界并完成基础的世界显示与交互操作（移动 / 交互采集 / 战斗 / 合成建造 / 对话 / 换图，以协议能力为准）。
 代码质量要求：无构建步骤、无 npm 依赖、全部内联、中文注释与 UI。
 
 ---
@@ -146,7 +146,7 @@
    | NPC | DialogueSource.treeId | 绿色 | NPC |
    | 资源点 | ResourceNode.remaining | 棕色 | 剩余量 |
    | 地面物品 | ItemMeta.kind | 黄色 | kind |
-   | 火堆 | CraftingStation.stationType + LightSource | 橙色 | 🔥 |
+   | 光源型合成站 | CraftingStation.stationType + LightSource | 橙色 | 🔥 |
    | 传送门 | Portal.targetMap | 紫色 | 门 |
    | 建筑 | Placeable.* | 灰色 | — |
 
@@ -175,15 +175,15 @@
 | 数字键 `1`-`9`,`0`,`-`,`=` | 选中背包槽 0-11（高亮） |
 | `F` | 对选中槽：食物→`consume`；工具→`equip` |
 | `G` | 丢弃选中槽（`drop`） |
-| `C` | 开关合成面板：列出协议 §4.4 全部配方按钮，点击发 `{type:"craft",recipe}` |
+| `C` | 开关合成面板：列出 crafting 配置（`game/rules/crafting.json`）定义的配方按钮，点击发 `{type:"craft",recipe}` |
 | `B` | 放置选中 kit：目标点 = 自身坐标 + 面板方向 × 32px，发 `{type:"place",slot,x,y}` |
 | `X` | 拆除最近建筑（从实体表找最近 `Placeable.*`，发 `{type:"deconstruct",target}`） |
 | 对话选项 | 自身实体存在 `Dialogue.{i}.option` 时渲染按钮列表，点击发 `{type:"dialogue",option:i}` |
 
 ### P4 状态 HUD
 
-左上角常驻：HP（Health.current）、hunger/thirst 条（Needs.0/1）、时钟（hour + phase 昼/夜）、mapId（该玩家当前地图）；
-底部 12 格背包条（`Inventory.{i}.kind/count`，空槽灰显）；右上角任务列表（`Quest.*`，state 含义见协议 §4.7）。
+左上角常驻：HP（Health.current）、需求条（`Needs.{i}`，按 `name` 渲染）、时钟（hour + phase 昼/夜）、mapId（该玩家当前地图）；
+底部背包条（`Inventory.{i}.kind/count`，槽位数按原型配置渲染、空槽灰显）；右上角任务列表（`Quest.*`，state 含义见协议 §4.7）。
 
 ---
 
@@ -215,16 +215,17 @@
 
 ## 5. 验收清单（生成完成后逐项自检，全过才算交付）
 
-1. 页面打开 → 填默认地址连接成功 → 画布出现阻挡块网格与若干实体色块，HUD 显示 HP/饥饿/口渴/时钟。
-2. WASD 移动流畅，松手即停（位置来自服务器同步）。
-3. 走近树/浆果丛按 `E` → 背包出现木材/浆果。
-4. 按 `Space` 攻击附近野猪 → 其消失前可见；掉落物走近自动拾取入包。
-5. 走近村民按 `T` → 出现对话框与选项按钮 → 点接任务选项 → 任务面板出现条目。
-6. `C` 打开合成面板 → 合成斧头（木材×2）成功入包；`F` 装备后采集速度提升。
-7. 吃浆果（选中+F）→ 饥饿度回升。
-8. 选中火堆套件按 `B` → 身前出现火堆实体（橙色）；`X` 可拆除自己放置的建筑。
-9. 找到紫色传送门（island tile (54,42)）走进去 → 该玩家 `mapId` 变为 cave（`players.get(room.sessionId).mapId`），地图重绘为 64×64 小图；走 cave 的回程门（tile (32,32)）可返回 island。
-10. 重启服务端后重连 → 位置/背包/任务基本恢复（60s 存档周期内的最后变更可能丢失）。
+> 机制级验收：只验收协议能力是否跑通，**不钉任何具体内容值**（实体种类/物品名/坐标/数值均为配置产物，随 `game/` 配置变化）。
+
+1. 页面打开 → 填默认地址连接成功 → 画布出现可走/阻挡地图与若干实体色块，HUD 显示生命/需求/时钟/地图 id。
+2. WASD 移动流畅，松手即停（位置来自服务器同步，不做客户端预测）。
+3. 走近任一资源实体（`ResourceNode.remaining` 特征）按 `E` → `ResourceNode.remaining` 减少，背包获得产出（`Inventory` 计数增加）。
+4. 按 `Space` 攻击附近敌怪（仅 `Health` 特征）→ 其 `Health.current` 下降直至实体消失；掉落物（`ItemMeta` 特征）走近自动拾取入包。
+5. 走近 NPC（`DialogueSource.treeId` 特征）按 `T` → 对话框与选项按钮出现 → 点任务类选项 → 任务面板（`Quest.*`）出现条目；可再经对话选项提交。
+6. `C` 打开合成面板 → 任选一个当前背包材料满足的配方合成 → 产出入包；`F` 装备后攻击/采集加成生效；`consume` 后对应需求条回升。
+7. 选中 kit 类物品按 `B` → 身前出现建筑实体（`Placeable.*` 特征）；`X` 可拆除自己放置的建筑（实体消失）。
+8. 走进任一传送门（`Portal.targetMap` 特征）→ 该玩家 `mapId` 变化、地图按新 key 重绘（`{key, version}` 缓存生效）；经对应回程门可返回原图。
+9. 重启服务端后重连 → 进度恢复至最近存档（存档周期内的最后变更可能丢失）。
 
 ---
 
@@ -236,3 +237,5 @@
 | v1.1 | 2026-08-25 | CDN/导入写法修正（`colyseus.js`→`@colyseus/sdk@0.17.43` 全局版 + `@colyseus/schema@4.0.25` 模块导入，浏览器实测通过）；新增 Tailwind 条目（§1 约束表第 7 条）；新增坑 K8（自定义 rootSchema 传参即空状态等 5 条实测坑）。约束 2/3 改掉原先写错的双重错误地址与“全局提供 Schema 类”的说法；K1-K7 复核后表述保持成立未改 |
 | v1.2 | 2026-08-25 | 约束 2 写法升级：明确**两种实测可行的引入方式**（方式 A：unpkg 全局脚本+Schema 模块导入 / 方式 B：importmap + jsdelivr `+esm`），新增**「禁止两个普通 script 混用」警告**以消除 AI 生成 `colyseus is not defined` 的歧义；最小示例保留方式 A 基准并**新增方式 B 完整可复制示例**（均标注浏览器实测通过）；坑 K8 补第 6 条（方式 B 专用 importmap 位置）并改写 K8.4 说明方式 B 如何绕开裸导入坑 |
 | v1.3 | 2026-08-31 | 地图契约改版（地图系统重设计后）：chunk 化阻挡位图废弃，`/maps/runtime` 改为全图快照 `tiles`/`walkable`/`regions`/`regionOfTile` + `x-map-version` 响应头；响应标识字段 `id`→`key`；默认图 generated-map→island；cave 32×32→64×64；`/maps/meta` 的 `kind` 改为管道首积木名（`generatorId`/`seed` 字段移除）。§P1 地图加载步骤 2-5 与验收清单第 9 步同步改写；§1 示例段 `mapId="generated-map"` 为历史实测记录（已就地标注，不改写实测日志） |
+| v1.4 | 2026-09-18 | 复核协议契约未变（RoomState/PlayerState 三层 Schema、`/maps/runtime` 契约、CORS 5173、colyseus 0.17.43 与 K1-K8 全部仍成立）；仅验收清单第 9 步 portal 坐标过时——生态地图切片①把 island 门从 (54,42) 迁至 (96,96)，切片②新增 island↔swamp↔ruins 门户（island 第二座门 (140,166)），第 9 步同步改写。注：巢穴实体（Nest 无 netSync 适配器）在客户端表现为普通敌怪（仅 Health 特征），特征辨识表无需新增条目 |
+| v2.0 | 2026-09-18 | 通用化改写——脱离具体游戏内容：任务指令/验收清单改为机制级（验收不钉内容值，实体/物品/坐标均为配置产物）；内容类枚举改为指向 `game/` 配置来源（配方=game/rules/crafting.json 等）。协议契约无变化，协议细节仍以 `CLIENT-INTEGRATION.md` 为唯一权威 |
