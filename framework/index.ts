@@ -108,7 +108,8 @@ export { addRelation, getRelation } from "framework/systems/gameplay/relation";
 export { emitEvent, consumeEvents, type GameEvent } from "framework/events/gameEvents";
 export { overlapsAnyEntity, overlapsMapBlocked, overlapsOccupiedGrid, snapToGrid } from "framework/utils/placement";
 
-export { GameDefinitionSchema, type GameDefinition, type LoadedGameDefinition, type BehaviorDefinition, type SystemEnableEntry, type NetSyncField } from "framework/config/schema/GameDefinitionSchema";
+export { GameDefinitionSchema, WorldTileSchema, WorldSchema, type GameDefinition, type WorldTile, type WorldConfig, type LoadedGameDefinition, type BehaviorDefinition, type SystemEnableEntry, type NetSyncField } from "framework/config/schema/GameDefinitionSchema";
+export { normalizeTileUnits } from "framework/config/tileUnits";
 export { ItemKindSchema, type ItemKindSpec, type ConsumeEffect, type EquipEffect, type PlaceEffect } from "framework/config/schema/ItemKindSchema";
 export { registerRuleSchema, getRuleSchema, hasRuleSchema, registerBuiltinRuleSchemas } from "framework/config/schema/ruleSchemas";
 export { CombatRuleSchema, NeedsRuleSchema, CraftingRuleSchema, DayNightRuleSchema, ServerRuleSchema, type CombatRule, type NeedsRule, type CraftingRule, type CraftingRecipe, type DayNightRule, type ServerRule } from "framework/config/schema/RuleSchema";

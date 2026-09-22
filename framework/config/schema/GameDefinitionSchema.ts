@@ -31,6 +31,37 @@ export const SystemEnableEntrySchema = z.object({
 });
 
 /**
+ * 全局 tile 像寸（game.json 的 world.tile）——`*Tiles` 配置量纲换算的唯一基准
+ * （tile-units 机制，见 framework/config/tileUnits.ts）。
+ *
+ * 两值为正数；v1 强制方形 tile（width === height，refine 校验，非方形暂不支持）。
+ */
+export const WorldTileSchema = z
+  .object({
+    /** tile 宽度（像素）。 */
+    width: z.number().positive(),
+    /** tile 高度（像素）。 */
+    height: z.number().positive(),
+  })
+  .refine((tile) => tile.width === tile.height, {
+    message:
+      "world.tile: non-square tile (width !== height) is not supported yet — v1 requires one global square tile size",
+  });
+
+/**
+ * 全局世界段（game.json 的 world）：当前仅声明 tile 像寸。
+ * 整段缺省 16×16（兼容未声明 world 段的旧配置）。
+ */
+export const WorldSchema = z
+  .object({ tile: WorldTileSchema })
+  .default({ tile: { width: 16, height: 16 } });
+
+/** 全局 tile 像寸类型推断。 */
+export type WorldTile = z.infer<typeof WorldTileSchema>;
+/** 世界段类型推断（经 schema 解析后 tile 恒存在）。 */
+export type WorldConfig = z.infer<typeof WorldSchema>;
+
+/**
  * 网络同步字段条目（game.json 的 netSync.fields[] 元素）：
  * 声明把某组件（component）的若干字段（fields）同步给客户端。
  */
@@ -51,6 +82,7 @@ export const NetSyncFieldSchema = z.object({
  * 游戏定义根 schema（game/game.json）：
  * - id/name：定义标识与显示名
  * - worldview：世界观/主题透传（不校验内部）
+ * - world：全局世界段（world.tile 全局 tile 像寸，`*Tiles` 换算的唯一基准）
  * - tickRate：逻辑 tick 频率（次/秒）
  * - map：地图清单路径（registry）与默认地图（default）
  * - systems：启用的系统列表（见 SystemEnableEntrySchema）
@@ -61,6 +93,8 @@ export const GameDefinitionSchema = z.object({
   id: z.string(),
   name: z.string().optional(),
   worldview: z.object({}).passthrough().optional(),
+  /** 全局世界段：tile 像寸（缺省 16×16，见 WorldSchema）。 */
+  world: WorldSchema,
   tickRate: z.number().min(1),
   map: z.object({
     registry: z.string(),

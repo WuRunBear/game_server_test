@@ -164,7 +164,7 @@
 
 ### P2 输入
 
-1. WASD → `moveX/moveY`（像素/秒，幅度 ≤200，斜向归一化到 ≤200）。
+1. WASD → `moveX/moveY`（像素/秒，幅度 ≤ 当前 server 规则速度上限，斜向归一化到同一上限；上限随 `game/rules/server.json` 漂移——当前为 `maxMoveSpeedTiles: 2` 格/秒 × 16px/格 = **32 像素/秒**，超限整条输入被静默拒收、角色不动）。
 2. 每 **50ms** 发送一次 `input`（携带当前方向快照）；`seq` 从 1 起严格递增。
 3. `E`=interact、`Space`=attack、`T`=talk：**仅按下事件那一帧置 true**，其余帧 false（见坑条款 K3）。
 
@@ -239,3 +239,4 @@
 | v1.3 | 2026-08-31 | 地图契约改版（地图系统重设计后）：chunk 化阻挡位图废弃，`/maps/runtime` 改为全图快照 `tiles`/`walkable`/`regions`/`regionOfTile` + `x-map-version` 响应头；响应标识字段 `id`→`key`；默认图 generated-map→island；cave 32×32→64×64；`/maps/meta` 的 `kind` 改为管道首积木名（`generatorId`/`seed` 字段移除）。§P1 地图加载步骤 2-5 与验收清单第 9 步同步改写；§1 示例段 `mapId="generated-map"` 为历史实测记录（已就地标注，不改写实测日志） |
 | v1.4 | 2026-09-18 | 复核协议契约未变（RoomState/PlayerState 三层 Schema、`/maps/runtime` 契约、CORS 5173、colyseus 0.17.43 与 K1-K8 全部仍成立）；仅验收清单第 9 步 portal 坐标过时——生态地图切片①把 island 门从 (54,42) 迁至 (96,96)，切片②新增 island↔swamp↔ruins 门户（island 第二座门 (140,166)），第 9 步同步改写。注：巢穴实体（Nest 无 netSync 适配器）在客户端表现为普通敌怪（仅 Health 特征），特征辨识表无需新增条目 |
 | v2.0 | 2026-09-18 | 通用化改写——脱离具体游戏内容：任务指令/验收清单改为机制级（验收不钉内容值，实体/物品/坐标均为配置产物）；内容类枚举改为指向 `game/` 配置来源（配方=game/rules/crafting.json 等）。协议契约无变化，协议细节仍以 `CLIENT-INTEGRATION.md` 为唯一权威 |
+| v2.1 | 2026-09-22 | tile-units 机制落地后输入约束复核：§P2 移动幅度从硬编码 ≤200 改为指向 server 规则速度上限并标注当前值 32px/s（`maxMoveSpeedTiles: 2` 格/s × 16px/格）——旧值会使生成的客户端全部输入被静默拒收（角色不动）。协议契约（三层 Schema/端点/CORS/K1-K8）无任何变化 |

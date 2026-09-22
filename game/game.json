@@ -3,6 +3,7 @@
   "name": "荒岛求生",
   "worldview": { "theme": "survival" },
   "tickRate": 20,
+  "world": { "tile": { "width": 16, "height": 16 } },
   "map": {
     "registry": "./maps/registry.json",
     "entityRules": "./maps/entity-rules.json",

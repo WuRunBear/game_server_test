@@ -9,12 +9,12 @@
           "type": "sequence",
           "children": [
             { "type": "condition", "call": "IsTargetInVision" },
-            { "type": "action", "call": "Chase", "args": { "speed": 60 } },
+            { "type": "action", "call": "Chase", "args": { "speedTiles": 0.6 } },
             { "type": "condition", "call": "InAttackRange" },
             { "type": "action", "call": "Attack" }
           ]
         },
-        { "type": "action", "call": "Wander", "args": { "speed": 40 } }
+        { "type": "action", "call": "Wander", "args": { "speedTiles": 0.4 } }
       ]
     }
   }

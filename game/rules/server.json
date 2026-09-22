@@ -1,7 +1,7 @@
 {
   "saveIntervalMs": 60000,
   "saveId": "main",
-  "viewRadius": 300,
-  "maxMoveSpeed": 200,
+  "viewRadiusTiles": 19,
+  "maxMoveSpeedTiles": 2,
   "maxCommandsPerSec": 20
 }

@@ -5,7 +5,7 @@
     "child": {
       "type": "action",
       "call": "Wander",
-      "args": { "speed": 48 }
+      "args": { "speedTiles": 0.48 }
     }
   }
 }

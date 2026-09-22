@@ -48,7 +48,7 @@ const room = await client.joinOrCreate<RoomState>("game");
 {
   "seq": 1,          // 自增序号（必填）。乱序/重复/小于等于上一条的被丢弃
   "moveX": 0,        // 水平速度分量，像素/秒（必填）
-  "moveY": 100,      // 垂直速度分量，像素/秒（必填）
+  "moveY": 20,       // 垂直速度分量，像素/秒（必填；幅度示例，上限见下表）
   "interact": false, // 可选：本帧按下"采集"键
   "attack": false,   // 可选：本帧按下"攻击"键
   "talk": false      // 可选：本帧按下"对话"键
@@ -60,7 +60,7 @@ const room = await client.joinOrCreate<RoomState>("game");
 | 项 | 值 |
 |----|----|
 | `seq` | 严格递增正整数；被拒输入不推进 seq、无需重发（下一条更高 seq 输入照常放行） |
-| 速度上限 | `|(moveX, moveY)|` 受 server 规则 `maxMoveSpeed`（`game/rules/server.json`）限定（像素/秒），超出整条输入被拒 |
+| 速度上限 | `\|(moveX, moveY)\|` 受 server 规则速度上限限定（像素/秒），超出整条输入被拒。配置源 `game/rules/server.json` 以格/秒表达（`maxMoveSpeedTiles`，加载期按 `game.json` `world.tile` 换算为像素/秒；当前 2 格/s = 32 px/s） |
 | 意图信号 | `interact` / `attack` / `talk` 为边沿触发（按下那帧置 true 即可，服务端消费后清除） |
 | 权威模型 | 服务端权威：客户端**不要**自行预测位移，以状态同步为准 |
 
@@ -131,7 +131,7 @@ Colyseus Schema 增量同步（补丁 + 全量握手）。**客户端必须声�
 | `visibleEntities` | map\<string, EntityState\> | 本玩家可见实体表（**唯一的实体来源**）：key = NetworkId 字符串，只含本玩家可见实体 |
 
 **兴趣裁剪（重要）**：实体同步**恒**走每个玩家自己的 `visibleEntities`——自 per-player 协议起，`RoomState` 的 `entities` 已移除，**不存在**房间级实体表或兼容通道：
-- 自己（`entityId` 对应实体）恒在表中；其他实体进入半径（由 server 规则 `viewRadius` 配置，见 `game/rules/server.json`；未配置时同图全量）才出现，离开即被删除。
+- 自己（`entityId` 对应实体）恒在表中；其他实体进入半径（由 server 规则配置，见 `game/rules/server.json` 的 `viewRadiusTiles`——格，加载期换算为像素；未配置时同图全量）才出现，离开即被删除。
 - 客户端只遍历 `state.players.get(room.sessionId).visibleEntities`，无需再读任何房间级实体表。
 - 该表仅对自己可见（服务端按连接过滤，经 `$filter` per-client 编码），不要假设能看到其他玩家的表。
 - 跨图实体被过滤：玩家只看到**同一地图**（`PlayerState.mapId`）内的实体 + 半径内；换图后旧图实体随即从此表移除。
@@ -232,7 +232,7 @@ export class RoomState extends Schema {
 
 | 玩法 | 操作 | 服务端反应 | 当前配置来源 |
 |------|------|-----------|-------------|
-| 移动 | `input` moveX/moveY | 速度积分 + 碰撞分离 → `Transform.x/y` 同步 | 速度上限 = server 规则 `maxMoveSpeed`（`game/rules/server.json`） |
+| 移动 | `input` moveX/moveY | 速度积分 + 碰撞分离 → `Transform.x/y` 同步 | 速度上限 = server 规则（`game/rules/server.json` 的 `maxMoveSpeedTiles`，格/秒，加载期换算为像素/秒） |
 | 采集 | `input` interact | 半径内最近资源实体 → `ResourceNode.remaining` 减少 → 物品入包/落地 | 交互半径 = `game.json` `systems[].config`（interaction 的 `range`） |
 | 近战攻击 | `input` attack | 半径内最近敌对实体 → 目标 `Health.current` 减少；击杀按 LootTable 落地掉落物 | 攻击射程取实体 `Attack` 组件值，缺省回退 combat 规则（**组件值优先**）；冷却/无友伤/伤害公式见 `game/rules/combat.json` |
 | 拾取 | 无操作（走近自动） | 地面物品消失 → `Inventory` 计数增加 | 自动拾取 + 防瞬回保护（落地后短暂不可拾，框架行为） |

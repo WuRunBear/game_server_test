@@ -14,7 +14,10 @@ import {
   GameDefinitionSchema,
   type LoadedGameDefinition,
   type BehaviorDefinition,
+  type WorldTile,
 } from "framework/config/schema/GameDefinitionSchema";
+import { normalizeTileUnits } from "framework/config/tileUnits";
+import { createLogger } from "framework/utils/logger";
 import { ArchetypeSchema } from "framework/config/schema/ArchetypeSchema";
 import { BehaviorSchema } from "framework/config/schema/BehaviorSchema";
 import { ItemKindSchema, type ItemKindSpec } from "framework/config/schema/ItemKindSchema";
@@ -46,6 +49,9 @@ export interface LoadGameDefinitionOptions {
   /** game.json 路径（相对 process.cwd()）；缺省 "game/game.json"。 */
   gameJsonPath?: string;
 }
+
+/** 加载期日志（tile-units sizing 不一致警告等非阻断诊断）。 */
+const logger = createLogger("load-game-def");
 
 /** 主配置所在目录（其余资源文件路径相对它解析）。 */
 function resolveConfigDir(gameJsonPath: string): string {
@@ -210,13 +216,59 @@ function inlineTemplateTiled(
 }
 
 /**
+ * 地图 sizing 注入（tile-units 机制，§3.4）：生成块参数缺 tileWidth/tileHeight
+ * 时注入 world.tile 全局像寸——注入发生在配置解析层，生成积木自身的必填校验
+ * 保持不变。tiled-source 步骤豁免（sizing 来自 Tiled JSON 自带的
+ * tilewidth/tileheight，不读参数 sizing）。步骤显式声明且与全局基准不一致 →
+ * 非阻断警告（实体 px 尺寸按全局基准换算，可能与该图几何比例失调）。
+ *
+ * 无参数切片的步骤不注入（sizing 积木必然自带参数对象；缺参错误由积木
+ * 自身的 fail-fast 校验给出）。
+ */
+function applyWorldTileSizing(
+  step: MapGenerationStep,
+  mapKey: string,
+  worldTile?: WorldTile,
+): MapGenerationStep {
+  if (!worldTile) return step;
+  if (step.generator === "tiled-source") return step;
+  const params = step.params;
+  if (params === null || typeof params !== "object") return step;
+  const raw = params as Record<string, unknown>;
+
+  // 显式声明与全局基准不一致 → 非阻断警告（不修正声明值，交由积木校验把关类型）
+  for (const axis of ["tileWidth", "tileHeight"] as const) {
+    const declared = raw[axis];
+    const expected = axis === "tileWidth" ? worldTile.width : worldTile.height;
+    if (typeof declared === "number" && declared !== expected) {
+      logger.warn(
+        `map "${mapKey}" step "${step.generator}": params.${axis} (${declared}) differs from world.tile (${expected}) — ` +
+          "entity px sizes are converted against the global tile size and may mismatch this map's geometry scale",
+      );
+    }
+  }
+
+  // 缺省键注入（不覆盖显式声明）
+  if (raw.tileWidth !== undefined && raw.tileHeight !== undefined) return step;
+  const paramsnext: Record<string, unknown> = { ...raw };
+  if (paramsnext.tileWidth === undefined) paramsnext.tileWidth = worldTile.width;
+  if (paramsnext.tileHeight === undefined) paramsnext.tileHeight = worldTile.height;
+  return { ...step, params: paramsnext };
+}
+
+/**
  * 解析地图注册表：返回全部地图生成配置（key = 地图 registry key）。
  * Tiled 条目在此读取其 JSON 文件并内联进 tiled-source 积木参数——缺文件/
  * 解析失败在此处报错（积木本身不做文件 I/O）；管道步骤的 tiledPath 模板
- * 同样在此读文件内联为 params.tiled（stamp-template 加载期约定）；无
+ * 同样在此读文件内联为 params.tiled（stamp-template 加载期约定）；生成块
+ * 参数缺 tileWidth/tileHeight 时注入 world.tile 全局像寸（§3.4）；无
  * 注册表/无地图时返回空。
  */
-function resolveMapConfigs(baseDir: string, mapRegistryPath?: string): MapConfig[] {
+function resolveMapConfigs(
+  baseDir: string,
+  mapRegistryPath?: string,
+  worldTile?: WorldTile,
+): MapConfig[] {
   if (!mapRegistryPath) return [];
   const fullPath = resolve(baseDir, mapRegistryPath);
   if (!existsSync(fullPath)) return [];
@@ -250,7 +302,9 @@ function resolveMapConfigs(baseDir: string, mapRegistryPath?: string): MapConfig
         key,
         seed: entry.seed,
         initialAgeTicks: entry.initialAgeTicks,
-        pipeline: entry.pipeline.map((step, stepIndex) => inlineTemplateTiled(key, stepIndex, step, registryDir)),
+        pipeline: entry.pipeline.map((step, stepIndex) =>
+          applyWorldTileSizing(inlineTemplateTiled(key, stepIndex, step, registryDir), key, worldTile),
+        ),
       });
     }
   }
@@ -639,6 +693,48 @@ function collectActionNames(node: unknown, names: Set<string>): void {
   }
 }
 
+/**
+ * 加载期 tile 单位归一化接线（tile-units 机制）：对四类配置结构各调一次
+ * normalizeTileUnits——
+ * 1. 每个 archetype 的 components 块；
+ * 2. 每个 resolvedRules[basename]（含 resolvedPlayerRule 等同引用别名）；
+ * 3. 每个 behaviors 文件树（覆盖 BT args）；
+ * 4. game.json 的 systems[].config。
+ *
+ * 调用时机：全部解析且 schema 校验通过后、注册表构建之前。§8.7 引用共享：
+ * 原地转换，同一根对象只转换一次（重复调用会二次换算）——除 rules 别名
+ * 天然同引用外，此处再以根对象去重兜底跨结构的意外共享。
+ */
+function normalizeLoadedTileUnits(loaded: LoadedGameDefinition, tilePx: number): void {
+  const roots: Array<{ label: string; root: unknown }> = [];
+  for (const entity of loaded.resolvedEntities) {
+    roots.push({ label: `archetype "${entity.kind}" components`, root: entity.components });
+  }
+  for (const [name, rule] of Object.entries(loaded.resolvedRules)) {
+    roots.push({ label: `rule "${name}"`, root: rule });
+  }
+  for (const behavior of loaded.resolvedBehaviors) {
+    roots.push({ label: `behavior "${behavior.id}"`, root: behavior.definition });
+  }
+  for (const entry of loaded.systems ?? []) {
+    roots.push({ label: `system config "${entry.id}"`, root: entry.config });
+  }
+
+  const seen = new Set<object>();
+  for (const { label, root } of roots) {
+    if (root === null || typeof root !== "object") continue;
+    if (seen.has(root)) continue;
+    seen.add(root);
+    try {
+      normalizeTileUnits(root, tilePx);
+    } catch (err) {
+      throw new Error(
+        `tile-units normalization failed for ${label}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+}
+
 export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedGameDefinition {
   const jsonPath = resolve(
     process.cwd(),
@@ -667,7 +763,7 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
   const resolvedItems = loadItemsFile(baseDir, gameDef.items);
   const resolvedDialogues = loadDialoguesFile(baseDir, gameDef.dialogues);
   const resolvedQuests = loadQuestsFile(baseDir, gameDef.quests);
-  const resolvedMapConfigs = resolveMapConfigs(baseDir, gameDef.map?.registry);
+  const resolvedMapConfigs = resolveMapConfigs(baseDir, gameDef.map?.registry, gameDef.world?.tile);
   const resolvedEntityRules = loadEntityRules(baseDir, gameDef.map?.entityRules);
   const resolvedEcosystems = loadEcosystemsFile(baseDir, gameDef.map?.ecosystems);
   const resolvedPlayerRule = resolvedRules["player"] as PlayerRule | undefined;
@@ -690,6 +786,10 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
     resolvedPlayerRule,
   };
 
+  // tile-units 归一化：全部配置解析且 schema 校验通过后、注册表构建之前，
+  // 一次性把 `*Tiles` 量纲键换算为 px（运行时系统只见 px，零改动）
+  normalizeLoadedTileUnits(loaded, gameDef.world.tile.width);
+
   validateIntegrity(loaded);
 
   return loaded;
@@ -700,6 +800,7 @@ export function createDefaultGameDefinition(): LoadedGameDefinition {
     id: "default",
     name: "默认游戏",
     tickRate: 20,
+    world: { tile: { width: 16, height: 16 } },
     systems: [
       { id: "ai" },
       { id: "physics" },

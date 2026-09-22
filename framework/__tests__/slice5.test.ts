@@ -395,8 +395,10 @@ describe("Slice 5：真实 game 配置（server 规则 + 存档→恢复 demo）
     const def = loadGameDefinition({ gameJsonPath: "game/game.json" });
     const server = def.resolvedRules["server"] as ServerRule;
     expect(server.saveId).toBe("main");
-    expect(server.viewRadius).toBe(300);
-    expect(server.maxMoveSpeed!).toBe(200);
+    // server.json 以 Tiles 量纲表达（viewRadiusTiles 19 / maxMoveSpeedTiles 2），
+    // 加载期归一化为 px：19×16=304、2×16=32（tile-units 机制）
+    expect(server.viewRadius).toBe(304);
+    expect(server.maxMoveSpeed!).toBe(32);
     expect(server.maxCommandsPerSec!).toBe(20);
 
     const dir = mkdtempSync(join(tmpdir(), "s5-real-"));

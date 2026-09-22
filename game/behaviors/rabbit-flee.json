@@ -9,10 +9,10 @@
           "type": "sequence",
           "children": [
             { "type": "condition", "call": "IsTargetInVision" },
-            { "type": "action", "call": "Flee", "args": { "speed": 80 } }
+            { "type": "action", "call": "Flee", "args": { "speedTiles": 0.8 } }
           ]
         },
-        { "type": "action", "call": "Wander", "args": { "speed": 40 } }
+        { "type": "action", "call": "Wander", "args": { "speedTiles": 0.4 } }
       ]
     }
   }

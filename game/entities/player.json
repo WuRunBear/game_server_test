@@ -2,12 +2,12 @@
   "kind": "player",
   "tags": ["Player"],
   "components": {
-    "Size": { "w": 16, "h": 16 },
+    "Size": { "wTiles": 0.5, "hTiles": 0.5 },
     "Velocity": {},
     "Acceleration": {},
-    "Collider": { "shape": 1, "halfW": 8, "halfH": 8 },
+    "Collider": { "shape": 1, "halfWTiles": 0.25, "halfHTiles": 0.25 },
     "Health": { "current": 100, "max": 100 },
-    "Attack": { "value": 10, "range": 40 },
+    "Attack": { "value": 10, "rangeTiles": 2.5 },
     "Cooldown": {},
     "Needs": [
       { "name": "hunger", "current": 100, "max": 100, "decayPerSec": 0.5, "depletionDmg": 1 },
