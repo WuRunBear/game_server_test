@@ -115,9 +115,11 @@ Colyseus Schema 增量同步（补丁 + 全量握手）。**客户端必须声�
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `tick` | uint32 | 逻辑帧号（tick 率由 game.json `tickRate` 配置；当前示例 20 帧/秒 = 50ms/帧） |
-| `hour` | float64 | 世界小时 0–24（昼夜循环推进） |
+| `hour` | float64 | 世界小时 0–24（推进速率见下「昼夜语义」） |
 | `phase` | uint8 | 0=白天，1=夜晚 |
 | `players` | map\<string, PlayerState\> | key = sessionId |
+
+> **昼夜语义**：`hour` 按 daynight 规则（`game/rules/daynight.json`）推进——每 `cycleLengthSec` 真实秒走完 24 世界小时（当前配置 600s ⇒ 1 世界小时 = 25 真实秒 ≈ 500 tick@20tps）；`phase` 在 `nightStartHour`/`nightEndHour` 边界切换（当前 19/5，支持跨午夜）。**天数不在协议中**：客户端如需显示「第 X 天」，自行累计 `hour` 回绕（23.x→0.x）次数，属本地近似。
 
 > **房间级状态只有上面四个字段**（协议破坏性变更）：`RoomState` 不再携带 `mapId` / `entities`。玩家的当前地图是 **per-player** 的，经 `PlayerState.mapId` 同步（见 §3.2），**不是**房间级字段；实体同步恒走 per-client 的 `PlayerState.visibleEntities`（见 §3.2），`RoomState` 内没有实体表。
 
@@ -136,6 +138,7 @@ Colyseus Schema 增量同步（补丁 + 全量握手）。**客户端必须声�
 - 该表仅对自己可见（服务端按连接过滤，经 `$filter` per-client 编码），不要假设能看到其他玩家的表。
 - 跨图实体被过滤：玩家只看到**同一地图**（`PlayerState.mapId`）内的实体 + 半径内；换图后旧图实体随即从此表移除。
 - 这是**唯一**的实体交付路径（破坏性变更，旧客户端读取 `RoomState` 的 `entities` 会失败）。
+- **上游解码 bug 兜底（core 0.17.43）**：该表可能解码出空壳实体（`id` 非数字、`values`/`stringValues` 缺失），与正常实体同表混入且时好时坏。客户端应**逐实体过滤**（仅使用 `typeof id === "number"` 的实体）并以可选链读取字段；空壳伴随控制台 `"refId not found"` 报错，属预期噪音，服务端升级 colyseus 后消除。
 
 ### 3.3 EntityState（单实体）
 
@@ -513,6 +516,7 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 | 连接失败/握手无响应 | Schema 与服务端不一致（字段顺序/类型）、地址错误、CORS 白名单未含客户端 Origin |
 | 角色不动 | 输入超速被拒（超限帧被丢弃、seq 不推进、无需重发）；或未发 `input`（只发 state 监听） |
 | 实体表为空 | 实体恒在自己 `visibleEntities`（首帧后才开始填充）；若持续为空，检查是否同一地图/半径内无实体、或 Schema 声明顺序与服务端不一致 |
+| 控制台报 `"refId not found"`、实体字段偶发消失 | 上游解码 bug（core 0.17.43）：`visibleEntities` 混入空壳实体，按 §3.2 末尾的兜底规则逐实体过滤即可容忍；服务端升级 colyseus 后消除 |
 | 命令"没反应" | 命令失败无回执：缺料/满包/频率超限/距离不够，观察状态确认 |
 | 断线重进后实体变了 | 服务端重启恢复存档，未到存档周期的最后变更会丢（周期由 server 规则 `saveIntervalMs` 配置） |
 | 换图后实体全变 | 正常：该玩家 `PlayerState.mapId` 变化 = 该玩家场景切换，实体集随图切换（玩家自身保留）；其他玩家不受影响 |

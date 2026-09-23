@@ -12,4 +12,7 @@ data/saves
 out/
 .well-known
 tmp/
-
+.openchamber
+assets/html/404.html
+assets/html/.htaccess
+assets/html/.user.ini

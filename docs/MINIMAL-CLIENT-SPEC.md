@@ -160,7 +160,7 @@
 4. 渲染：`walkable[i]===0` 的格子画半透明白色方块（尺寸 `grid.tileWidth/tileHeight`）。⚠️ 语义与旧版 chunked `blocked` 位图**相反**：0=阻挡，1=可走。
 5. 缓存：以 `{key, version}` 为键缓存地图（`version` 与响应头 `x-map-version` 同值），命中则跳过拉取。
 6. 监听 `state.players.get(room.sessionId).mapId` 变化 → 变化时重新执行 1-4（该玩家换图）。
-7. 相机：平移画布使自身实体居中（不做边界钳制也可）。
+7. 相机：平移画布使自身实体居中（不做边界钳制也可）。可加固定渲染缩放（如 3x：16px 瓦片上屏 48px、横向可见约 30 格）改善观感——1:1 像素渲染视野过大、地图显小；缩放只影响渲染，不涉及协议。
 
 ### P2 输入
 
@@ -189,11 +189,11 @@
 
 ## 3. ⚠️ 已知坑（违反任何一条都会“看似连上但显示不对”）
 
-- **K1 visibleEntities 空 shell 兜底**：受服务端已知上游 bug 影响（colyseus#935/#936，core 0.17.43），`visibleEntities` 可能解码“成功”但实体内容为空壳（`id` 不是数字）。`visibleEntities` 是**唯一**实体来源（`state` 的 `entities` 已随协议移除，**没有回退通道**）。**规则：表中存在至少一个 `typeof e.id === "number"` 的实体才使用 visibleEntities；若解码为空壳，客户端应视为无可见实体**（不再有任何实体表回退）。注意：此场景下**玩家自身实体只存在于 visibleEntities**，空壳时自身状态缺失属预期行为。服务端升级修复后本条可删除。
+- **K1 visibleEntities 空壳兜底（逐实体）**：受上游 bug 影响（colyseus#935/#936，core 0.17.43），`visibleEntities` 可能解码出空壳实体（`id` 非数字、`values`/`stringValues` 缺失），与正常实体**同表混入**且时好时坏。`visibleEntities` 是**唯一**实体来源（`state` 的 `entities` 已移除，无回退通道）。**规则：逐实体过滤——只使用 `typeof e.id === "number"` 的实体，读取统一走 `e.values?.get(...)` 可选链**；勿按整表校验（混有一个空壳即每帧抛 `Cannot read properties of undefined`）。空壳伴随控制台 `"refId not found"` 报错，属同一 bug 的预期噪音，勿当客户端 bug 追。自身实体也在此表中，空壳时自身状态缺失属预期。服务端升级修复后本条可删除。
 - **K2 seq 无需重传机制**：被拒输入（超速等）会被丢弃，客户端无法感知；只需保证 seq 严格递增、每次携带最新输入即可，后续输入自然覆盖，勿实现复杂重传。
 - **K3 边沿触发**：键盘 `keydown` 有系统自动重复（auto-repeat），必须检查 `event.repeat` 过滤，否则 interact/attack/talk 会被连续触发。
 - **K4 命令失败无回执**：所有命令失败（缺料/满包/距离不够）服务端零副作用且**不回复错误**。UI 不等待响应、不做乐观本地修改，一切以状态同步为准。
-- **K5 CORS**：HTTP 端点受 `CORS_ORIGINS` 白名单限制（服务端默认 `http://localhost:5173`）。运行方式二选一：① 用任意静态服务器把页面跑在 `http://localhost:5173`（如 `npx serve -l 5173` 或 `python3 -m http.server 5173`）；② 在服务端 `.env` 设 `CORS_ORIGINS=<你的页面地址>` 后重启。
+- **K5 CORS**：HTTP 端点受 `CORS_ORIGINS` 白名单限制（服务端默认 `http://localhost:5173`）。运行方式二选一：① 用任意静态服务器把页面跑在 `http://localhost:5173`（如 `npx serve -l 5173` 或 `python3 -m http.server 5173`）；② 在服务端 `.env` 设 `CORS_ORIGINS=<你的页面地址>` 后重启。https/wss 部署同理：页面 Origin（`https://...`）与派生的 https 端点都需在白名单内。
 - **K6 换图改为 per-player**：玩家踩传送门只切换**该玩家自己**的地图（其 `players.get(room.sessionId).mapId` 变化），其他玩家的 `mapId` 不受影响、画面不切换——不再有房间级全员换图。
 - **K7 权威模型**：服务端权威模拟，客户端**不做位移预测**，位置完全以同步状态为准（最小版直接读最新值渲染即可，不需要插值）。
 - **K8 引入与 rootSchema 实测坑**（下列任何一条都会“看似连上但状态不对”或直接崩）：
@@ -203,6 +203,8 @@
   4. **SDK 的 ESM 入口浏览器直载失败**：`@colyseus/sdk@0.17.43/build/index.mjs` 含 `@colyseus/schema`/`@colyseus/shared-types` 裸导入，浏览器报 `Failed to resolve module specifier`；须用 `dist/colyseus.js` 全局版，或经 importmap（方式 B）让 CDN 服务端把裸导入改写为绝对 `/npm/...` 路径。
   5. **旧版浏览器直接崩**：`colyseus.js@0.15.28` 加载即抛 `Buffer is not defined`（`window.Colyseus` 是空 `{}`）；`0.16.22` 全局并不暴露 Schema 类。此两者均不可用。
   6. **（方式 B 专用）importmap 位置**：`<script type="importmap">` **必须放在所有 module script 之前**，且一个页面**只能有一个** importmap；两个 module script 里重复贴 importmap 会报错。importmap 只影响裸名称解析，不影响方式 A（全局脚本+模块直导入）的正确性。
+- **K9 首帧状态未就绪**：`joinOrCreate` 返回后、首个状态补丁到达前，`room.state.players` 可能为 `undefined`，同步读 `players.get(...)` 直接抛错。一切状态读取先判空（`room?.state?.players`），渲染循环自然重试；勿在 join 后同步断言字段存在。
+- **K10（方式 B）页面实际加载两份 schema**：importmap 钉的是 4.0.25，但 SDK 的 `+esm` 内部对 schema 的传递依赖由 CDN 解析为其范围内最新版（实测 4.0.26）——**解码路径用的是 SDK 内部那份**（控制台报错来源会显示 4.0.26）。如需绝对钉版，在 importmap 里把该传递依赖也显式映射。
 
 ---
 
@@ -240,3 +242,4 @@
 | v1.4 | 2026-09-18 | 复核协议契约未变（RoomState/PlayerState 三层 Schema、`/maps/runtime` 契约、CORS 5173、colyseus 0.17.43 与 K1-K8 全部仍成立）；仅验收清单第 9 步 portal 坐标过时——生态地图切片①把 island 门从 (54,42) 迁至 (96,96)，切片②新增 island↔swamp↔ruins 门户（island 第二座门 (140,166)），第 9 步同步改写。注：巢穴实体（Nest 无 netSync 适配器）在客户端表现为普通敌怪（仅 Health 特征），特征辨识表无需新增条目 |
 | v2.0 | 2026-09-18 | 通用化改写——脱离具体游戏内容：任务指令/验收清单改为机制级（验收不钉内容值，实体/物品/坐标均为配置产物）；内容类枚举改为指向 `game/` 配置来源（配方=game/rules/crafting.json 等）。协议契约无变化，协议细节仍以 `CLIENT-INTEGRATION.md` 为唯一权威 |
 | v2.1 | 2026-09-22 | tile-units 机制落地后输入约束复核：§P2 移动幅度从硬编码 ≤200 改为指向 server 规则速度上限并标注当前值 32px/s（`maxMoveSpeedTiles: 2` 格/s × 16px/格）——旧值会使生成的客户端全部输入被静默拒收（角色不动）。协议契约（三层 Schema/端点/CORS/K1-K8）无任何变化 |
+| v2.2 | 2026-09-23 | 按生成客户端实测反馈修订：K1 改写为**逐实体过滤**（实测空壳与正常实体同表混入、`values`/`stringValues` 整个缺失，旧的整表校验写法会每帧崩；空壳伴随 `"refId not found"` 预期噪音）；新增 K9（join 后首帧 `players` 可能为 `undefined`，读取需判空）；新增 K10（方式 B 下 SDK 传递依赖漂移，页面实际加载 4.0.25/4.0.26 两份 schema）；K5 补 https/wss 部署白名单说明；§P1 相机补渲染缩放建议；昼夜 `hour` 换算语义补至协议文档 §3.1 |

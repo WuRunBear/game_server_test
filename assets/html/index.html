@@ -1,0 +1,1323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>荒岛求生 · 单文件客户端（饥荒风视觉版）</title>
+<!--
+  ============================================================================
+  单文件最小游戏客户端（Don't Starve 风格纯视觉重设计版）
+  生成依据（严格照做）：
+    1. docs/MINIMAL-CLIENT-SPEC.md —— 生成规格（硬性约束 / P0-P4 必实现行为 / 坑 K1-K8 / 验收清单）
+    2. docs/CLIENT-INTEGRATION.md —— 协议契约（Schema 字段顺序 §3.4 / 消息形状 §2 / HTTP 端点 §5.2 / 特征辨识 §3.6）
+  本版改动【仅限视觉层】：DOM 结构、CSS、Canvas 绘制（地面配色/抖动/昼夜遮罩/实体描边阴影/相机 3× 缩放）。
+  协议与逻辑【逐字未动】：Schema defineTypes、joinOrCreate("game")、地图拉取与校验、
+  input 发送循环（50ms / seq 递增 / 32px/s / 边沿触发）、全部 command 键位与载荷形状、
+  实体辨识 classify、K1 空壳兜底、me() 判空、服务端权威（无预测/插值）。
+  视觉参照《饥荒》界面：深棕木质面板 + 米黄描边 + 衬线字体 + 暗角；
+  右上圆形昼夜钟 + 液位徽章组；底部木质热键条 + 右端 3 装备槽；左缘合成页签轨 + 展开大面板。
+  明确不做（规格 §4）：美术/动画/音频、客户端预测与插值、断线重连、移动端、i18n、测试、打包。
+  运行方式（坑 K5 CORS）：用静态服务器把本页跑在 http://localhost:5173
+    （如 `npx serve -l 5173` 或 `python3 -m http.server 5173`），
+    或在服务端 .env 配置 CORS_ORIGINS=<本页地址> 后重启服务端。
+  ============================================================================
+-->
+
+<!-- 方式 B（规格 §1 约束 2 推荐）：importmap + jsdelivr +esm，纯 ESM。
+     ⚠️ 坑 K8.6：importmap 必须放在所有 module script 之前，且全页只能有一个。
+     ⚠️ 禁止用两个普通 <script> 分别加载 SDK 与 Schema（会报 colyseus is not defined）。
+     注：本版 DOM 覆盖层样式全部改用手写 CSS（饥荒木质风），不再引入 Tailwind。 -->
+<script type="importmap">
+{
+  "imports": {
+    "@colyseus/sdk": "https://cdn.jsdelivr.net/npm/@colyseus/sdk@0.17.43/+esm",
+    "@colyseus/schema": "https://cdn.jsdelivr.net/npm/@colyseus/schema@4.0.25/+esm"
+  }
+}
+</script>
+
+<style>
+  /* ==========================================================================
+     饥荒风主题：深棕近黑木质面板 + 米黄描边 + 米色衬线文字 + 屏幕暗角
+     ==========================================================================*/
+  :root {
+    --wood: #241c14;        /* 面板主底色（深棕近黑木质） */
+    --wood-deep: #17110a;   /* 更深的槽底/底色 */
+    --wood-hi: #3a2d1f;     /* 按钮亮面 */
+    --beige: #c9b689;       /* 米黄描边 */
+    --beige-dim: #8f7f5c;   /* 次级描边/暗文字 */
+    --ink: #e8dcc0;         /* 主文字米色 */
+    --ink-dim: #a89a78;     /* 次要文字 */
+    --gold: #d8a94e;        /* 选中金 */
+    --lack: #d86a5a;        /* 材料不足红 */
+  }
+  html, body { margin: 0; height: 100%; background: #0a0906; overflow: hidden;
+    font-family: Georgia, 'STKaiti', KaiTi, 'STSong', 'STFangsong', serif; }
+  #game { display: block; position: fixed; inset: 0; }
+  .hidden { display: none !important; }
+  button { font-family: inherit; }
+
+  /* 屏幕四边暗角（vignette）：纯 CSS 覆盖层，不拦截事件 */
+  #vignette { position: fixed; inset: 0; z-index: 5; pointer-events: none;
+    background: radial-gradient(ellipse at center,
+      rgba(0,0,0,0) 50%, rgba(0,0,0,.38) 82%, rgba(0,0,0,.62) 100%); }
+
+  /* ---------- 通用木质面板 ---------- */
+  .panel {
+    background:
+      repeating-linear-gradient(175deg, rgba(255,255,255,.015) 0 2px, rgba(0,0,0,.04) 2px 5px),
+      linear-gradient(170deg, #2a2117, #1b1510);
+    border: 2px solid #0e0a06;
+    border-radius: 8px;
+    box-shadow: 0 0 0 1px rgba(201,182,137,.55), 0 8px 24px rgba(0,0,0,.7),
+      inset 0 0 30px rgba(0,0,0,.5);
+    color: var(--ink);
+  }
+  .panel-head { display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 12px; border-bottom: 1px solid rgba(201,182,137,.35);
+    font-weight: bold; letter-spacing: 3px; font-size: 14px; color: var(--beige); }
+  .panel-head button { background: none; border: 1px solid var(--beige-dim); color: var(--ink);
+    width: 22px; height: 22px; border-radius: 4px; cursor: pointer; line-height: 1; padding: 0; }
+  .panel-head button:hover { background: var(--wood-hi); }
+
+  /* ---------- 顶部连接栏（不显眼窄条，居中，融入整体） ---------- */
+  #topbar { position: fixed; top: 6px; left: 50%; transform: translateX(-50%); z-index: 20;
+    display: flex; align-items: center; gap: 8px; padding: 4px 12px;
+    background: linear-gradient(180deg, rgba(36,28,20,.92), rgba(22,17,12,.92));
+    border: 1px solid rgba(201,182,137,.5); border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.6); color: var(--ink); font-size: 13px; }
+  #topbar .tb-label { color: var(--beige); letter-spacing: 2px; white-space: nowrap; }
+  #endpoint { background: #141009; border: 1px solid var(--beige-dim); color: var(--ink);
+    border-radius: 4px; padding: 3px 8px; width: 210px; font-size: 12px; font-family: inherit; }
+  #connectBtn { background: var(--wood-hi); border: 1px solid var(--beige-dim); color: var(--ink);
+    border-radius: 4px; padding: 3px 12px; cursor: pointer; }
+  #connectBtn:hover:not(:disabled) { background: #4a3a28; border-color: var(--beige); }
+  #connectBtn:disabled { opacity: .5; cursor: default; }
+  #status { color: var(--ink-dim); max-width: 320px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+
+  /* ---------- 右上状态组：昼夜钟 + 液位徽章 + mapId ---------- */
+  #statusGroup { position: fixed; top: 52px; right: 12px; z-index: 10;
+    display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  #clockCanvas { width: 96px; height: 96px; filter: drop-shadow(0 3px 6px rgba(0,0,0,.6)); }
+  #clockText { font-size: 12px; color: var(--ink-dim); letter-spacing: 1px; text-shadow: 0 1px 2px #000; }
+  #badges { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+  /* 圆形液位徽章：深色圆底 + 米色描边，内部自底向上液位填充，中心图标 + 数字 */
+  .badge { position: relative; width: 46px; height: 46px; border-radius: 50%;
+    background: #171009; border: 2px solid var(--beige-dim);
+    box-shadow: 0 0 0 2px #0d0906, inset 0 2px 8px rgba(0,0,0,.8); overflow: hidden; }
+  .badge .fill { position: absolute; left: 0; right: 0; bottom: 0; display: block;
+    transition: height .2s linear; }
+  .badge .ico { position: absolute; top: 5px; width: 100%; text-align: center;
+    font-size: 13px; line-height: 1; font-style: normal; text-shadow: 0 1px 2px #000; }
+  .badge .num { position: absolute; bottom: 3px; width: 100%; text-align: center;
+    font-size: 12px; font-weight: bold; color: #f3e9cf; text-shadow: 0 1px 2px #000; }
+  #mapIdText { font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-shadow: 0 1px 2px #000; }
+
+  /* ---------- 左缘合成页签轨 ---------- */
+  #craftTabs { position: fixed; left: 8px; top: 50%; transform: translateY(-50%); z-index: 10;
+    display: flex; flex-direction: column; gap: 6px; }
+  #craftTabs button { width: 42px; height: 42px; border-radius: 6px; font-size: 18px;
+    background: linear-gradient(160deg, #2a2117, #17110a); color: var(--ink);
+    border: 2px solid #0e0a06; cursor: pointer;
+    box-shadow: 0 0 0 1px rgba(201,182,137,.4), inset 0 0 8px rgba(0,0,0,.7); }
+  #craftTabs button:hover { background: var(--wood-hi); }
+  #craftTabs button.active { border-color: var(--gold);
+    box-shadow: 0 0 0 1px var(--gold), 0 0 8px rgba(216,169,78,.5); }
+
+  /* ---------- 合成大面板（截图 2 样式：分类行 + 配方格阵列 + 详情 + 建造） ---------- */
+  #craft { position: fixed; left: 62px; top: 50%; transform: translateY(-50%); z-index: 30;
+    width: 344px; }
+  #craftCats { display: flex; gap: 6px; padding: 8px 10px 0; }
+  #craftCats button { width: 30px; height: 30px; border-radius: 5px; font-size: 14px;
+    background: #20180f; color: var(--ink); border: 1px solid var(--beige-dim); cursor: pointer; }
+  #craftCats button:hover { background: var(--wood-hi); }
+  #craftCats button.active { border-color: var(--gold); color: var(--gold); }
+  #recipeGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+    padding: 8px 10px; max-height: 30vh; overflow-y: auto; }
+  .recipeCell { position: relative; min-height: 52px; display: flex; align-items: center;
+    justify-content: center; text-align: center; font-size: 10px; line-height: 1.25;
+    word-break: break-all; padding: 3px; cursor: pointer; user-select: none;
+    color: var(--ink); background: linear-gradient(160deg, #241b11, #17110a);
+    border: 2px solid #0e0a06; border-radius: 5px;
+    box-shadow: inset 0 0 0 1px rgba(201,182,137,.35), inset 0 0 8px rgba(0,0,0,.7); }
+  .recipeCell:hover { box-shadow: inset 0 0 0 1px var(--beige), inset 0 0 8px rgba(0,0,0,.7); }
+  .recipeCell.sel { border-color: var(--gold);
+    box-shadow: inset 0 0 0 1px var(--gold), 0 0 6px rgba(216,169,78,.5); }
+  .recipeCell.locked { opacity: .38; } /* 材料不足置暗 */
+  .recipeCell.locked::after { content: "\1F512"; position: absolute; top: 0; right: 2px; font-size: 9px; }
+  #craftDetail { border-top: 1px solid rgba(201,182,137,.35); padding: 8px 12px 10px; }
+  #craftName { font-weight: bold; color: var(--beige); font-size: 14px; letter-spacing: 1px; }
+  #craftDesc { font-size: 11px; color: var(--ink-dim); margin: 3px 0 6px; line-height: 1.4; }
+  #craftMats { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .mat { font-size: 11px; padding: 2px 8px; border-radius: 4px;
+    border: 1px solid var(--beige-dim); background: #20180f; color: var(--ink); }
+  .mat.ok { color: #b9c98e; border-color: #6a7a4a; }
+  .mat.lack { color: var(--lack); border-color: #8a4a3a; } /* 不足红色 */
+  .mat.station { color: #d8a94e; border-color: #8a6a2a; }
+  #craftBuild { width: 100%; padding: 6px 0; font-size: 14px; letter-spacing: 6px;
+    background: linear-gradient(180deg, #4a3a28, #33261a); color: var(--beige);
+    border: 1px solid var(--beige-dim); border-radius: 5px; cursor: pointer; }
+  #craftBuild:hover { border-color: var(--gold); color: var(--gold); }
+  .craft-note { font-size: 10px; color: rgba(168,154,120,.7); padding: 6px 12px 8px;
+    border-top: 1px dashed rgba(201,182,137,.2); line-height: 1.5; }
+
+  /* ---------- 右缘任务面板（竖向窄面板，与整体面板统一风格） ---------- */
+  #quests { position: fixed; right: 12px; bottom: 128px; z-index: 10; width: 172px; }
+  #questList { padding: 6px 12px 10px; max-height: 42vh; overflow-y: auto; }
+  .qItem { font-size: 12px; padding: 3px 0; border-bottom: 1px dashed rgba(201,182,137,.2);
+    line-height: 1.5; }
+  .qItem:last-child { border-bottom: none; }
+  .qName { color: var(--ink); }
+  .qState { font-size: 11px; }
+  .qState.s0 { color: var(--ink-dim); }  /* 未接 */
+  .qState.s1 { color: var(--beige); }    /* 进行 */
+  .qState.s2 { color: var(--gold); }     /* 可交 */
+  .qState.s3 { color: #7a8a5a; }         /* 完成 */
+  .qCnt { color: var(--ink-dim); font-size: 11px; }
+  .qEmpty { font-size: 12px; color: var(--ink-dim); text-align: center; padding: 6px 0;
+    letter-spacing: 2px; }
+
+  /* ---------- 对话面板（底部居中旧木面板，竖排选项按钮） ---------- */
+  #dlg { position: fixed; left: 50%; transform: translateX(-50%); bottom: 128px;
+    z-index: 12; min-width: 260px; max-width: 360px; }
+  #dlgTitle { padding: 7px 12px 5px; font-weight: bold; color: var(--beige);
+    letter-spacing: 2px; font-size: 14px; border-bottom: 1px solid rgba(201,182,137,.3); }
+  #dlgOptions { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 12px; }
+  #dlgOptions button { text-align: left; background: #2c2216; border: 1px solid var(--beige-dim);
+    color: var(--ink); padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  #dlgOptions button:hover { background: #3d2f1e; border-color: var(--beige); }
+
+  /* ---------- 底部热键条（木质相框槽位 + 右端 3 装备槽） ---------- */
+  #bottomWrap { position: fixed; bottom: 8px; left: 50%; transform: translateX(-50%);
+    z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  #hint { font-size: 11px; color: rgba(201,182,137,.75); letter-spacing: 1px;
+    text-shadow: 0 1px 2px #000; white-space: nowrap; }
+  #hotbarRow { display: flex; gap: 10px; align-items: center; }
+  #invBar { display: flex; gap: 4px; }
+  #equipBar { display: flex; gap: 4px; padding-left: 10px;
+    border-left: 1px solid rgba(201,182,137,.35); }
+  /* 槽位：深棕外框 + 米色内衬的木质相框感 */
+  .slot { position: relative; width: 48px; height: 48px; border-radius: 5px;
+    background: linear-gradient(160deg, #2a2117, #1a1410);
+    border: 2px solid #0e0a06; color: var(--ink); cursor: pointer; user-select: none;
+    box-shadow: inset 0 0 0 1px rgba(201,182,137,.45), inset 0 0 10px rgba(0,0,0,.8),
+      0 2px 6px rgba(0,0,0,.5); }
+  .slot.empty { background: #141009;
+    box-shadow: inset 0 0 0 1px rgba(201,182,137,.18), inset 0 0 10px rgba(0,0,0,.9); }
+  .slot.sel { border-color: var(--gold);
+    box-shadow: inset 0 0 0 1px var(--gold), 0 0 10px rgba(216,169,78,.65); }
+  .slot .key { position: absolute; top: 1px; left: 3px; font-size: 9px; color: var(--ink-dim); }
+  .slot .kind { display: block; font-size: 9px; text-align: center; line-height: 1.15;
+    word-break: break-all; padding: 8px 2px 0; color: var(--ink); }
+  .slot .cnt { position: absolute; right: 3px; bottom: 1px; font-size: 11px; font-weight: bold;
+    color: #f3e9cf; text-shadow: 0 1px 2px #000; }
+  .slot .eqTag { position: absolute; top: 1px; left: 3px; font-size: 9px; color: var(--beige-dim); }
+
+  /* ---------- 左下日志（小字半透明，不超过 4 行） ---------- */
+  #log { position: fixed; left: 10px; bottom: 8px; z-index: 10; font-size: 11px;
+    color: rgba(232,220,192,.55); pointer-events: none; text-shadow: 0 1px 2px #000;
+    line-height: 1.55; }
+</style>
+</head>
+<body>
+
+<!-- 世界画布（原生 Canvas 2D，规格 §1 约束 4） -->
+<canvas id="game"></canvas>
+
+<!-- 屏幕暗角覆盖层（纯 CSS，pointer-events:none） -->
+<div id="vignette"></div>
+
+<!-- 顶部连接栏（规格 §1 约束 5：地址可配置 + localStorage 记忆，默认 ws://localhost:3000） -->
+<div id="topbar">
+  <span class="tb-label">服务端</span>
+  <input id="endpoint" placeholder="ws://localhost:3000" />
+  <button id="connectBtn">连接</button>
+  <span id="status">未连接</span>
+</div>
+
+<!-- 右上状态组（规格 P4）：圆形昼夜钟 + HP/Needs 液位徽章 + mapId -->
+<div id="statusGroup" class="hidden">
+  <canvas id="clockCanvas" width="96" height="96"></canvas>
+  <div id="clockText">—</div>
+  <div id="badges"></div>
+  <div id="mapIdText">—</div>
+</div>
+
+<!-- 左缘合成页签轨（点击页签展开合成面板；C 键开关保留） -->
+<div id="craftTabs" class="hidden"></div>
+
+<!-- 合成大面板（规格 P3：C 开关；配方静态内嵌，craft 命令只发 recipe id） -->
+<div id="craft" class="panel hidden">
+  <div class="panel-head"><span>合 成</span><button id="craftClose">×</button></div>
+  <div id="craftCats"></div>
+  <div id="recipeGrid"></div>
+  <div id="craftDetail">
+    <div id="craftName">—</div>
+    <div id="craftDesc">选择上方配方查看详情。</div>
+    <div id="craftMats"></div>
+    <button id="craftBuild">建 造</button>
+  </div>
+  <div class="craft-note">
+    配方静态内嵌自 game/rules/crafting.json（协议不枚举配方，随配置漂移需手动同步）。
+    材料不足置暗仅为客户端提示，成败以服务端状态同步为准（命令失败无回执，坑 K4）。
+  </div>
+</div>
+
+<!-- 右缘任务面板（规格 P4：Quest.*；无任务显示「暂无任务」） -->
+<div id="quests" class="panel hidden">
+  <div class="panel-head"><span>任 务</span></div>
+  <div id="questList"></div>
+</div>
+
+<!-- 对话面板（规格 P3：自身实体存在 Dialogue.{i}.option 时渲染选项按钮） -->
+<div id="dlg" class="panel hidden">
+  <div id="dlgTitle">对话</div>
+  <div id="dlgOptions"></div>
+</div>
+
+<!-- 底部操作提示 + 热键条（12 背包槽 + 右端 3 装备槽） -->
+<div id="bottomWrap">
+  <div id="hint">WASD 移动 · E 采集 · 空格 攻击 · T 对话 · C 合成 · F 食用/装备 · G 丢弃 · B 放置 · X 拆除 · 1-9/0/-/= 选槽</div>
+  <div id="hotbarRow">
+    <div id="invBar"></div>
+    <div id="equipBar"></div>
+  </div>
+</div>
+
+<!-- 左下日志（连接/地图/操作提示，最多 4 行） -->
+<div id="log"></div>
+
+<script type="module">
+import * as Colyseus from "@colyseus/sdk";
+import { Schema, MapSchema, defineTypes } from "@colyseus/schema";
+
+/* ============================================================================
+ * 协议 §3.4 客户端 Schema 声明（纯 JS defineTypes，不用装饰器）
+ * 类名/字段名/类型/【字段顺序】严格照抄协议 —— 字段顺序是线协议的一部分。
+ * ⚠️ 坑 K8：这些类仅作协议文档/校验用，【禁止】作为 rootSchema 传入
+ *    joinOrCreate（传了会状态解码为空）。连接用 joinOrCreate("game") 无第 3 参。
+ * ==========================================================================*/
+class EntityState extends Schema {}
+defineTypes(EntityState, {
+  id:           "uint32",          // NetworkId
+  values:       { map: "number" }, // 数值字段，key="组件.字段"
+  stringValues: { map: "string" }, // 字符串字段，key="组件.字段"
+});
+class PlayerState extends Schema {}
+defineTypes(PlayerState, {
+  sessionId:       "string",              // 自己的 sessionId
+  entityId:        "uint32",              // 自己实体的 NetworkId
+  mapId:           "string",              // 该玩家当前地图 id（per-player，坑 K6）
+  visibleEntities: { map: EntityState },  // 视野内实体（唯一实体来源，坑 K1）
+});
+class RoomState extends Schema {}
+defineTypes(RoomState, {
+  tick:    "uint32",             // 逻辑帧号
+  hour:    "float64",            // 世界小时 0-24
+  phase:   "uint8",              // 0=白天 1=夜晚
+  players: { map: PlayerState }, // key=sessionId
+});
+
+/* ============================================================================
+ * 常量（数值来源见注释；规则值随 game/ 配置漂移，此处按当前配置写死并标注）
+ * ==========================================================================*/
+// 移动速度上限（像素/秒）：server 规则 maxMoveSpeedTiles=2 格/s × game.json world.tile=16px = 32px/s。
+// 超限整条输入被服务端静默拒收（规格 §P2 / 坑 K2）。
+const MOVE_SPEED = 32;
+const INPUT_INTERVAL_MS = 50;   // 每 50ms 发一次 input（规格 §P2）
+const PLACE_DIST = 32;          // B 放置：自身坐标 + 面朝方向 × 32px（规格 §P3）
+// 相机缩放（纯视觉）：固定世界缩放系数，以 CSS 像素为基准，不随窗口大小漂移。
+// 饥荒观感参考：1920 宽屏横向约见 25-35 草皮格、角色约 100px 高。本客户端瓦片 16px，
+// ZOOM=3 → 瓦片上屏 48px：1440 宽画布横向 30 格（1920 宽 40 格），自机上屏 48px + 粗描边。
+const ZOOM = 3;
+// HP 显示用满值：协议 §3.5 只同步 Health.current，不同步 max；
+// 若快照里出现 Health.max 则优先使用，否则用此显示常量（仅影响徽章液位，不影响数值文本）。
+const DISPLAY_HP_MAX = 100;
+
+// 地面语义 id → 颜色（客户端自备配置！）。服务端不解释 tiles 语义（协议 §5.2），
+// id→含义的映射在游戏配置（game/maps/registry.json 的 groundPalette / nonWalkableSemantics）。
+// 当前「荒岛求生」配置中 id 1 为不可走水域；其余 id 含义见游戏配置。
+// 本版色表整体调暗沉（橄榄草绿/褐土/暗沙/深岩灰/深蓝黑水域），模拟饥荒手绘氛围。
+const GROUND_COLORS = {
+  0: "#20241c", // 未知/空缺
+  1: "#101c2a", // 语义 1（当前配置：不可走，多为水域）—— 很深的蓝黑
+  2: "#8a7a52", // 语义 2 —— 暗沙
+  3: "#5a6234", // 语义 3 —— 橄榄草绿
+  4: "#46522c", // 语义 4 —— 深草
+  5: "#5d5a52", // 语义 5 —— 深岩灰
+  6: "#7a6a4a", // 语义 6 —— 褐土
+  7: "#4e4460", // 语义 7 —— 暗紫岩
+  8: "#3f5250", // 语义 8 —— 暗青
+};
+const GROUND_COLOR_FALLBACK = "#33352c";
+
+/* ============================================================================
+ * 合成配方表（规格 §P3）：⚠️ 静态内嵌自 game/rules/crafting.json，随配置漂移，需手动同步！
+ * 协议不枚举配方（协议 §4.4），客户端无法拉取配方清单；craft 命令只发 recipe id。
+ * in/out 形如 [kind, count]；station 为站点类型要求（0/缺省=通用，1=光源站点，见 crafting 配置）。
+ * 当前同步点：crafting.json 共 11 条配方（wood_axe … furniture_kit）。
+ * ==========================================================================*/
+const RECIPES = [
+  { id: "wood_axe",      in: [["wood", 2]],                          out: [["axe", 1]] },
+  { id: "stone_axe",     in: [["wood", 1], ["stone", 1]],            out: [["stone_axe", 1]] },
+  { id: "spear",         in: [["wood", 2], ["stone", 1]],            out: [["spear", 1]] },
+  { id: "berry_pie",     in: [["berry", 3]],                         out: [["berry_pie", 1]] },
+  { id: "cooked_meat",   in: [["raw_meat", 1]],                      out: [["cooked_meat", 1]], station: 1 },
+  { id: "campfire_kit",  in: [["wood", 3], ["stone", 2]],            out: [["campfire_kit", 1]] },
+  { id: "wall_kit",      in: [["wood", 2], ["stone", 1]],            out: [["wall_kit", 1]] },
+  { id: "floor_kit",     in: [["wood", 1]],                          out: [["floor_kit", 1]] },
+  { id: "door_kit",      in: [["wood", 2], ["stone", 1]],            out: [["door_kit", 1]] },
+  { id: "fence_kit",     in: [["wood", 2]],                          out: [["fence_kit", 1]] },
+  { id: "furniture_kit", in: [["wood", 2], ["stone", 2]],            out: [["furniture_kit", 1]] },
+];
+
+// 以下两张表为【纯展示元数据】（不改配方数据本身，不参与协议）：
+// 配方 → 合成页签分类；配方 → 一行描述文字（截图 2 详情区用）。
+const RECIPE_CATS = {
+  wood_axe: "tool", stone_axe: "tool", spear: "tool",
+  berry_pie: "food", cooked_meat: "food",
+  campfire_kit: "fire",
+  wall_kit: "build", floor_kit: "build", door_kit: "build",
+  fence_kit: "build", furniture_kit: "build",
+};
+const RECIPE_DESC = {
+  wood_axe: "两块木头绑成的粗斧，砍树必备。",
+  stone_axe: "木柄石刃，更结实耐用的斧头。",
+  spear: "木杆石尖的长矛，用于自卫。",
+  berry_pie: "三份浆果烤成的派，填饱肚子。",
+  cooked_meat: "烤熟的肉，需要在光源站点旁烹制。",
+  campfire_kit: "木石篝火套件，放置后照亮黑夜。",
+  wall_kit: "木石墙体套件，按 B 放置建造。",
+  floor_kit: "木地板套件，铺出一块干燥地面。",
+  door_kit: "可通行的木门套件。",
+  fence_kit: "简易木栅栏，圈出一小块地。",
+  furniture_kit: "桌椅家具套件，让营地像样一点。",
+};
+// 合成页签（左缘竖轨 + 面板顶部分类行共用，字符图标）
+const CATS = [
+  { id: "all",   ico: "✦",  label: "全部" },
+  { id: "tool",  ico: "🔨", label: "工具" },
+  { id: "food",  ico: "🍖", label: "食物" },
+  { id: "fire",  ico: "🔥", label: "火焰" },
+  { id: "build", ico: "🏠", label: "建筑" },
+];
+
+// F 键「食物→consume / 工具→equip」的物品分类启发式（协议不下发物品类型，见协议 §4.1：
+// 客户端不应内置物品清单 —— 但规格 §P3 要求 F 区分两者，故用此启发式集合，
+// ⚠️ 随 game/items 配置漂移，需手动同步。不在集合内的按食物处理发 consume，
+// 材料类 consume 会失败且无回执（坑 K4），属可接受行为）。
+const TOOL_KINDS = new Set(["axe", "stone_axe", "spear"]);
+
+// 背包槽选择键位（规格 §P3）：1-9,0,-,= → 槽 0-11
+const SLOT_KEYS = { "1":0,"2":1,"3":2,"4":3,"5":4,"6":5,"7":6,"8":7,"9":8,"0":9,"-":10,"=":11 };
+const SLOT_KEY_LABELS = ["1","2","3","4","5","6","7","8","9","0","-","="];
+const DEFAULT_SLOT_COUNT = 12; // 扫描不到 Inventory key 时的兜底槽位数
+
+// 装备槽（热键条右端 3 格）：Equipment.*Slot 引用背包槽索引，-1=空
+const EQUIP_SLOTS = [
+  { key: "weaponSlot", tag: "武", label: "武器" },
+  { key: "toolSlot",   tag: "具", label: "工具" },
+  { key: "armorSlot",  tag: "甲", label: "护甲" },
+];
+
+// 实体辨识配色/标签（规格 §P0 表 + 协议 §3.6）；种类语义不变，整体降饱和以贴合饥荒氛围
+const ENTITY_STYLE = {
+  self:     { color: "#3b9aa8", label: "你"  },  // 自己：暗青 + 高亮圈
+  player:   { color: "#3b9aa8", label: "👤" },  // 其他玩家（Health + Needs）
+  enemy:    { color: "#a83c3c", label: "敌"  },  // 敌怪（仅 Health）：暗红
+  npc:      { color: "#5d8a4a", label: "NPC" },  // NPC（DialogueSource.treeId）：暗绿
+  resource: { color: "#7a5a36", label: null  },  // 资源点：暗棕，标签=剩余量（运行时填）
+  item:     { color: "#c2a13c", label: null  },  // 地面物品：暗黄，标签=kind（运行时填）
+  station:  { color: "#b06a2e", label: "🔥" },  // 光源型合成站（CraftingStation+LightSource）：暗橙
+  portal:   { color: "#7a5a9a", label: "门"  },  // 传送门（Portal.targetMap）：暗紫
+  building: { color: "#7a7268", label: null  },  // 建筑（Placeable.*）：灰褐，无标签
+  other:    { color: "#5a5a5a", label: "?"  },  // 未识别兜底
+};
+
+/* ============================================================================
+ * 运行状态
+ * ==========================================================================*/
+let room = null;          // Colyseus Room（连接成功后赋值）
+let httpBase = "http://localhost:3000"; // 由 ws 地址派生（ws:→http:，wss:→https:）
+let seq = 0;              // input 序号：从 1 起严格递增（每次连接重置）
+const keysDown = new Set();           // 当前按下的移动键
+let facing = { x: 0, y: 1 };          // 面朝方向（最近一次移动方向；默认朝下）
+let edgeInteract = false, edgeAttack = false, edgeTalk = false; // E/空格/T 边沿触发标记（坑 K3）
+let selectedSlot = 0;                 // 当前选中背包槽
+
+let currentMap = null;    // 当前应用的地图数据 {key,version,grid,tiles,walkable}
+let mapCanvas = null;     // 地图离屏预渲染画布（地面底色 + 阻挡覆盖层）
+let nightCanvas = null;   // 夜幕离屏画布（深蓝遮罩 + destination-out 挖光圈）
+let nightCtx = null;
+let lastMapId = "";       // 上次触发加载的 mapId（用于监听变化，规格 §P1-6）
+let mapLoading = false;   // 地图加载中标记（防并发）
+const mapCache = new Map(); // 地图缓存：键 `${key}@${version}`（规格 §P1-5），值=地图数据
+
+// 「第 N 天」为本地近似显示（⚠️ 非协议字段）：协议只有 tick(20/s) 与 hour(0-24)。
+// join 时记录 joinTick/joinHour 作基准备注；跨天靠 hour 回绕（23.x→0.x）检测累计。
+let joinTick = null, joinHour = null;
+let lastHourSeen = null, dayCount = 1;
+
+// 合成面板展示状态（纯 UI）
+let activeCat = "all";                  // 当前页签分类
+let selectedRecipe = RECIPES[0].id;     // 当前选中配方
+
+let camX = 0, camY = 0;   // 相机左上角世界坐标（跟随自身实体居中，不做边界钳制，规格 §P1-7）
+
+/* ============================================================================
+ * DOM 引用与工具
+ * ==========================================================================*/
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const endpointInput = document.getElementById("endpoint");
+const connectBtn = document.getElementById("connectBtn");
+const statusEl = document.getElementById("status");
+const statusGroupEl = document.getElementById("statusGroup");
+const clockCanvas = document.getElementById("clockCanvas");
+const clockCtx2d = clockCanvas.getContext("2d");
+const clockTextEl = document.getElementById("clockText");
+const badgesEl = document.getElementById("badges");
+const mapIdTextEl = document.getElementById("mapIdText");
+const craftTabsEl = document.getElementById("craftTabs");
+const craftCatsEl = document.getElementById("craftCats");
+const recipeGridEl = document.getElementById("recipeGrid");
+const craftNameEl = document.getElementById("craftName");
+const craftDescEl = document.getElementById("craftDesc");
+const craftMatsEl = document.getElementById("craftMats");
+const craftBuildEl = document.getElementById("craftBuild");
+const questsEl = document.getElementById("quests");
+const questListEl = document.getElementById("questList");
+const invBarEl = document.getElementById("invBar");
+const equipBarEl = document.getElementById("equipBar");
+const dlgEl = document.getElementById("dlg");
+const dlgTitleEl = document.getElementById("dlgTitle");
+const dlgOptionsEl = document.getElementById("dlgOptions");
+const craftEl = document.getElementById("craft");
+const logEl = document.getElementById("log");
+
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  // 夜幕离屏画布与视口同尺寸（frame 中每帧重绘遮罩）
+  if (!nightCanvas) { nightCanvas = document.createElement("canvas"); nightCtx = nightCanvas.getContext("2d"); }
+  nightCanvas.width = canvas.width;
+  nightCanvas.height = canvas.height;
+}
+window.addEventListener("resize", resizeCanvas);
+resizeCanvas();
+
+function setStatus(t) { statusEl.textContent = t; }
+function log(msg) {
+  const d = document.createElement("div");
+  d.textContent = `${new Date().toLocaleTimeString()} ${msg}`;
+  logEl.appendChild(d);
+  while (logEl.children.length > 4) logEl.removeChild(logEl.firstChild); // 最多 4 行，低调展示
+}
+
+/* ---------- 实体字段读取助手（协议 §3.3：values 数值 / stringValues 字符串） ---------- */
+// 注意：空壳实体（坑 K1）连 values/stringValues 都不存在，这里全部可选链兜底
+function num(e, key) { const v = e.values?.get(key); return v === undefined ? undefined : v; }
+function str(e, key) { const v = e.stringValues?.get(key); return v === undefined ? undefined : v; }
+function has(e, key) { return e.values?.get(key) !== undefined || e.stringValues?.get(key) !== undefined; }
+
+/* ---------- 自身玩家状态 / 实体收集（坑 K1：visibleEntities 是唯一实体来源） ---------- */
+function me() {
+  // players 在首帧状态补丁到达前可能尚未解码（undefined），需一并判空
+  if (!room || !room.state || !room.state.players) return null;
+  return room.state.players.get(room.sessionId) || null;
+}
+function collectEntities() {
+  const p = me();
+  if (!p) return [];
+  const list = [];
+  p.visibleEntities.forEach((e) => list.push(e));
+  // 坑 K1 空壳兜底：受上游 bug（colyseus#935/#936）影响，visibleEntities 可能解码出空壳
+  // （id 不是数字、values/stringValues 缺失，解码日志伴随 "refId not found" 警告）。
+  // 规则：只保留 typeof id === "number" 的实体；空壳一律视为不存在。
+  return list.filter((e) => typeof e.id === "number");
+}
+function selfEntity() {
+  const p = me();
+  if (!p) return undefined;
+  return collectEntities().find((e) => e.id === p.entityId);
+}
+
+/* ============================================================================
+ * 连接（规格 §P0）
+ * ==========================================================================*/
+async function connect() {
+  const ep = endpointInput.value.trim() || "ws://localhost:3000";
+  localStorage.setItem("minClient.endpoint", ep); // 记住上次输入（规格 §1 约束 5）
+  httpBase = ep.replace(/^ws:/, "http:").replace(/^wss:/, "https:"); // HTTP 基址派生
+  setStatus("连接中…");
+  connectBtn.disabled = true;
+  try {
+    const client = new Colyseus.Client(ep);
+    // ⚠️ 坑 K8：不传自定义 rootSchema（第 3 参），由服务端反射自动解码
+    room = await client.joinOrCreate("game");
+    seq = 0;          // 新会话 seq 重新从 1 起
+    lastMapId = "";   // 触发首图加载
+    joinTick = null; joinHour = null; lastHourSeen = null; dayCount = 1; // 「第 N 天」本地近似重置
+    setStatus(`已连接 · sessionId=${room.sessionId}`);
+    log(`已加入房间 game，sessionId=${room.sessionId}`);
+    room.onLeave((code) => {
+      setStatus(`已断开（code=${code}）。按规格不做自动重连，可手动重连`);
+      log(`连接断开（code=${code}）`);
+      room = null;
+    });
+    room.onError((code, msg) => log(`房间错误 ${code}: ${msg}`));
+  } catch (err) {
+    setStatus("连接失败：" + ((err && err.message) || err));
+    log(`连接失败：${(err && err.message) || err}（检查地址/服务端是否启动）`);
+    room = null;
+  } finally {
+    connectBtn.disabled = false;
+  }
+}
+connectBtn.addEventListener("click", connect);
+endpointInput.value = localStorage.getItem("minClient.endpoint") || "ws://localhost:3000";
+endpointInput.addEventListener("keydown", (ev) => { if (ev.key === "Enter") connect(); });
+
+/* ============================================================================
+ * 地图加载（规格 §P1 + 协议 §5.2）
+ * ==========================================================================*/
+async function ensureMap(mapId) {
+  if (!mapId || mapLoading) return;
+  if (currentMap && currentMap.key === mapId) return;
+  mapLoading = true;
+  try {
+    // ① 先经 /maps/meta 预检该图当前 version，用于 {key,version} 缓存命中判断（规格 §P1-5）
+    let version = null;
+    try {
+      const metaResp = await fetch(`${httpBase}/maps/meta`, { cache: "no-cache" });
+      if (metaResp.ok) {
+        const meta = await metaResp.json();
+        const info = (meta.maps || []).find((m) => m.id === mapId);
+        if (info) version = info.version;
+      }
+    } catch (e) {
+      log(`预检 /maps/meta 失败（继续拉取 runtime）：${e.message || e}`);
+    }
+    // ② 缓存命中则跳过 /maps/runtime 拉取
+    if (version) {
+      const hit = mapCache.get(`${mapId}@${version}`);
+      if (hit) { applyMap(hit, mapId); return; }
+    }
+    // ③ 拉取全图几何快照
+    const resp = await fetch(`${httpBase}/maps/runtime?mapId=${encodeURIComponent(mapId)}`, { cache: "no-cache" });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      log(`地图拉取失败 HTTP ${resp.status}：${body.slice(0, 120)}（跨域失败见坑 K5：页面需跑在 http://localhost:5173 或配置 CORS_ORIGINS）`);
+      return;
+    }
+    const data = await resp.json();
+    const ver = data.version || resp.headers.get("x-map-version") || "unknown";
+    // ④ 校验：响应 key 必须等于请求的 mapId，不符告警并拒绝应用（规格 §P1-2）
+    if (data.key !== mapId) {
+      console.warn(`地图 key 不符：请求 ${mapId}，响应 ${data.key}，拒绝应用`);
+      log(`地图 key 不符（请求 ${mapId} / 响应 ${data.key}），已拒绝应用`);
+      return;
+    }
+    // ⑤ 校验：walkable 为纯 JSON number[]，行主序，长度必须 = width*height（规格 §P1-3）
+    const { width, height } = data.grid || {};
+    if (!Number.isInteger(width) || !Number.isInteger(height) ||
+        !Array.isArray(data.walkable) || data.walkable.length !== width * height) {
+      console.error(`walkable 长度不符：期望 ${width}*${height}=${width * height}，实际 ${data.walkable && data.walkable.length}`);
+      log("地图数据校验失败（walkable 长度不符），已拒绝应用");
+      return;
+    }
+    const mapData = {
+      key: data.key, version: ver, grid: data.grid,
+      tiles: data.tiles, walkable: data.walkable,
+      regions: data.regions, regionOfTile: data.regionOfTile,
+    };
+    mapCache.set(`${mapId}@${ver}`, mapData);
+    applyMap(mapData, mapId);
+  } catch (e) {
+    // 网络/CORS 异常（坑 K5：页面需跑在 http://localhost:5173 或配置服务端 CORS_ORIGINS）
+    log(`地图拉取异常：${(e && e.message) || e}（疑似跨域/服务不可达，见坑 K5）`);
+  } finally {
+    mapLoading = false;
+  }
+}
+
+// 应用地图：若加载期间玩家又换图则丢弃（防错图）
+function applyMap(mapData, forMapId) {
+  if (forMapId !== lastMapId) return;
+  currentMap = mapData;
+  prerenderMap();
+  log(`地图 ${mapData.key} 已加载（${mapData.grid.width}×${mapData.grid.height} 格，版本 ${mapData.version}）`);
+}
+
+/* ---------- 地面手绘颗粒：每格确定性 hash → ±6% 明度抖动（不依赖随机数，重渲染一致） ---------- */
+function tileHash(x, y) {
+  let h = (x * 374761393 + y * 668265263) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h = (h ^ (h >>> 16)) >>> 0;
+  return h % 16; // 0..15 明度桶
+}
+const shadeCache = new Map();
+function shadeF(hex, f) { // f=明度系数 → rgb 字符串（结果缓存，量化到 0.001）
+  const key = hex + "@" + f.toFixed(3);
+  let v = shadeCache.get(key);
+  if (v) return v;
+  const r = Math.min(255, Math.round(parseInt(hex.slice(1, 3), 16) * f));
+  const g = Math.min(255, Math.round(parseInt(hex.slice(3, 5), 16) * f));
+  const b = Math.min(255, Math.round(parseInt(hex.slice(5, 7), 16) * f));
+  v = `rgb(${r},${g},${b})`;
+  shadeCache.set(key, v);
+  return v;
+}
+
+// 离屏预渲染：地面语义色 + walkable===0 很深的蓝黑覆盖层
+//（规格 §P1-4：0=阻挡 1=可走，与旧版相反；本版仅改覆盖层颜色表现，语义不变）
+// 颗粒策略（配合 ZOOM 倍相机放大）：每格 ±6% 明度基调之上再细分 4×4 子块做 ±3.5% 细颗粒。
+// 离屏保持 1 世界 px 分辨率（整图 3× 重渲染内存不可行），上屏经双线性轻平滑 ——
+// 饥荒是手绘风，选「轻平滑柔和斑驳」而非 nearest-neighbor 硬边马赛克。
+function prerenderMap() {
+  const { width, height, tileWidth: tw, tileHeight: th } = currentMap.grid;
+  mapCanvas = document.createElement("canvas");
+  mapCanvas.width = width * tw;
+  mapCanvas.height = height * th;
+  const mc = mapCanvas.getContext("2d");
+  const { tiles, walkable } = currentMap;
+  const SUB = 4, sw = tw / SUB, sh = th / SUB; // 每格细分 4×4 子块（4 世界 px）
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      // 地面底色：语义 id → 颜色（客户端自备色表，id 含义见游戏配置，见 GROUND_COLORS 注释）
+      const sem = Array.isArray(tiles) && tiles.length === width * height ? tiles[i] : 0;
+      const base = GROUND_COLORS[sem] || GROUND_COLOR_FALLBACK;
+      const fBase = 0.94 + (tileHash(x, y) / 15) * 0.12; // 每格 ±6% 明度基调
+      for (let sy = 0; sy < SUB; sy++) {
+        for (let sx = 0; sx < SUB; sx++) {
+          const fFine = 0.965 + ((tileHash(x * SUB + sx, y * SUB + sy) & 7) / 7) * 0.07; // 子块 ±3.5% 细颗粒
+          mc.fillStyle = shadeF(base, fBase * fFine);
+          mc.fillRect(x * tw + sx * sw, y * th + sy * sh, sw, sh);
+        }
+      }
+      // 阻挡覆盖层：walkable[i]===0 画很深的蓝黑（当前配置阻挡多为水域）
+      if (walkable[i] === 0) {
+        mc.fillStyle = "rgba(6, 10, 18, 0.5)";
+        mc.fillRect(x * tw, y * th, tw, th);
+      }
+    }
+  }
+}
+
+/* ============================================================================
+ * 实体辨识（规格 §P0 表 + 协议 §3.6：服务端不发种类字段，按同步字段组合辨识）
+ * ==========================================================================*/
+function classify(e) {
+  const p = me();
+  if (p && e.id === p.entityId) return "self";                                   // 自己
+  if (has(e, "ResourceNode.remaining")) return "resource";                       // 资源点
+  if (has(e, "ItemMeta.kind")) return "item";                                    // 地面物品
+  if (has(e, "DialogueSource.treeId")) return "npc";                             // NPC
+  if (has(e, "Portal.targetMap")) return "portal";                               // 传送门
+  if (has(e, "CraftingStation.stationType") &&
+      (has(e, "LightSource.radius") || has(e, "LightSource.fuelRemainingMs")))
+    return "station";                                                            // 光源型合成站
+  if (has(e, "Placeable.footprintW") || has(e, "Placeable.footprintH") || has(e, "Placeable.canCollide"))
+    return "building";                                                           // 建筑
+  if (has(e, "Health.current") && has(e, "Needs.0.name")) return "player";       // 其他玩家（Health+Needs）
+  if (has(e, "Health.current")) return "enemy";                                  // 敌怪（仅 Health）
+  return "other";
+}
+
+function drawEntity(e) {
+  const x = num(e, "Transform.x"), y = num(e, "Transform.y"); // Transform.x/y 是中心坐标（规格 §P0-5）
+  if (x === undefined || y === undefined) return;
+  // 视口外跳过（世界坐标系剔除，余量 64 世界 px；此时 ctx 已处于相机缩放变换下）
+  const viewW = canvas.width / ZOOM, viewH = canvas.height / ZOOM;
+  if (x < camX - 64 || y < camY - 64 || x > camX + viewW + 64 || y > camY + viewH + 64) return;
+
+  const kind = classify(e);
+  const style = ENTITY_STYLE[kind];
+
+  // 形状：Collider.shape 0=圆（radius）、1=矩形（Size.w/h）；缺省按半径 8 圆处理
+  const shape = num(e, "Collider.shape");
+  const r = num(e, "Collider.radius") ?? 8;
+  const w = shape === 1 ? (num(e, "Size.w") ?? 16) : r * 2;
+  const h = shape === 1 ? (num(e, "Size.h") ?? 16) : r * 2;
+
+  // 脚下椭圆阴影（饥荒式接地感，世界单位，随缩放变换）
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  ctx.beginPath();
+  ctx.ellipse(x, y + h / 2, Math.max(6, w * 0.45), Math.max(3, w * 0.18), 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 实体色块 + 深棕描边：线宽按世界单位给（1 世界 px ≈ 屏上 3px），缩放后仍是清晰粗描边
+  ctx.fillStyle = style.color;
+  ctx.strokeStyle = "#241a10";
+  ctx.lineWidth = 1;
+  if (shape === 1) {
+    ctx.fillRect(x - w / 2, y - h / 2, w, h);
+    ctx.strokeRect(x - w / 2, y - h / 2, w, h);
+  } else {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  // 自己：额外高亮圈（保留；圈距与线宽同样按世界单位）
+  if (kind === "self") {
+    ctx.strokeStyle = "#8adce0";
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.arc(x, y, r + 1.5, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // 标签（资源点=剩余量；地面物品=kind；建筑无标签）—— 衬线米色 + 深色描影。
+  // 字号按世界单位给：5 世界 px ≈ 屏上 15px，随缩放放大、保持可读。
+  let label = style.label;
+  if (kind === "resource") label = String(num(e, "ResourceNode.remaining") ?? "");
+  if (kind === "item") label = str(e, "ItemMeta.kind") || "";
+  if (label) {
+    ctx.font = "5px Georgia, 'STKaiti', KaiTi, serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#1a120a";
+    ctx.fillText(label, x + 0.35, y - r - 1.6);
+    ctx.fillStyle = "#e8dcc0";
+    ctx.fillText(label, x, y - r - 2);
+  }
+}
+
+/* ============================================================================
+ * 昼夜氛围（纯显示层近似，不回写任何协议数据）
+ * 夜晚强度曲线：7-17 白天无遮罩；17-21 黄昏渐暗；21-5 深夜峰值 0.5；5-7 黎明渐亮。
+ * 协议 phase===1（夜晚）时保底 0.35，避免与客户端弧段假设错位时全亮。
+ * ==========================================================================*/
+function nightStrength(hour) {
+  const h = ((hour % 24) + 24) % 24;
+  if (h >= 7 && h < 17) return 0;
+  if (h >= 17 && h < 21) return ((h - 17) / 4) * 0.5;
+  if (h >= 21 || h < 5) return 0.5;
+  return (1 - (h - 5) / 2) * 0.5;
+}
+
+/* ---------- 圆形昼夜钟（Canvas 绘制：外圈昼夜弧环 + 小时刻度 + 旋转指针 + 中心「第 N 天」） ---------- */
+function drawClock(hour, day) {
+  const c = clockCtx2d, W = clockCanvas.width, H = clockCanvas.height;
+  const cx = W / 2, cy = H / 2, R = W / 2 - 2;
+  const ang = (h) => (h / 24) * Math.PI * 2 - Math.PI / 2; // 0 时指向正上，顺时针
+  c.clearRect(0, 0, W, H);
+  // 底盘 + 米色外圈
+  c.beginPath(); c.arc(cx, cy, R, 0, Math.PI * 2);
+  c.fillStyle = "#17110a"; c.fill();
+  c.lineWidth = 2; c.strokeStyle = "#c9b689"; c.stroke();
+  // 昼夜弧环（显示近似：6-18 为昼弧暖黄，其余为夜弧深蓝黑；协议只下发 hour/phase，弧界为客户端显示约定）
+  const ringR = R - 7;
+  c.lineWidth = 8; c.lineCap = "butt";
+  c.strokeStyle = "#c9962e";
+  c.beginPath(); c.arc(cx, cy, ringR, ang(6), ang(18)); c.stroke();
+  c.strokeStyle = "#1b2b47";
+  c.beginPath(); c.arc(cx, cy, ringR, ang(18), ang(30)); c.stroke();
+  // 小时刻度（6/12/18/0 稍长）
+  c.strokeStyle = "rgba(201,182,137,.55)"; c.lineWidth = 1;
+  for (let h = 0; h < 24; h++) {
+    const a = ang(h), r1 = R - 2, r2 = R - (h % 6 === 0 ? 7 : 4);
+    c.beginPath();
+    c.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    c.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    c.stroke();
+  }
+  // 指针（按当前 hour 旋转）+ 针尖圆点
+  const a = ang(hour);
+  c.strokeStyle = "#e8dcc0"; c.lineWidth = 2;
+  c.beginPath(); c.moveTo(cx, cy);
+  c.lineTo(cx + Math.cos(a) * (ringR + 3), cy + Math.sin(a) * (ringR + 3)); c.stroke();
+  c.beginPath(); c.arc(cx + Math.cos(a) * (ringR + 3), cy + Math.sin(a) * (ringR + 3), 2.5, 0, Math.PI * 2);
+  c.fillStyle = "#e8dcc0"; c.fill();
+  // 中心圆盖 +「第 N 天」（本地近似，非协议字段）
+  const innerR = ringR - 6;
+  c.beginPath(); c.arc(cx, cy, innerR, 0, Math.PI * 2);
+  c.fillStyle = "#241c14"; c.fill();
+  c.lineWidth = 1.5; c.strokeStyle = "rgba(201,182,137,.8)"; c.stroke();
+  const label = `第${day}天`;
+  c.fillStyle = "#e8dcc0";
+  c.font = `${label.length > 4 ? 10 : 12}px Georgia, 'STKaiti', KaiTi, serif`;
+  c.textAlign = "center"; c.textBaseline = "middle";
+  c.fillText(label, cx, cy + 1);
+}
+
+/* ============================================================================
+ * 渲染主循环（坑 K7：服务端权威，不做位移预测/插值，直接读最新状态渲染）
+ * ==========================================================================*/
+function frame() {
+  requestAnimationFrame(frame);
+  // 监听自身 mapId 变化 → 重新拉图（规格 §P1-6；坑 K6：换图是 per-player 的）
+  const p = me();
+  if (p && p.mapId && p.mapId !== lastMapId) {
+    lastMapId = p.mapId;
+    ensureMap(p.mapId);
+  }
+  const list = collectEntities();
+  const selfEnt = p ? list.find((e) => e.id === p.entityId) : undefined;
+  // 相机：自身实体居中（不做边界钳制，规格 §P1-7）；可视尺寸 = 画布 CSS 像素 / ZOOM，缩放比不随窗口变
+  const viewW = canvas.width / ZOOM, viewH = canvas.height / ZOOM;
+  if (selfEnt) {
+    const x = num(selfEnt, "Transform.x"), y = num(selfEnt, "Transform.y");
+    if (x !== undefined && y !== undefined) {
+      camX = x - viewW / 2;
+      camY = y - viewH / 2;
+    }
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // 清屏在屏幕空间
+  ctx.fillStyle = "#0a0906";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // 世界绘制：围绕相机中心 ZOOM 倍缩放（地图/实体/描边/标签全部按世界单位给，随变换放大）
+  ctx.setTransform(ZOOM, 0, 0, ZOOM, Math.round(-camX * ZOOM), Math.round(-camY * ZOOM));
+  if (mapCanvas && currentMap) {
+    // 只裁可视区源矩形上屏（离屏 1px=1世界px）；手绘风选择：保留双线性轻平滑，细颗粒呈柔和斑驳
+    ctx.imageSmoothingEnabled = true;
+    const mw = currentMap.grid.width * currentMap.grid.tileWidth;
+    const mh = currentMap.grid.height * currentMap.grid.tileHeight;
+    const vx0 = Math.max(0, camX), vy0 = Math.max(0, camY);
+    const vx1 = Math.min(mw, camX + viewW), vy1 = Math.min(mh, camY + viewH);
+    if (vx1 > vx0 && vy1 > vy0) {
+      ctx.drawImage(mapCanvas, vx0, vy0, vx1 - vx0, vy1 - vy0, vx0, vy0, vx1 - vx0, vy1 - vy0);
+    }
+  }
+  for (const e of list) drawEntity(e);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // 复位：夜幕遮罩与暖光在屏幕空间合成
+
+  // ---- 昼夜氛围：入夜叠深蓝遮罩 + 以自身为中心挖暖色光圈
+  //（饥荒夜晚角色光环感：半径按世界单位 180px 定义，屏上 = 180×ZOOM，随缩放正确变换） ----
+  const hourNow = room && room.state ? (room.state.hour ?? 12) : 12;
+  const phaseNow = room && room.state ? (room.state.phase ?? 0) : 0;
+  let ns = nightStrength(hourNow);
+  if (phaseNow === 1) ns = Math.max(ns, 0.35);
+  if (ns > 0.01 && nightCtx) {
+    // 自身屏幕坐标（光圈中心；无自身实体时整屏压暗）= 世界坐标经相机缩放换算
+    let sxp = null, syp = null;
+    if (selfEnt) {
+      const x = num(selfEnt, "Transform.x"), y = num(selfEnt, "Transform.y");
+      if (x !== undefined && y !== undefined) { sxp = (x - camX) * ZOOM; syp = (y - camY) * ZOOM; }
+    }
+    const lr = 180 * ZOOM; // 光圈世界半径 180px → 屏半径随缩放
+    const nc = nightCtx;
+    nc.clearRect(0, 0, nightCanvas.width, nightCanvas.height);
+    nc.fillStyle = `rgba(7, 10, 28, ${ns})`;
+    nc.fillRect(0, 0, nightCanvas.width, nightCanvas.height);
+    if (sxp !== null) {
+      // destination-out 挖出清晰视区（中心近乎全透明，边缘渐变融入夜幕）
+      const g = nc.createRadialGradient(sxp, syp, 30 * ZOOM, sxp, syp, lr);
+      g.addColorStop(0, "rgba(0,0,0,0.95)");
+      g.addColorStop(1, "rgba(0,0,0,0)");
+      nc.globalCompositeOperation = "destination-out";
+      nc.fillStyle = g;
+      nc.beginPath(); nc.arc(sxp, syp, lr, 0, Math.PI * 2); nc.fill();
+      nc.globalCompositeOperation = "source-over";
+    }
+    ctx.drawImage(nightCanvas, 0, 0);
+    // 暖色微光（火光般的色温，随夜强度加深；半径同样随缩放）
+    if (sxp !== null) {
+      const gw = ctx.createRadialGradient(sxp, syp, 10 * ZOOM, sxp, syp, lr);
+      gw.addColorStop(0, `rgba(255, 180, 90, ${0.16 * (ns / 0.5)})`);
+      gw.addColorStop(1, "rgba(255, 180, 90, 0)");
+      ctx.fillStyle = gw;
+      ctx.beginPath(); ctx.arc(sxp, syp, lr, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+}
+requestAnimationFrame(frame);
+
+/* ============================================================================
+ * 输入（规格 §P2）：WASD → moveX/moveY（≤32px/s，斜向归一化），每 50ms 发一次，
+ * seq 从 1 严格递增；E/空格/T 边沿触发（仅按下帧 true，过滤 event.repeat，坑 K3）
+ * ==========================================================================*/
+setInterval(() => {
+  if (!room) return;
+  let mx = 0, my = 0;
+  if (keysDown.has("w")) my -= 1;
+  if (keysDown.has("s")) my += 1;
+  if (keysDown.has("a")) mx -= 1;
+  if (keysDown.has("d")) mx += 1;
+  if (mx !== 0 || my !== 0) {
+    const len = Math.hypot(mx, my);
+    mx /= len; my /= len;              // 斜向归一化到同一上限
+    facing = { x: mx, y: my };         // 记录面朝方向（B 放置用）
+    mx *= MOVE_SPEED; my *= MOVE_SPEED;
+  }
+  seq++; // seq 从 1 起严格递增；被拒输入无需重发，下一条更高 seq 自然覆盖（坑 K2）
+  room.send("input", {
+    seq,
+    moveX: mx,
+    moveY: my,
+    interact: edgeInteract,
+    attack: edgeAttack,
+    talk: edgeTalk,
+  });
+  edgeInteract = edgeAttack = edgeTalk = false; // 边沿信号只发一帧
+}, INPUT_INTERVAL_MS);
+
+/* ============================================================================
+ * 离散命令（规格 §P3 + 协议 §2.2）：消息名 "command"。
+ * 坑 K4：命令失败服务端零副作用且无回执 —— UI 不等待响应、不做乐观本地修改。
+ * ==========================================================================*/
+function sendCommand(obj) {
+  if (!room) return;
+  room.send("command", obj);
+}
+
+// 读取选中槽物品 kind（空槽为 "" 占位，协议 §3.3）
+function slotKind(slot) {
+  const selfEnt = selfEntity();
+  if (!selfEnt) return "";
+  return str(selfEnt, `Inventory.${slot}.kind`) || "";
+}
+
+function useSelected() {
+  const kind = slotKind(selectedSlot);
+  if (!kind) { log("选中槽为空"); return; }
+  if (kind.endsWith("_kit")) { log(`${kind} 是放置套件，按 B 放置`); return; }
+  // 启发式分类（见 TOOL_KINDS 注释）：工具/武器→equip，其余→consume
+  if (TOOL_KINDS.has(kind)) {
+    sendCommand({ type: "equip", slot: selectedSlot });
+    log(`装备 ${kind}（槽 ${selectedSlot}）`);
+  } else {
+    sendCommand({ type: "consume", slot: selectedSlot });
+    log(`食用/使用 ${kind}（槽 ${selectedSlot}）`);
+  }
+}
+
+function dropSelected() {
+  const kind = slotKind(selectedSlot);
+  if (!kind) { log("选中槽为空"); return; }
+  sendCommand({ type: "drop", slot: selectedSlot });
+  log(`丢弃 ${kind}（槽 ${selectedSlot}）`);
+}
+
+function placeSelected() {
+  const kind = slotKind(selectedSlot);
+  if (!kind) { log("选中槽为空（选中 kit 类物品后按 B 放置）"); return; }
+  const selfEnt = selfEntity();
+  if (!selfEnt) { log("自身实体未同步，无法放置"); return; }
+  const x = num(selfEnt, "Transform.x"), y = num(selfEnt, "Transform.y");
+  if (x === undefined || y === undefined) return;
+  // 目标点 = 自身坐标 + 面朝方向 × 32px（规格 §P3）
+  const tx = Math.round(x + facing.x * PLACE_DIST);
+  const ty = Math.round(y + facing.y * PLACE_DIST);
+  sendCommand({ type: "place", slot: selectedSlot, x: tx, y: ty });
+  log(`放置 ${kind} → (${tx}, ${ty})`);
+}
+
+function deconstructNearest() {
+  const selfEnt = selfEntity();
+  if (!selfEnt) { log("自身实体未同步"); return; }
+  const sx = num(selfEnt, "Transform.x"), sy = num(selfEnt, "Transform.y");
+  if (sx === undefined || sy === undefined) return;
+  // 从可见实体表找最近 Placeable.* 建筑（规格 §P3）
+  let best = null, bestD = Infinity;
+  for (const e of collectEntities()) {
+    if (classify(e) !== "building" && classify(e) !== "station") continue;
+    const ex = num(e, "Transform.x"), ey = num(e, "Transform.y");
+    if (ex === undefined || ey === undefined) continue;
+    const d = Math.hypot(ex - sx, ey - sy);
+    if (d < bestD) { bestD = d; best = e; }
+  }
+  if (!best) { log("附近没有可拆除的建筑"); return; }
+  sendCommand({ type: "deconstruct", target: best.id });
+  log(`拆除最近建筑（NetworkId=${best.id}，距离 ${Math.round(bestD)}px）`);
+}
+
+function toggleCraftPanel() {
+  craftEl.classList.toggle("hidden");
+  if (!craftEl.classList.contains("hidden")) refreshCraftPanel(selfEntity()); // 打开即刷新材料置灰
+}
+document.getElementById("craftClose").addEventListener("click", () => craftEl.classList.add("hidden"));
+
+/* ---------- 键盘事件 ---------- */
+window.addEventListener("keydown", (ev) => {
+  // 地址输入框内不劫持按键
+  if (ev.target && (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA")) return;
+  if (!room) return;
+  const k = ev.key.toLowerCase();
+  if (k === "w" || k === "a" || k === "s" || k === "d") { keysDown.add(k); return; }
+  if (k === " ") { ev.preventDefault(); if (!ev.repeat) edgeAttack = true; return; }
+  // 坑 K3：keydown 有系统自动重复，边沿触发键必须过滤 event.repeat
+  if (ev.repeat) return;
+  if (k === "e") { edgeInteract = true; return; }
+  if (k === "t") { edgeTalk = true; return; }
+  if (k in SLOT_KEYS) { selectedSlot = SLOT_KEYS[k]; return; }
+  switch (k) {
+    case "f": useSelected(); break;
+    case "g": dropSelected(); break;
+    case "c": toggleCraftPanel(); break;
+    case "b": placeSelected(); break;
+    case "x": deconstructNearest(); break;
+  }
+});
+window.addEventListener("keyup", (ev) => {
+  const k = ev.key.toLowerCase();
+  keysDown.delete(k);
+});
+window.addEventListener("blur", () => keysDown.clear()); // 失焦清空，防按键卡死
+
+/* ============================================================================
+ * 合成面板（规格 §P3）：左缘页签轨 + 分类行 + 配方格阵列 + 详情 + 「建造」按钮。
+ * craft 命令只发 recipe id；材料是否足够仅为客户端提示（置暗加锁），服务端权威。
+ * ==========================================================================*/
+// 背包 kind → 总数量（用于配方材料提示）
+function inventoryTotals(selfEnt) {
+  const totals = {};
+  if (!selfEnt) return totals;
+  for (let i = 0; i < 64; i++) {
+    const kind = str(selfEnt, `Inventory.${i}.kind`);
+    const count = num(selfEnt, `Inventory.${i}.count`);
+    if (kind === undefined && count === undefined) break; // 组件索引稳定，连续扫描到尽头
+    if (kind) totals[kind] = (totals[kind] || 0) + (count ?? 0);
+  }
+  return totals;
+}
+
+// 构建左缘页签轨与面板顶部分类行（同一组 CATS，纯 UI）
+function buildCraftTabs() {
+  for (const c of CATS) {
+    const b = document.createElement("button");
+    b.textContent = c.ico;
+    b.title = `${c.label}（C 开关面板）`;
+    b.dataset.cat = c.id;
+    b.addEventListener("click", () => {
+      // 点已激活页签 → 收起面板；否则切分类并展开
+      if (activeCat === c.id && !craftEl.classList.contains("hidden")) {
+        craftEl.classList.add("hidden");
+        return;
+      }
+      activeCat = c.id;
+      craftEl.classList.remove("hidden");
+      refreshCraftPanel(selfEntity());
+    });
+    craftTabsEl.appendChild(b);
+
+    const b2 = document.createElement("button");
+    b2.textContent = c.ico;
+    b2.title = c.label;
+    b2.dataset.cat = c.id;
+    b2.addEventListener("click", () => { activeCat = c.id; refreshCraftPanel(selfEntity()); });
+    craftCatsEl.appendChild(b2);
+  }
+}
+
+// 刷新合成面板：页签高亮 / 配方格（不足置暗加锁）/ 详情（材料计数，不足红色）/ 建造按钮
+function refreshCraftPanel(selfEnt) {
+  const totals = inventoryTotals(selfEnt);
+  craftTabsEl.querySelectorAll("button").forEach((b) =>
+    b.classList.toggle("active", b.dataset.cat === activeCat && !craftEl.classList.contains("hidden")));
+  craftCatsEl.querySelectorAll("button").forEach((b) =>
+    b.classList.toggle("active", b.dataset.cat === activeCat));
+  // 配方格阵列
+  recipeGridEl.innerHTML = "";
+  const list = RECIPES.filter((r) => activeCat === "all" || (RECIPE_CATS[r.id] || "tool") === activeCat);
+  for (const r of list) {
+    const ok = r.in.every(([k, c]) => (totals[k] || 0) >= c);
+    const cell = document.createElement("div");
+    cell.className = "recipeCell" + (ok ? "" : " locked") + (r.id === selectedRecipe ? " sel" : "");
+    cell.textContent = r.out.map(([k, c]) => (c > 1 ? `${k}×${c}` : k)).join(" + ");
+    cell.title = r.id;
+    cell.addEventListener("click", () => { selectedRecipe = r.id; refreshCraftPanel(selfEntity()); });
+    recipeGridEl.appendChild(cell);
+  }
+  // 详情区
+  const r = RECIPES.find((x) => x.id === selectedRecipe) || RECIPES[0];
+  craftNameEl.textContent = `${r.out.map(([k, c]) => `${k}×${c}`).join(" + ")} ［${r.id}］`;
+  craftDescEl.textContent = RECIPE_DESC[r.id] || "——";
+  craftMatsEl.innerHTML = r.in.map(([k, c]) => {
+    const have = totals[k] || 0;
+    return `<span class="mat ${have >= c ? "ok" : "lack"}">${k} ${have}/${c}</span>`;
+  }).join("") + (r.station ? `<span class="mat station">需光源站点（类型 ${r.station}）</span>` : "");
+  craftBuildEl.onclick = () => {
+    sendCommand({ type: "craft", recipe: r.id }); // craft 命令只发 recipe id
+    log(`合成请求：${r.id}（失败无回执，以背包状态为准）`);
+  };
+}
+buildCraftTabs();
+
+/* ============================================================================
+ * HUD 刷新（规格 §P4，节流 150ms 更新 DOM）
+ * ==========================================================================*/
+const QUEST_STATE_TEXT = { 0: "未接", 1: "进行", 2: "可交", 3: "完成" }; // 协议 §4.7
+
+/* ---------- 状态徽章：HP=红心；Needs 按 name 取图标字符与液位色 ---------- */
+function needIcon(name) {
+  const n = (name || "").toLowerCase();
+  if (n.includes("hunger")) return "🍖";
+  if (n.includes("thirst")) return "💧";
+  if (n.includes("sanity") || n.includes("spirit")) return "🧠";
+  return (name || "?").charAt(0).toUpperCase();
+}
+function needColor(name) {
+  const n = (name || "").toLowerCase();
+  if (n.includes("hunger")) return "#b8622a"; // 饥：橙
+  if (n.includes("thirst")) return "#3f6d8e"; // 渴：蓝
+  if (n.includes("sanity") || n.includes("spirit")) return "#7a5a9a"; // 精神：紫
+  return "#8f7f5c";
+}
+function badgeHtml(icoHtml, fillColor, text, pct, title) {
+  return `<div class="badge" title="${title}">` +
+    `<i class="fill" style="height:${Math.round(pct * 100)}%;background:${fillColor}"></i>` +
+    `<span class="ico">${icoHtml}</span><span class="num">${text}</span></div>`;
+}
+function buildBadges(selfEnt) {
+  const parts = [];
+  // HP 徽章（红心；协议只同步 Health.current，max 缺省用显示常量）
+  let hpTxt = "—", hpPct = 0;
+  if (selfEnt) {
+    const hp = num(selfEnt, "Health.current");
+    const hpMax = num(selfEnt, "Health.max") ?? DISPLAY_HP_MAX;
+    if (hp !== undefined) { hpTxt = String(Math.round(hp)); hpPct = Math.max(0, Math.min(1, hp / hpMax)); }
+  }
+  parts.push(badgeHtml('<b style="color:#d8544a;font-style:normal">♥</b>', "#8a2e28", hpTxt, hpPct, "生命"));
+  // Needs 徽章（按 name 渲染，不假设条目数量与含义，协议 §4.2）
+  if (selfEnt) {
+    for (let i = 0; i < 16; i++) {
+      const name = str(selfEnt, `Needs.${i}.name`);
+      const cur = num(selfEnt, `Needs.${i}.current`);
+      const max = num(selfEnt, `Needs.${i}.max`);
+      if (name === undefined && cur === undefined && max === undefined) break;
+      const pct = cur !== undefined && max ? Math.max(0, Math.min(1, cur / max)) : 0;
+      parts.push(badgeHtml(needIcon(name), needColor(name),
+        cur !== undefined ? String(Math.round(cur)) : "—", pct, name || "?"));
+    }
+  }
+  badgesEl.innerHTML = parts.join("");
+}
+
+/* ---------- 底部热键条：12 背包槽（kind 文本 + 右下数量）+ 右端 3 装备槽 ---------- */
+function buildHotbar(selfEnt) {
+  const slots = [];
+  if (selfEnt) {
+    for (let i = 0; i < 64; i++) {
+      const kind = str(selfEnt, `Inventory.${i}.kind`);
+      const count = num(selfEnt, `Inventory.${i}.count`);
+      if (kind === undefined && count === undefined) break;
+      slots.push({ kind: kind || "", count: count ?? 0 });
+    }
+  }
+  if (slots.length === 0) {
+    for (let i = 0; i < DEFAULT_SLOT_COUNT; i++) slots.push({ kind: "", count: 0 });
+  }
+  invBarEl.innerHTML = "";
+  slots.forEach((s, i) => {
+    const d = document.createElement("div");
+    d.className = "slot" + (s.kind ? "" : " empty") + (i === selectedSlot ? " sel" : "");
+    d.title = s.kind || "空";
+    d.innerHTML = `<span class="key">${SLOT_KEY_LABELS[i] ?? i}</span>` +
+      (s.kind ? `<span class="kind">${s.kind}</span>` +
+        (s.count > 1 ? `<span class="cnt">${s.count}</span>` : "") : "");
+    d.addEventListener("click", () => { selectedSlot = i; });
+    invBarEl.appendChild(d);
+  });
+  // 装备槽：Equipment.*Slot 引用背包槽索引（-1/未同步 = 空）；点击装备槽联动选中背包槽
+  equipBarEl.innerHTML = "";
+  for (const eq of EQUIP_SLOTS) {
+    let idx = -1;
+    if (selfEnt) { const v = num(selfEnt, `Equipment.${eq.key}`); if (v !== undefined) idx = v; }
+    const kind = selfEnt && idx >= 0 ? (str(selfEnt, `Inventory.${idx}.kind`) || "") : "";
+    const d = document.createElement("div");
+    d.className = "slot eq" + (kind ? "" : " empty");
+    d.title = `${eq.label}${kind ? "：" + kind : "（空）"}`;
+    d.innerHTML = `<span class="eqTag">${eq.tag}</span>` +
+      (kind ? `<span class="kind">${kind}</span>` : "");
+    if (idx >= 0) d.addEventListener("click", () => { selectedSlot = idx; });
+    equipBarEl.appendChild(d);
+  }
+}
+
+/* ---------- 右缘任务面板（Quest.{i}.questId/state/count，协议 §4.7） ---------- */
+function buildQuests(selfEnt) {
+  const items = [];
+  if (selfEnt) {
+    for (let i = 0; i < 16; i++) {
+      const qid = str(selfEnt, `Quest.${i}.questId`);
+      const st = num(selfEnt, `Quest.${i}.state`);
+      const cnt = num(selfEnt, `Quest.${i}.count`);
+      if (qid === undefined && st === undefined && cnt === undefined) break;
+      items.push(`<div class="qItem"><span class="qName">${qid ?? "?"}</span> ` +
+        `<span class="qState s${st ?? 0}">[${QUEST_STATE_TEXT[st] ?? st}]</span>` +
+        (cnt !== undefined && cnt > 0 ? ` <span class="qCnt">进度 ${cnt}</span>` : "") + `</div>`);
+    }
+  }
+  questListEl.innerHTML = items.length ? items.join("") : `<div class="qEmpty">暂无任务</div>`;
+}
+
+/* ---------- 对话选项（自身实体存在 Dialogue.{i}.option 时渲染竖排按钮，协议 §4.6） ---------- */
+function buildDialogue(selfEnt) {
+  const opts = [];
+  if (selfEnt) {
+    for (let i = 0; i < 16; i++) {
+      const o = str(selfEnt, `Dialogue.${i}.option`);
+      if (o === undefined) break;
+      opts.push(o);
+    }
+  }
+  if (opts.length) {
+    dlgEl.classList.remove("hidden");
+    dlgTitleEl.textContent = `对话中（节点 ${str(selfEnt, "Dialogue.nodeId") ?? "?"}）`;
+    dlgOptionsEl.innerHTML = "";
+    opts.forEach((text, i) => {
+      const b = document.createElement("button");
+      b.textContent = `${i}. ${text}`;
+      b.addEventListener("click", () => sendCommand({ type: "dialogue", option: i }));
+      dlgOptionsEl.appendChild(b);
+    });
+  } else {
+    dlgEl.classList.add("hidden");
+  }
+}
+
+function updateHud() {
+  const p = me();
+  const connected = !!(room && p);
+  statusGroupEl.classList.toggle("hidden", !connected);
+  craftTabsEl.classList.toggle("hidden", !connected);
+  questsEl.classList.toggle("hidden", !connected);
+  if (!connected) {
+    invBarEl.innerHTML = "";
+    equipBarEl.innerHTML = "";
+    dlgEl.classList.add("hidden");
+    return;
+  }
+
+  const selfEnt = selfEntity();
+
+  // ---- 昼夜钟：hour/phase 驱动指针；「第 N 天」本地近似（非协议字段） ----
+  {
+    const hour = room.state.hour ?? 0;
+    const phase = room.state.phase ?? 0;
+    if (joinTick === null) { joinTick = room.state.tick; joinHour = hour; } // join 基准（备注定档）
+    if (lastHourSeen !== null && hour < lastHourSeen - 1) dayCount++; // hour 回绕 23.x→0.x 视为跨天
+    lastHourSeen = hour;
+    drawClock(hour, dayCount);
+    const hh = String(Math.floor(hour) % 24).padStart(2, "0");
+    const mm = String(Math.floor((hour % 1) * 60)).padStart(2, "0");
+    clockTextEl.textContent = `${hh}:${mm} ${phase === 1 ? "🌙 夜" : "☀ 昼"}`;
+    mapIdTextEl.textContent = p.mapId || "—";
+  }
+
+  // ---- 状态徽章组（HP + Needs 液位徽章） ----
+  buildBadges(selfEnt);
+
+  // ---- 底部热键条 + 装备槽 ----
+  buildHotbar(selfEnt);
+
+  // ---- 右缘任务面板 ----
+  buildQuests(selfEnt);
+
+  // ---- 对话选项 ----
+  buildDialogue(selfEnt);
+
+  // ---- 合成面板材料提示（面板打开时刷新置灰；仅提示，服务端权威） ----
+  if (!craftEl.classList.contains("hidden")) {
+    refreshCraftPanel(selfEnt);
+  } else {
+    // 面板关闭时也要清掉页签高亮
+    craftTabsEl.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+  }
+}
+setInterval(updateHud, 150);
+</script>
+</body>
+</html>
