@@ -49,18 +49,26 @@ const EntityRuleBaseSchema = z.object({
 
 /** density 规则：区域内确定性选点补足。 */
 export const DensityRuleSchema = EntityRuleBaseSchema.extend({
+  /** 规则模式判别字段。 */
   mode: z.literal("density"),
 });
 
 /** exact 规则：固定落点补足（每 timeSlot 至多尝试一次落点）。 */
 export const ExactRuleSchema = EntityRuleBaseSchema.extend({
+  /** 规则模式判别字段。 */
   mode: z.literal("exact"),
   /** 固定落点（tile 坐标）。 */
-  at: z.object({ x: z.number().int(), y: z.number().int() }),
+  at: z.object({
+    /** 落点 x 坐标（tile 数）。 */
+    x: z.number().int(),
+    /** 落点 y 坐标（tile 数）。 */
+    y: z.number().int(),
+  }),
 });
 
 /** template 规则：成组结构，整组原子创建（任一落点非法则整组放弃）。 */
 export const TemplateRuleSchema = EntityRuleBaseSchema.extend({
+  /** 规则模式判别字段。 */
   mode: z.literal("template"),
   /** 模板条目（至少一条）；落点 = 模板原点 + (dx, dy)。 */
   template: z.array(TemplateEntrySchema).min(1),
@@ -93,6 +101,7 @@ export type EntityRule = z.infer<typeof EntityRuleSchema>;
  * 相对布局）可被跨 region/跨图的多条 template 规则引用而不产生复制漂移。
  */
 export const TemplateRuleSourceSchema = EntityRuleBaseSchema.extend({
+  /** 规则模式判别字段。 */
   mode: z.literal("template"),
   /** inline 模板条目（至少一条）；与 templateRef 恰好声明其一。 */
   template: z.array(TemplateEntrySchema).min(1).optional(),

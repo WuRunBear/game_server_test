@@ -15,19 +15,17 @@ import { z } from "zod";
  */
 const ComponentConfigSchema = z.unknown();
 
-/**
- * 单个实体原型定义：
- * - kind：原型唯一标识（刷怪/放置/查询等引用目标）
- * - tags：bitecs 标签组件名列表（用于查询过滤，如 netSync 按 tags 限定同步范围）
- * - components：组件初值表（组件名 → 初值；AoS 组件的初值形态由组件初始化钩子解读）
- * - behavior：AI 行为树配置 id（引用 game/behaviors/*.json）
- * - team：队伍编号（战斗归属判断用；缺省无队伍）
- */
+/** 单个实体原型定义（实体生成模板）。 */
 export const ArchetypeSchema = z.object({
+  /** 原型唯一标识（刷怪/放置/查询等引用目标）。 */
   kind: z.string(),
+  /** bitecs 标签组件名列表（用于查询过滤，如 netSync 按 tags 限定同步范围）。 */
   tags: z.array(z.string()).optional(),
+  /** 组件初值表（组件名 → 初值；AoS 组件的初值形态由组件初始化钩子解读）。 */
   components: z.record(z.string(), ComponentConfigSchema),
+  /** AI 行为树配置 id（引用 game/behaviors/*.json）。 */
   behavior: z.string().optional(),
+  /** 队伍编号（战斗归属判断用；缺省无队伍）。 */
   team: z.number().optional(),
 });
 

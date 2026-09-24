@@ -1,4 +1,6 @@
 import { PHASE_DAY, PHASE_NIGHT, type GameWorld } from "world";
+import type { RegistrationMetadata } from "framework/registryMetadata";
+import { assertStrictConfigSchema } from "framework/registryMetadata";
 
 /**
  * 刷怪条件模块注册表（名 → 判定函数）。
@@ -8,23 +10,41 @@ import { PHASE_DAY, PHASE_NIGHT, type GameWorld } from "world";
  */
 export type SpawnCondition = (world: GameWorld) => boolean;
 
-const spawnConditions = new Map<string, SpawnCondition>();
+/** 刷怪条件注册条目（含可选元数据），供配置编辑器消费。 */
+export interface SpawnConditionEntry extends RegistrationMetadata {
+  /** 条件注册名（EntityRule.condition 引用键）。 */
+  name: string;
+  /** 条件判定函数。 */
+  condition: SpawnCondition;
+}
 
-/** 注册刷怪条件（重名抛错，防配置引用歧义与插件覆盖）。 */
-export function registerSpawnCondition(name: string, condition: SpawnCondition): void {
+const spawnConditions = new Map<string, SpawnConditionEntry>();
+
+/** 注册刷怪条件（重名抛错，防配置引用歧义与插件覆盖）。可选元数据随条目保存供编辑器消费。 */
+export function registerSpawnCondition(
+  name: string,
+  condition: SpawnCondition,
+  meta?: RegistrationMetadata,
+): void {
   if (spawnConditions.has(name)) {
     throw new Error(`Spawn condition "${name}" is already registered`);
   }
-  spawnConditions.set(name, condition);
+  assertStrictConfigSchema(name, meta?.configSchema);
+  spawnConditions.set(name, { name, condition, ...meta });
 }
 
 /** 取刷怪条件判定函数（未注册抛错——引用未知条件属配置错误，尽早暴露）。 */
 export function getSpawnCondition(name: string): SpawnCondition {
-  const condition = spawnConditions.get(name);
-  if (!condition) {
+  const entry = spawnConditions.get(name);
+  if (!entry) {
     throw new Error(`Spawn condition "${name}" is not registered`);
   }
-  return condition;
+  return entry.condition;
+}
+
+/** 列出全部已注册刷怪条件条目（含 description / configSchema），供 sidecar listRegistries 消费。 */
+export function listSpawnConditions(): SpawnConditionEntry[] {
+  return [...spawnConditions.values()];
 }
 
 /** 刷怪条件是否已注册（加载期完整性校验先用它预检，避免 get 抛错中断加载）。 */

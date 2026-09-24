@@ -16,7 +16,12 @@ export { serializeGeometry, type SerializedMapGeometry } from "map/geometry/snap
 export { buildMapGeometry, validateMapGeometry } from "map/generate";
 export { exportGeometryArtifacts, type GeometryExportOptions, type TilePalette } from "framework/map/exportGenerated";
 
-export { createComponentRegistry, type ComponentRegistry } from "framework/components/componentRegistry";
+export { createComponentRegistry, type ComponentRegistry, type ComponentEntry } from "framework/components/componentRegistry";
+export {
+  assertStrictConfigSchema,
+  type RegistrationMetadata,
+  type RegistrationEntry,
+} from "framework/registryMetadata";
 export { createSystemRegistry, type SystemRegistry, type SystemSpec, buildSystems } from "framework/systems/systemRegistry";
 export { createActionRegistry, type ActionRegistry, type ActionFactory, type ActionEntry } from "framework/ai/actionRegistry";
 export { createArchetypeRegistry, type ArchetypeRegistry, type ArchetypeSpec } from "framework/entities/archetypeRegistry";
@@ -46,8 +51,8 @@ export {
 
 // 效果系统（注册表 + 内置效果）
 export {
-  registerEffect, getEffect, hasEffect, listEffects, applyEffectSpecs, positionOfEntity,
-  type EffectContext, type EffectExecutor, type EffectSpec,
+  registerEffect, getEffect, hasEffect, listEffects, listEffectEntries, applyEffectSpecs, positionOfEntity,
+  type EffectContext, type EffectExecutor, type EffectSpec, type EffectEntry,
 } from "framework/simulation/effects/effectRegistry";
 export { registerBuiltinEffects } from "framework/simulation/effects/builtinEffects";
 
@@ -64,8 +69,8 @@ export { Modifiers, addModifier, computeStat, type ModifierEntry, type ModifierS
 // 触发器（AoS 组件 + 注册表 + 系统）
 export { Triggers, addTrigger, type TriggerEntry } from "framework/simulation/triggers/triggers";
 export {
-  registerTrigger, getTrigger, hasTrigger, listTriggers, registerBuiltinTriggers,
-  type TriggerContext, type TriggerEvaluator,
+  registerTrigger, getTrigger, hasTrigger, listTriggers, listTriggerEntries, registerBuiltinTriggers,
+  type TriggerContext, type TriggerEvaluator, type TriggerEvaluatorEntry,
 } from "framework/simulation/triggers/triggerRegistry";
 export { triggerSystem } from "framework/simulation/triggers/triggerSystem";
 
@@ -99,7 +104,7 @@ export type { Repository, WorldRecord, SerializedEntity } from "framework/reposi
 export { dayNightCycleSystem } from "framework/systems/gameplay/dayNightCycleSystem";
 export { portalSystem } from "framework/systems/gameplay/portalSystem";
 export { movePlayerToMap } from "framework/map/switchMap";
-export { registerSpawnCondition, getSpawnCondition, hasSpawnCondition, registerBuiltinSpawnConditions, type SpawnCondition } from "framework/systems/gameplay/spawnConditions";
+export { registerSpawnCondition, getSpawnCondition, hasSpawnCondition, listSpawnConditions, registerBuiltinSpawnConditions, type SpawnCondition, type SpawnConditionEntry } from "framework/systems/gameplay/spawnConditions";
 export { placeEntity } from "framework/systems/gameplay/placeableSystem";
 export { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";
 export { startDialogue, advanceDialogue, applyDialogueEffect, END_DIALOGUE } from "framework/systems/gameplay/dialogueSystem";
@@ -125,7 +130,10 @@ export {
   listRegisteredArchetypes,
   listRegisteredActions,
   listRegisteredComponents,
+  listRegisteredComponentEntries,
   listRegisteredMapGenerators,
+  listRegisteredRuleModules,
   validateGameDefinition,
   type RuleModule,
+  type RuleModuleEntry,
 } from "framework/api";

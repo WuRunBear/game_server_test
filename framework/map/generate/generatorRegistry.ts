@@ -6,9 +6,11 @@
  * 地图配置管道中的 generator 名引用这里注册的名字。
  */
 import type { MapGenerator } from "map/generate/types";
+import type { RegistrationMetadata } from "framework/registryMetadata";
+import { assertStrictConfigSchema } from "framework/registryMetadata";
 
-/** 注册表条目：积木 id + 积木函数。 */
-export interface GeneratorEntry {
+/** 注册表条目：积木 id + 积木函数 + 可选元数据。 */
+export interface GeneratorEntry extends RegistrationMetadata {
   /** 积木唯一 id（供配置管道引用）。 */
   id: string;
   /** 积木函数本身。 */
@@ -17,8 +19,8 @@ export interface GeneratorEntry {
 
 /** 生成积木注册表接口（注册 / 查询 / 枚举）。 */
 export interface GeneratorRegistry {
-  /** 注册积木；id 重复时抛错，避免静默覆盖。 */
-  register(id: string, gen: MapGenerator): void;
+  /** 注册积木；id 重复时抛错，避免静默覆盖。可选元数据随条目保存供编辑器消费。 */
+  register(id: string, gen: MapGenerator, meta?: RegistrationMetadata): void;
   /** 按 id 获取积木；未注册时抛错。 */
   get(id: string): MapGenerator;
   /** 判断指定 id 是否已注册。 */
@@ -33,23 +35,24 @@ export interface GeneratorRegistry {
  * @returns 注册表实例
  */
 export function createGeneratorRegistry(): GeneratorRegistry {
-  // 内部存储：积木 id → 积木函数
-  const generators = new Map<string, MapGenerator>();
+  // 内部存储：积木 id → 注册条目（积木函数 + 可选元数据）
+  const generators = new Map<string, GeneratorEntry>();
 
   return {
-    register(id, gen) {
+    register(id, gen, meta) {
       if (generators.has(id)) {
         throw new Error(`Generator "${id}" is already registered`);
       }
-      generators.set(id, gen);
+      assertStrictConfigSchema(id, meta?.configSchema);
+      generators.set(id, { id, generator: gen, ...meta });
     },
 
     get(id) {
-      const gen = generators.get(id);
-      if (!gen) {
+      const entry = generators.get(id);
+      if (!entry) {
         throw new Error(`Generator "${id}" is not registered`);
       }
-      return gen;
+      return entry.generator;
     },
 
     has(id) {
@@ -57,7 +60,7 @@ export function createGeneratorRegistry(): GeneratorRegistry {
     },
 
     all() {
-      return [...generators.entries()].map(([id, generator]) => ({ id, generator }));
+      return [...generators.values()];
     },
   };
 }

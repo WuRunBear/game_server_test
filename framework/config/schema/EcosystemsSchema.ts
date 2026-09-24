@@ -10,26 +10,19 @@ import { z } from "zod";
  * （portal/建筑组）与 biome 概念不契合，留在 entity-rules.json 不入本表。
  *
  * spawnTable 条目为「密度式 | 显式式」二选一（结构互斥，走 strict 校验）：
- * - 密度式 `{ kind, density, every? }`：max 由展开器按区域面积推导
- *   （max = floor(area × density)）；
- * - 显式式 `{ kind, max, every, condition? }`：原样展开。
+ * 密度式的 max 由展开器按区域可走面积推导，显式式原样展开。
  *
  * 未知字段一律拒绝（strictObject）——拼写错误在加载期 fail-fast，而非静默
  * 丢字段。
  */
 
-/**
- * 密度式条目：区域内确定性选点补足到 max = floor(area × density)。
- *
- * every 缺省 20 tick——当前配置的主导补足周期（world tick 20tps 下的现行
- * 节奏），展开器按 DEFAULT_EVERY 兜底；显式覆盖请声明 every 字段。
- */
+/** 密度式条目：区域内确定性选点补足到 max = floor(area × density)。 */
 export const DensitySpawnEntrySchema = z.strictObject({
   /** 计数与补足的实体原型 kind。 */
   kind: z.string(),
   /** 目标密度：(0, 1] 区间；max = floor(区域面积 × density)。 */
   density: z.number().gt(0).lte(1),
-  /** 补足周期（tick 数）；缺省 20（见本条目注释）。 */
+  /** 补足周期（tick 数）；缺省 20——当前配置的主导补足周期（world tick 20tps 下的现行节奏），展开器按 DEFAULT_EVERY 兜底。 */
   every: z.number().int().min(1).optional(),
 });
 

@@ -8,16 +8,28 @@ import { z } from "zod";
  * 与跳转目标（to；缺省或 "__end__" = 结束对话）。
  */
 
-/**
- * 对话选项效果：选项被选中后执行的一次性副作用（失败则停留在当前节点）。
- * - quest_accept：接受任务（任务进入进行中）
- * - quest_submit：提交任务（校验完成条件，发放奖励）
- * - relation_delta：对指定 NPC kind 增减好感
- */
+/** 对话选项效果：选项被选中后执行的一次性副作用（失败则停留在当前节点）。 */
 export const DialogueEffectSchema = z.union([
-  z.object({ type: z.literal("quest_accept"), questId: z.string() }),
-  z.object({ type: z.literal("quest_submit"), questId: z.string() }),
-  z.object({ type: z.literal("relation_delta"), npcKind: z.string(), delta: z.number() }),
+  z.object({
+    /** 效果类型：接受任务（任务进入进行中）。 */
+    type: z.literal("quest_accept"),
+    /** 目标任务 id（引用 quests 目录）。 */
+    questId: z.string(),
+  }),
+  z.object({
+    /** 效果类型：提交任务（校验完成条件，发放奖励）。 */
+    type: z.literal("quest_submit"),
+    /** 目标任务 id（引用 quests 目录）。 */
+    questId: z.string(),
+  }),
+  z.object({
+    /** 效果类型：对指定 NPC 增减好感。 */
+    type: z.literal("relation_delta"),
+    /** 目标 NPC kind（引用实体原型 kind）。 */
+    npcKind: z.string(),
+    /** 好感增减数值。 */
+    delta: z.number(),
+  }),
 ]);
 
 /** 对话选项：展示文本 + 跳转目标 + 可选效果。 */

@@ -10,6 +10,8 @@
 import { hasComponent } from "bitecs";
 import type { GameWorld, EntityId } from "framework/world";
 import { Transform } from "framework/components/transform";
+import type { RegistrationMetadata } from "framework/registryMetadata";
+import { assertStrictConfigSchema } from "framework/registryMetadata";
 
 /**
  * 效果执行上下文：来源实体、目标实体列表、作用位置与声明参数。
@@ -38,20 +40,33 @@ export interface EffectSpec {
   params?: Record<string, unknown>;
 }
 
-/** 注册表：效果名 → 执行器（模块级单例，bootstrap 时注册内建实现）。 */
-const effects = new Map<string, EffectExecutor>();
+/** 效果注册条目（含可选元数据），供配置编辑器消费。 */
+export interface EffectEntry extends RegistrationMetadata {
+  /** 效果注册名（EffectSpec.name 引用键）。 */
+  name: string;
+  /** 效果执行器。 */
+  executor: EffectExecutor;
+}
 
-/** 注册效果执行器；同名重复注册抛错（防静默覆盖）。 */
-export function registerEffect(name: string, executor: EffectExecutor): void {
+/** 注册表：效果名 → 注册条目（模块级单例，bootstrap 时注册内建实现）。 */
+const effects = new Map<string, EffectEntry>();
+
+/** 注册效果执行器；同名重复注册抛错（防静默覆盖）。可选元数据随条目保存供编辑器消费。 */
+export function registerEffect(
+  name: string,
+  executor: EffectExecutor,
+  meta?: RegistrationMetadata,
+): void {
   if (effects.has(name)) {
     throw new Error(`Effect "${name}" is already registered`);
   }
-  effects.set(name, executor);
+  assertStrictConfigSchema(name, meta?.configSchema);
+  effects.set(name, { name, executor, ...meta });
 }
 
 /** 按名取效果执行器；未注册返回 undefined（调用方告警跳过，不崩 tick）。 */
 export function getEffect(name: string): EffectExecutor | undefined {
-  return effects.get(name);
+  return effects.get(name)?.executor;
 }
 
 /** 效果名是否已注册。 */
@@ -62,6 +77,11 @@ export function hasEffect(name: string): boolean {
 /** 列出全部已注册效果名（注册序）。 */
 export function listEffects(): string[] {
   return [...effects.keys()];
+}
+
+/** 列出全部已注册效果条目（含 description / configSchema），供 sidecar listRegistries 消费。 */
+export function listEffectEntries(): EffectEntry[] {
+  return [...effects.values()];
 }
 
 /**
@@ -89,7 +109,7 @@ export function applyEffectSpecs(
 ): boolean {
   let ok = true;
   for (const spec of specs) {
-    const executor = effects.get(spec.name);
+    const executor = effects.get(spec.name)?.executor;
     if (!executor) {
       world.logger.warn("效果未注册，跳过", { effect: spec.name, source });
       ok = false;

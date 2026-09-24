@@ -11,14 +11,25 @@
  * - registerAction     → behaviors/*.json 的 action.name / condition.call
  * - registerRuleModule → rules/*.json 的 xxxRef 字段
  *
+ * 注册点可携带可选元数据（description / configSchema，见 RegistrationMetadata），
+ * 供外部配置编辑器列出框架功能与参数表单。configSchema 字段介绍按配置编辑器
+ * 注释规范（docs/CONFIG-EDITOR-PLAN.md §Phase A1）书写：
+ * - 每个字段独立一条前导 JSDoc，禁止组合 bullet（解析器按属性名对齐描述）；
+ * - 注释只写文字介绍，数值约束（min/max/default/枚举）一律留在 zod 校验链；
+ * - 注释挂在 z.object({...}) 内字段声明所在行之前。
+ * 提供 configSchema 时注册入口会校验其 JSON Schema 输出无宽松对象形态
+ * （passthrough/looseObject/catchall 会被拒绝注册）。
+ *
  * 注意：bootstrapFramework() 必须先于这些函数调用（getRegistries 依赖其完成）。
  */
 import { getRegistries } from "framework/bootstrap";
-import type { ComponentRegistry } from "framework/components/componentRegistry";
+import type { ComponentRegistry, ComponentEntry } from "framework/components/componentRegistry";
 import type { SystemRegistry, SystemSpec } from "framework/systems/systemRegistry";
 import type { ActionRegistry, ActionFactory, ActionEntry } from "framework/ai/actionRegistry";
 import type { ArchetypeRegistry, ArchetypeSpec } from "framework/entities/archetypeRegistry";
 import type { GeneratorEntry as MapBlockEntry } from "map/generate/generatorRegistry";
+import type { RegistrationMetadata } from "framework/registryMetadata";
+import { assertStrictConfigSchema } from "framework/registryMetadata";
 import type { GameDefinition } from "framework/config/schema/GameDefinitionSchema";
 import { GameDefinitionSchema } from "framework/config/schema/GameDefinitionSchema";
 
@@ -33,9 +44,15 @@ export function registerSystem(spec: SystemSpec): void {
 /**
  * 注册一个组件。entities/*.json 的 components 块按组件名引用；
  * 组件实现由框架或扩展方提供（SoA 数值数组或 AoS 普通数组）。
+ *
+ * @param meta 可选元数据（description / configSchema），供配置编辑器列出组件参数。
  */
-export function registerComponent(name: string, component: unknown): void {
-  getRegistries().componentRegistry.register(name, component);
+export function registerComponent(
+  name: string,
+  component: unknown,
+  meta?: RegistrationMetadata,
+): void {
+  getRegistries().componentRegistry.register(name, component, meta);
 }
 
 /**
@@ -49,35 +66,61 @@ export function registerArchetype(spec: ArchetypeSpec): void {
 /**
  * 注册一个行为树动作/条件工厂。behaviors/*.json 中 `action.name`、
  * `condition.call` 按此注册名查找（行为树由 btFactory 据此绑定到 agent）。
+ *
+ * @param meta 可选元数据（description / configSchema），供配置编辑器列出节点参数。
  */
-export function registerAction(name: string, factory: ActionFactory): void {
-  getRegistries().actionRegistry.register(name, factory);
+export function registerAction(
+  name: string,
+  factory: ActionFactory,
+  meta?: RegistrationMetadata,
+): void {
+  getRegistries().actionRegistry.register(name, factory, meta);
 }
 
 /** 规则模块签名：以 world 为参数的计算/判定函数（游戏无关约束）。 */
 export type RuleModule = (world: unknown, ...args: unknown[]) => unknown;
 
-/** 规则模块注册表（独立于五大注册表的简单 Map，id → 模块）。 */
-const ruleModules = new Map<string, RuleModule>();
+/** 规则模块注册条目（含可选元数据），供配置编辑器消费。 */
+export interface RuleModuleEntry extends RegistrationMetadata {
+  /** 规则模块注册 id（rules/*.json xxxRef 引用键）。 */
+  id: string;
+  /** 规则模块函数。 */
+  module: RuleModule;
+}
+
+/** 规则模块注册表（独立于五大注册表的简单 Map，id → 注册条目）。 */
+const ruleModules = new Map<string, RuleModuleEntry>();
 
 /**
  * 注册一个规则模块。rules/*.json 的 xxxRef 字段按 id 引用，
  * 由各规则系统在求值/应用时通过 getRuleModule 取用。
+ *
+ * @param meta 可选元数据（description / configSchema），供配置编辑器列出模块参数。
  */
-export function registerRuleModule(id: string, module: RuleModule): void {
+export function registerRuleModule(
+  id: string,
+  module: RuleModule,
+  meta?: RegistrationMetadata,
+): void {
   if (ruleModules.has(id)) {
     throw new Error(`Rule module "${id}" is already registered`);
   }
-  ruleModules.set(id, module);
+  assertStrictConfigSchema(id, meta?.configSchema);
+  ruleModules.set(id, { id, module, ...meta });
 }
 
 /** 按 id 取规则模块；未注册抛错（配置引用错误会在运行期暴露）。 */
 export function getRuleModule(id: string): RuleModule {
-  const mod = ruleModules.get(id);
-  if (!mod) {
+  const entry = ruleModules.get(id);
+  if (!entry) {
     throw new Error(`Rule module "${id}" is not registered`);
   }
-  return mod;
+  return entry.module;
+}
+
+/** 列出全部已注册规则模块条目（含 description / configSchema），供 sidecar listRegistries 消费。 */
+export function listRegisteredRuleModules(): RuleModuleEntry[] {
+  return [...ruleModules.values()];
 }
 
 /** 列出全部已注册系统（供 tools list-registries 等检查/调试）。 */
@@ -98,6 +141,11 @@ export function listRegisteredActions(): ActionEntry[] {
 /** 列出全部已注册组件（名 → 组件对象）。 */
 export function listRegisteredComponents(): Readonly<Record<string, unknown>> {
   return getRegistries().componentRegistry.all();
+}
+
+/** 列出全部已注册组件条目（含 description / configSchema），供 sidecar listRegistries 消费。 */
+export function listRegisteredComponentEntries(): ComponentEntry[] {
+  return getRegistries().componentRegistry.entries();
 }
 
 /** 列出全部已注册生成积木（map/generate 层注册表；地图管道的 generator 名在此查找）。 */

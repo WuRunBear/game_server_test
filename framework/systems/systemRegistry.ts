@@ -1,4 +1,6 @@
 import type { System, GameWorld } from "framework/world";
+import type { RegistrationMetadata } from "framework/registryMetadata";
+import { assertStrictConfigSchema } from "framework/registryMetadata";
 
 /**
  * 系统注册表与构建器：把「系统名 → 工厂函数」的注册表（名 → factory 模式）
@@ -11,7 +13,7 @@ import type { System, GameWorld } from "framework/world";
  * - 系统链：每个系统都是 (world) => world 的纯函数，由 GameSimulation 按序串联执行，
  *   上一个系统处理后的 world 原样传给下一个系统，形成一条无状态的管道
  */
-export interface SystemSpec {
+export interface SystemSpec extends RegistrationMetadata {
   /** 系统唯一 id，与 game.json 的 systems[].id 对应。 */
   id: string;
   /** 工厂函数：传入 world（及可选配置）返回系统实例（即 (world) => world）。 */
@@ -45,6 +47,7 @@ export function createSystemRegistry(): SystemRegistry {
       if (systems.has(spec.id)) {
         throw new Error(`System "${spec.id}" is already registered`);
       }
+      assertStrictConfigSchema(spec.id, spec.configSchema);
       systems.set(spec.id, spec);
     },
 

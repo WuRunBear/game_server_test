@@ -8,58 +8,49 @@ import { z } from "zod";
  * 由 consume/equipment/placeable 系统按 kind 查表解读。
  */
 
-/**
- * 食用/消耗效果：把指定 Need 恢复指定数值。
- *
- * `need` 是字符串引用 Need 名（具体名由 game/ 配置约定）；框架不识别具体语义，
- * 仅按名匹配实体的 Needs 数组中同名的 Need 项。游戏无关。
- */
+/** 食用/消耗效果：把指定 Need 恢复指定数值。 */
 const ConsumeEffectSchema = z.object({
+  /** 目标 Need 名（按名匹配实体 Needs 数组中的同名项；具体名由 game/ 配置约定）。 */
   need: z.string(),
+  /** 恢复数值。 */
   amount: z.number(),
 });
 
 /**
  * 穿戴效果：把物品穿到 Equipment 的指定槽位，并声明加成数值。
- *
- * `slot` 是通用装备槽词（weapon/tool/armor），与 Equipment 组件三槽对应；
- * `attackBonus` / `defenseBonus` 由 combat 读取修正攻防，
- * `gatherMult` 由 gathering 读取修正采集产出倍率。
- * 所有字段可选——只声明该物品实际提供的效果。
+ * 各加成字段可选——只声明该物品实际提供的效果。
  */
 const EquipEffectSchema = z.object({
+  /** 装备槽词（与 Equipment 组件三槽对应）。 */
   slot: z.enum(["weapon", "tool", "armor"]),
+  /** 攻击加成（combat 读取修正攻击）。 */
   attackBonus: z.number().optional(),
+  /** 防御加成（combat 读取修正防御）。 */
   defenseBonus: z.number().optional(),
+  /** 采集产出倍率（gathering 读取修正产出）。 */
   gatherMult: z.number().positive().optional(),
 });
 
-/**
- * 放置效果：把物品放置成指定 archetype 实体（玩家 place 命令用）。
- *
- * `archetype` 是实体原型 kind 字符串引用（placeableSystem 经原型注册表查找）；
- * 该 archetype 的 Placeable 组件配置决定占位尺寸与放置校验。
- */
+/** 放置效果：把物品放置成指定 archetype 实体（玩家 place 命令用）。 */
 const PlaceEffectSchema = z.object({
+  /** 目标实体原型 kind（placeableSystem 经原型注册表查找；其 Placeable 组件配置决定占位尺寸与放置校验）。 */
   archetype: z.string(),
 });
 
 /**
  * item kind 定义——item 是数据（由 game/items/*.json 声明），不是实体原型。
- *
- * - `kind`：item 种类字符串（全局唯一），被 ResourceNode.yieldsKind / Inventory 槽位引用
- * - `maxStack`：单槽最大堆叠数，缺省 1
- * - `consume`：被 consume 时对持有者 Needs 的恢复效果列表；缺省表示不可食用
- * - `equip`：穿戴效果（槽位 + 加成）；缺省表示不可穿戴
- * - `place`：可放置声明（目标 archetype）；缺省表示不可放置
- *
  * 字段名与语义保持游戏无关（need/maxStack/amount/slot/archetype 皆为通用机制词）。
  */
 export const ItemKindSchema = z.object({
+  /** item 种类字符串（全局唯一；被 ResourceNode.yieldsKind / Inventory 槽位引用）。 */
   kind: z.string(),
+  /** 单槽最大堆叠数；缺省 1。 */
   maxStack: z.number().int().positive().optional(),
+  /** 被 consume 时对持有者 Needs 的恢复效果列表；缺省表示不可食用。 */
   consume: z.array(ConsumeEffectSchema).optional(),
+  /** 穿戴效果（槽位 + 加成）；缺省表示不可穿戴。 */
   equip: EquipEffectSchema.optional(),
+  /** 可放置声明（目标 archetype）；缺省表示不可放置。 */
   place: PlaceEffectSchema.optional(),
 });
 

@@ -7,6 +7,8 @@
  * （如 registerBuiltinActions）与游戏配置决定，与游戏内容解耦。
  */
 import type { State } from "mistreevous";
+import type { RegistrationMetadata } from "framework/registryMetadata";
+import { assertStrictConfigSchema } from "framework/registryMetadata";
 
 /**
  * 行为树节点工厂：返回 agent 方法。
@@ -16,7 +18,7 @@ import type { State } from "mistreevous";
  */
 export type ActionFactory = (args?: Record<string, unknown>) => () => State | boolean;
 
-export interface ActionEntry {
+export interface ActionEntry extends RegistrationMetadata {
   name: string;
   factory: ActionFactory;
 }
@@ -26,7 +28,7 @@ export interface ActionEntry {
  * 约定：重名 register 与未注册 get 均由实现抛错，避免配置歧义。
  */
 export interface ActionRegistry {
-  register(name: string, factory: ActionFactory): void;
+  register(name: string, factory: ActionFactory, meta?: RegistrationMetadata): void;
   get(name: string): ActionFactory;
   has(name: string): boolean;
   all(): ActionEntry[];
@@ -38,22 +40,23 @@ export interface ActionRegistry {
  * get 未注册抛错（编译行为树时会因此提前暴露配置错误）。
  */
 export function createActionRegistry(): ActionRegistry {
-  const actions = new Map<string, ActionFactory>();
+  const actions = new Map<string, ActionEntry>();
 
   return {
-    register(name, factory) {
+    register(name, factory, meta) {
       if (actions.has(name)) {
         throw new Error(`Action "${name}" is already registered`);
       }
-      actions.set(name, factory);
+      assertStrictConfigSchema(name, meta?.configSchema);
+      actions.set(name, { name, factory, ...meta });
     },
 
     get(name) {
-      const factory = actions.get(name);
-      if (!factory) {
+      const entry = actions.get(name);
+      if (!entry) {
         throw new Error(`Action "${name}" is not registered`);
       }
-      return factory;
+      return entry.factory;
     },
 
     has(name) {
@@ -61,7 +64,7 @@ export function createActionRegistry(): ActionRegistry {
     },
 
     all() {
-      return [...actions.entries()].map(([name, factory]) => ({ name, factory }));
+      return [...actions.values()];
     },
   };
 }

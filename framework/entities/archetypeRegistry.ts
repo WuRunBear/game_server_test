@@ -1,3 +1,6 @@
+import type { RegistrationMetadata } from "framework/registryMetadata";
+import { assertStrictConfigSchema } from "framework/registryMetadata";
+
 /**
  * 原型注册表——「原型名（kind）→ 组件规格（ArchetypeSpec）」的工厂表。
  *
@@ -9,7 +12,7 @@
  * 经 loadGameDefinition 加载后，用 override 覆盖同 kind 内建原型
  * （game 配置优先于框架内建兜底）。
  */
-export interface ArchetypeSpec {
+export interface ArchetypeSpec extends RegistrationMetadata {
   /** 原型唯一名（kind），实体的 Kind 组件值，AI/行为按它路由。 */
   kind: string;
   /** 标签组件名列表（如 "Player"/"Item"），spawn 时按 TAG_MAP 挂载到实体。 */
@@ -47,10 +50,12 @@ export function createArchetypeRegistry(): ArchetypeRegistry {
       if (archetypes.has(spec.kind)) {
         throw new Error(`Archetype "${spec.kind}" is already registered`);
       }
+      assertStrictConfigSchema(spec.kind, spec.configSchema);
       archetypes.set(spec.kind, spec);
     },
 
     override(spec) {
+      assertStrictConfigSchema(spec.kind, spec.configSchema);
       archetypes.set(spec.kind, spec);
     },
 

@@ -19,14 +19,15 @@ import type { PlayerRule } from "framework/config/schema/PlayerRuleSchema";
  */
 
 /**
- * 系统启用条目（game.json 的 systems[] 元素）：
- * - id：引用系统注册表（registerSystem）中的系统名
- * - enabled：是否启用（缺省启用；false 用于停用默认开启的系统，如替换内置系统时）
- * - config：系统级配置（透传给系统工厂，内部结构不校验）
+ * 系统启用条目（game.json 的 systems[] 元素）：声明启用/停用一个已注册系统，
+ * 并可携带该系统级配置。
  */
 export const SystemEnableEntrySchema = z.object({
+  /** 系统名，引用系统注册表（registerSystem）中的系统 id。 */
   id: z.string(),
+  /** 是否启用；缺省启用，false 用于停用默认开启的系统（如替换内置系统时）。 */
   enabled: z.boolean().optional(),
+  /** 系统级配置，透传给系统工厂；内部结构由系统自行约定，不在此校验。 */
   config: z.object({}).passthrough().optional(),
 });
 
@@ -53,7 +54,10 @@ export const WorldTileSchema = z
  * 整段缺省 16×16（兼容未声明 world 段的旧配置）。
  */
 export const WorldSchema = z
-  .object({ tile: WorldTileSchema })
+  .object({
+    /** 全局 tile 像寸（见 WorldTileSchema）。 */
+    tile: WorldTileSchema,
+  })
   .default({ tile: { width: 16, height: 16 } });
 
 /** 全局 tile 像寸类型推断。 */
@@ -79,24 +83,23 @@ export const NetSyncFieldSchema = z.object({
 });
 
 /**
- * 游戏定义根 schema（game/game.json）：
- * - id/name：定义标识与显示名
- * - worldview：世界观/主题透传（不校验内部）
- * - world：全局世界段（world.tile 全局 tile 像寸，`*Tiles` 换算的唯一基准）
- * - tickRate：逻辑 tick 频率（次/秒）
- * - map：地图清单路径（registry）与默认地图（default）
- * - systems：启用的系统列表（见 SystemEnableEntrySchema）
- * - entities/behaviors/rules/items/dialogues/quests：各内容文件路径
- * - netSync：网络同步字段配置（见 NetSyncFieldSchema）
+ * 游戏定义根 schema（game/game.json）：配置驱动框架的入口结构，
+ * 声明游戏标识、世界参数、启用系统与各内容文件路径。
  */
 export const GameDefinitionSchema = z.object({
+  /** 游戏标识（唯一 id）。 */
   id: z.string(),
+  /** 游戏显示名。 */
   name: z.string().optional(),
+  /** 世界观/主题透传内容；内部结构不校验。 */
   worldview: z.object({}).passthrough().optional(),
   /** 全局世界段：tile 像寸（缺省 16×16，见 WorldSchema）。 */
   world: WorldSchema,
+  /** 逻辑 tick 频率（次/秒）。 */
   tickRate: z.number().min(1),
+  /** 地图段：清单路径与默认地图等（见 map 子字段）。 */
   map: z.object({
+    /** 地图清单文件路径（maps/registry.json）。 */
     registry: z.string(),
     /** 默认地图 key（maps/registry.json 的 maps 表键；新玩家出生图）。 */
     default: z.string().optional(),
@@ -105,16 +108,23 @@ export const GameDefinitionSchema = z.object({
     /** 生态声明层文件路径（game/ecosystems.json，B1 编译器模式——boot 期展开合并）。 */
     ecosystems: z.string().optional(),
   }).optional(),
+  /** 启用的系统列表（见 SystemEnableEntrySchema）。 */
   systems: z.array(SystemEnableEntrySchema).optional(),
+  /** 实体原型文件路径（game/entities/*.json，支持 * 通配）。 */
   entities: z.string().optional(),
+  /** 行为树文件路径（game/behaviors/*.json，支持 * 通配）。 */
   behaviors: z.string().optional(),
+  /** 规则文件路径（game/rules/*.json，支持 * 通配）。 */
   rules: z.string().optional(),
+  /** 物品定义文件路径（game/items/*.json，支持 * 通配）。 */
   items: z.string().optional(),
   /** 对话树配置段（game/dialogues/*.json）。 */
   dialogues: z.string().optional(),
   /** 任务定义配置段（game/quests/*.json）。 */
   quests: z.string().optional(),
+  /** 网络同步配置段（见 NetSyncFieldSchema）。 */
   netSync: z.object({
+    /** 网络同步字段条目列表（见 NetSyncFieldSchema）。 */
     fields: z.array(NetSyncFieldSchema),
   }).optional(),
 });

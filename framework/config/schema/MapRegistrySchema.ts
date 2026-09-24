@@ -5,12 +5,10 @@ import type { MapGenerationStep } from "map/generate/types";
  * 地图注册表配置 schema（game/maps/registry.json）——新地图系统的配置入口。
  *
  * 注册表声明全部地图条目（maps，key = 地图 registry key）；默认地图由
- * game.json 的 map.default 声明（本清单不再重复 default 字段）。条目两类：
- * - kind = "pipeline"：生成积木管道——按声明顺序执行积木（generator 引用
- *   生成积木注册表），seed 派生各步骤独立随机流；initialAgeTicks 为开机
- *   初始演化跨度（世界从 0 演化到该时刻）。
- * - kind = "tiled"：Tiled 编辑器地图，path 指向的 JSON 在加载期（loadGameDefinition）
- *   内联进 tiled-source 积木参数——积木本身不做文件 I/O。
+ * game.json 的 map.default 声明（本清单不再重复 default 字段）。
+ * 条目两类：pipeline 为生成积木管道（按声明顺序执行积木，seed 派生各步骤
+ * 独立随机流）；tiled 为 Tiled 编辑器地图（path 指向的 JSON 在加载期
+ * loadGameDefinition 内联进 tiled-source 积木参数，积木本身不做文件 I/O）。
  *
  * 各积木的自有参数（params）框架不解释，原样透传给积木自行收窄校验。
  */
@@ -25,6 +23,7 @@ export const MapGenerationStepSchema = z.object({
 
 /** 管道地图条目：seed + 初始演化跨度 + 积木管道。 */
 export const PipelineMapEntrySchema = z.object({
+  /** 条目类型判别字段：管道生成条目。 */
   kind: z.literal("pipeline"),
   /**
    * 随机种子（各管道步骤经 seed + 步骤序号派生独立流，同 seed 同产出）。
@@ -40,6 +39,7 @@ export const PipelineMapEntrySchema = z.object({
 
 /** Tiled 地图条目：path 指向的 Tiled JSON 在加载期内联。 */
 export const TiledMapEntrySchema = z.object({
+  /** 条目类型判别字段：Tiled 地图条目。 */
   kind: z.literal("tiled"),
   /** Tiled JSON 文件路径（相对本清单文件；缺文件/解析失败在加载期报错）。 */
   path: z.string(),

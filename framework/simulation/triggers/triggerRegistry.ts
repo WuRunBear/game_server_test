@@ -14,6 +14,8 @@
 import type { GameWorld, EntityId } from "framework/world";
 import { applyEffectSpecs, positionOfEntity } from "framework/simulation/effects/effectRegistry";
 import type { EffectSpec } from "framework/simulation/effects/effectRegistry";
+import type { RegistrationMetadata } from "framework/registryMetadata";
+import { assertStrictConfigSchema } from "framework/registryMetadata";
 
 /** 触发器求值上下文。 */
 export interface TriggerContext {
@@ -30,20 +32,33 @@ export interface TriggerContext {
 /** 触发器求值器：对命中的效果列表执行一次。 */
 export type TriggerEvaluator = (ctx: TriggerContext, effects: EffectSpec[]) => void;
 
-/** 注册表：触发器名 → 求值器（模块级单例，bootstrap 时注册内建实现）。 */
-const evaluators = new Map<string, TriggerEvaluator>();
+/** 触发器注册条目（含可选元数据），供配置编辑器消费。 */
+export interface TriggerEvaluatorEntry extends RegistrationMetadata {
+  /** 触发器注册名（= 类型化事件名）。 */
+  name: string;
+  /** 触发器求值器。 */
+  evaluator: TriggerEvaluator;
+}
 
-/** 注册触发器求值器；同名重复注册抛错（防静默覆盖）。 */
-export function registerTrigger(name: string, evaluator: TriggerEvaluator): void {
+/** 注册表：触发器名 → 注册条目（模块级单例，bootstrap 时注册内建实现）。 */
+const evaluators = new Map<string, TriggerEvaluatorEntry>();
+
+/** 注册触发器求值器；同名重复注册抛错（防静默覆盖）。可选元数据随条目保存供编辑器消费。 */
+export function registerTrigger(
+  name: string,
+  evaluator: TriggerEvaluator,
+  meta?: RegistrationMetadata,
+): void {
   if (evaluators.has(name)) {
     throw new Error(`Trigger "${name}" is already registered`);
   }
-  evaluators.set(name, evaluator);
+  assertStrictConfigSchema(name, meta?.configSchema);
+  evaluators.set(name, { name, evaluator, ...meta });
 }
 
 /** 按名取求值器；未注册返回 undefined（triggerSystem 跳过该事件）。 */
 export function getTrigger(name: string): TriggerEvaluator | undefined {
-  return evaluators.get(name);
+  return evaluators.get(name)?.evaluator;
 }
 
 /** 触发器名是否已注册。 */
@@ -54,6 +69,11 @@ export function hasTrigger(name: string): boolean {
 /** 列出全部已注册触发器名（注册序）。 */
 export function listTriggers(): string[] {
   return [...evaluators.keys()];
+}
+
+/** 列出全部已注册触发器条目（含 description / configSchema），供 sidecar listRegistries 消费。 */
+export function listTriggerEntries(): TriggerEvaluatorEntry[] {
+  return [...evaluators.values()];
 }
 
 /** 内建求值器（通用实体事件）：效果以 owner 为来源、target 为缺省目标执行。 */
