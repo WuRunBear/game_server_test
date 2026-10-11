@@ -8,11 +8,12 @@
 import { hasComponent } from "bitecs";
 import { Health, Defense, Kind, Transform } from "components";
 import type { GameWorld } from "framework/world";
-import { registerEffect, positionOfEntity } from "framework/simulation/effects/effectRegistry";
+import { registerEffect, positionOfEntity, parseEffectSpec } from "framework/simulation/effects/effectRegistry";
 import { computeStandardDamage } from "framework/systems/gameplay/damageFormula";
 import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
+import { computeNumericStat, addModifier, STAT_DEFENSE } from "framework/simulation/modifiers/modifiers";
+import { setExpiresAt, setIntervalTimer } from "framework/simulation/timer/timer";
 import { emitEvent } from "framework/events/gameEvents";
-import { addModifier } from "framework/simulation/modifiers/modifiers";
 import { insertContainer, removeContainer, type ContainerRef } from "framework/economy/container";
 import { spawnProjectile } from "framework/systems/gameplay/projectileSystem";
 import { spawnEntity } from "framework/entities/spawn";
@@ -52,7 +53,8 @@ export function registerBuiltinEffects(): void {
       const defense =
         (hasComponent(ctx.world, target, Defense) ? (Defense.value[target] ?? 0) : 0) +
         getEquipModifiers(ctx.world, target).defenseBonus;
-      Health.current[target] = (Health.current[target] ?? 0) - computeStandardDamage(amount, defense);
+      const effectiveDefense = computeNumericStat(ctx.world, target, STAT_DEFENSE, defense);
+      Health.current[target] = (Health.current[target] ?? 0) - computeStandardDamage(amount, effectiveDefense);
       applied = true;
       if ((Health.current[target] ?? 0) <= 0) {
         emitEvent(ctx.world, "killed", {
@@ -133,6 +135,44 @@ export function registerBuiltinEffects(): void {
         source,
         expiresTick,
       });
+      applied = true;
+    }
+    return applied;
+  });
+
+  /**
+   * set-timer：给目标设置一次性或周期定时器（声明式定时入口）。
+   *
+   * params：
+   * - mode："expires"（一次性）| 缺省 "interval"（周期）
+   * - expires 模式：durationTicks（到期延迟，≥0）
+   * - interval 模式：periodTicks（周期，>0）、delayTicks（首触发延迟，缺省
+   *   = periodTicks）、ticks（触发次数，缺省 -1 = 无限）
+   * - effect：可选嵌套 EffectSpec（到期/触发时经 effectRegistry 求值；
+   *   缺省仅发 on-timer 事件，交 Triggers 声明式消费）
+   *
+   * 定时器为运行时瞬态（不入档），恢复后由再次施加的效果重建。
+   */
+  registerEffect("set-timer", (ctx) => {
+    const mode = strParam(ctx.params, "mode") === "expires" ? "expires" : "interval";
+    const effect = parseEffectSpec(ctx.params.effect);
+
+    let applied = false;
+    for (const target of ctx.targets) {
+      if (mode === "expires") {
+        const durationTicks = Math.max(0, Math.floor(numParam(ctx.params, "durationTicks", 0)));
+        setExpiresAt(target, ctx.world.time.tick + durationTicks, effect);
+        applied = true;
+        continue;
+      }
+
+      const periodTicks = Math.floor(numParam(ctx.params, "periodTicks", 0));
+      if (!(periodTicks > 0)) continue;
+      const delayTicks = Math.floor(numParam(ctx.params, "delayTicks", periodTicks));
+      const ticksRaw = Math.floor(numParam(ctx.params, "ticks", -1));
+      const remaining = ticksRaw < 0 ? -1 : Math.max(1, ticksRaw);
+      const firstTick = ctx.world.time.tick + Math.max(1, delayTicks);
+      setIntervalTimer(target, periodTicks, firstTick, remaining, effect);
       applied = true;
     }
     return applied;

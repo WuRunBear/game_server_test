@@ -5,13 +5,24 @@
  * 可带来源标识与失效 tick。computeStat 按「base × (1+Σmul) + Σadd」
  * 合成数值，bool 型条目同 statKey 内取或（bool 条目存在时优先返回布尔）。
  *
- * 过期条目按 world.time.tick 惰性判定失效（expiresTick 时刻起不再生效），
- * 不做主动清理——条目量小，读取路径过滤即可。组件默认随实体持久化。
+ * 过期条目按 world.time.tick 惰性判定失效（expiresTick 时刻起不再生效）；
+ * 另有 modifierSystem 每 tick 主动清理过期条目（避免持久化集合无限膨胀）。
+ * 组件默认随实体持久化（见 worldSerializer 的 AoS 分支）。
  *
- * 现有移动/战斗系统暂不接入 computeStat（接线留配方切片），
- * 本阶段消费方为 apply-status 效果与测试。
+ * 消费方：movementSystem（moveSpeed）、combatSystem（attack/defense）、
+ * damage 效果（defense）读取 computeStat 覆盖基础值；apply-status 效果写入条目。
  */
 import type { GameWorld } from "framework/world";
+
+/**
+ * 框架内建 stat key 常量（游戏无关；game 配置按字符串引用同名键）。
+ *
+ * 约定：基础值由消费方从组件/装备解析，computeStat 在其上叠修饰符；
+ * moveSpeed 语义为位移倍率（缺省 1），attack/defense 为绝对值。
+ */
+export const STAT_MOVE_SPEED = "moveSpeed";
+export const STAT_ATTACK = "attack";
+export const STAT_DEFENSE = "defense";
 
 /** 单条修饰符条目：乘法/加法/布尔修正 + 来源 + 失效 tick。 */
 export interface ModifierEntry {
@@ -88,4 +99,18 @@ export function computeStat(
   }
   if (hasBool) return boolOr;
   return base * (1 + mulSum) + addSum;
+}
+
+/**
+ * 数值语义的 computeStat：bool 条目存在时按 true→1 / false→0 折算，
+ * 保证消费方（攻击/防御/位移倍率）恒拿到 number。
+ */
+export function computeNumericStat(
+  world: GameWorld,
+  eid: number,
+  statKey: string,
+  base: number,
+): number {
+  const value = computeStat(world, eid, statKey, base);
+  return typeof value === "boolean" ? (value ? 1 : 0) : value;
 }

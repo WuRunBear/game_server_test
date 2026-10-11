@@ -19,7 +19,8 @@ import type { GameWorld } from "framework/world";
  * 类型化事件载荷表：事件名 → 载荷结构。
  *
  * 命名约定：触发器求值器名 = 事件名（triggerRegistry 按 on-* 名注册）。
- * 预留事件（on-hit/on-death/on-region-*）的产生方接线在配方切片补齐。
+ * on-death（deathSystem）/ on-hit（combatSystem）的产生方已接线；
+ * on-region-* 的产生方接线在配方切片补齐。
  */
 export interface TypedEventPayloads {
   /** 定时器触发（timerSystem 入队；phase 区分一次性到期/周期触发）。 */
@@ -28,8 +29,8 @@ export interface TypedEventPayloads {
   "on-command": { eid: number; type: string };
   /** 投射物接触实体（projectileSystem 入队；eid=投射物主人，target=被接触实体）。 */
   "on-contact": { eid: number; target: number; x: number; y: number };
-  /** 攻击命中（combat 接线预留，配方切片消费）。 */
-  "on-hit": { eid: number; attacker: number; target: number };
+  /** 攻击命中（combatSystem 入队；eid=攻击者，target=被命中实体，damage=实际伤害）。 */
+  "on-hit": { eid: number; attacker: number; target: number; damage: number };
   /** 实体死亡（death 接线预留）。 */
   "on-death": { eid: number; kind: string };
   /** 进入区域（region 接线预留）。 */

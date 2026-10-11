@@ -92,6 +92,83 @@ export const DayNightRuleSchema = z.object({
 export type DayNightRule = z.infer<typeof DayNightRuleSchema>;
 
 /**
+ * 相位修饰数值：常量，或随相位进度在 `[from, to]` 间线性插值。
+ * 字段名由 game/ 配置自定（框架只当标量求值），例：temperatureOffset / growthScale。
+ */
+export const EnvironmentModifierSchema = z.union([
+  z.number(),
+  z.object({
+    /** 相位起点处的值。 */
+    from: z.number(),
+    /** 相位终点处（进度→1）的值。 */
+    to: z.number(),
+  }),
+]);
+
+/** 相位内的天气候选与权重。 */
+export const PhaseWeatherOptionSchema = z.object({
+  /** 天气 id（配置字符串；框架只当不透明标识）。 */
+  id: z.string(),
+  /** 抽样权重（正数；同相位内按权重比例抽样）。 */
+  weight: z.number().positive(),
+});
+
+/** 单个相位：id + 时长（tick）+ 天气候选 + 通用修饰数值。 */
+export const EnvironmentPhaseSchema = z.object({
+  /** 相位 id（game/ 提供的配置字符串；框架只当不透明标识）。 */
+  id: z.string(),
+  /** 相位时长（tick）；相位程序内各时长之和为一周期，按绝对槽对齐循环。 */
+  durationTicks: z.number().int().positive(),
+  /** 该相位允许的天气候选（可省略＝该相位恒定无天气）。 */
+  weather: z.array(PhaseWeatherOptionSchema).optional(),
+  /**
+   * 该相位的通用修饰数值（键自定，如 temperatureOffset/growthScale）；
+   * 值为常量或 `{ from, to }`（按进度线性）。框架只当标量，不解释语义。
+   */
+  modifiers: z.record(z.string(), EnvironmentModifierSchema).optional(),
+});
+
+/**
+ * 环境/相位时钟全局规则（game/rules/environment.json）：作用于 environmentSystem。
+ *
+ * 相位与天气皆为 tick 的纯函数（见 framework/simulation/worldClock）——本规则
+ * 只描述相位程序与天气抽样参数，不含任何运行时累积状态；字段语义游戏无关
+ * （相位/天气 id 均来自配置字符串）。
+ */
+export const EnvironmentRuleSchema = z
+  .object({
+    /** 天气抽样种子（世界级）；缺省 0。同 seed + 同天气槽恒同天气。 */
+    seed: z.number().int().optional(),
+    /** 天气槽长度（tick）；槽索引 = floor(tick / weatherSlotTicks)。 */
+    weatherSlotTicks: z.number().int().positive(),
+    /** 相位程序（按数组顺序循环；一周期 = 各相位时长之和）。 */
+    phases: z.array(EnvironmentPhaseSchema).min(1),
+  })
+  .passthrough()
+  .superRefine((rule, ctx) => {
+    const seen = new Set<string>();
+    rule.phases.forEach((phase, index) => {
+      if (seen.has(phase.id)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `duplicate phase id "${phase.id}"`,
+          path: ["phases", index, "id"],
+        });
+      }
+      seen.add(phase.id);
+    });
+  });
+
+/** 相位修饰数值类型推断（即 environment.json 的 modifiers 值）。 */
+export type EnvironmentModifier = z.infer<typeof EnvironmentModifierSchema>;
+/** 相位天气候选类型推断。 */
+export type PhaseWeatherOption = z.infer<typeof PhaseWeatherOptionSchema>;
+/** 单相位类型推断。 */
+export type EnvironmentPhase = z.infer<typeof EnvironmentPhaseSchema>;
+/** 环境/相位时钟规则的类型推断（即 game/rules/environment.json）。 */
+export type EnvironmentRule = z.infer<typeof EnvironmentRuleSchema>;
+
+/**
  * 服务端全局规则（game/rules/server.json）：作用于仿真层的存档/视野/输入校验。
  * 各字段语义游戏无关。
  */

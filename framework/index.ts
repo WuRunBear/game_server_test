@@ -8,7 +8,7 @@
 export { createLogger, type Logger } from "framework/utils/logger";
 export { clampMs } from "framework/utils/timer";
 export { createMetrics, recordTick, type Metrics } from "framework/metrics";
-export { createGameWorld, type GameWorld, type EntityId, type Tick, type System, type GameTime, type TimeOfDay, PHASE_DAY, PHASE_NIGHT } from "framework/world";
+export { createGameWorld, type GameWorld, type EntityId, type Tick, type System, type GameTime, type TimeOfDay, type EnvironmentState, PHASE_DAY, PHASE_NIGHT } from "framework/world";
 
 // 新地图系统公共面（geometry 数据层 + generate 生成层 + 几何导出）
 export type { MapGeometry, MapGeometryGrid, RegionMeta } from "map/geometry/types";
@@ -51,7 +51,7 @@ export {
 
 // 效果系统（注册表 + 内置效果）
 export {
-  registerEffect, getEffect, hasEffect, listEffects, listEffectEntries, applyEffectSpecs, positionOfEntity,
+  registerEffect, getEffect, hasEffect, listEffects, listEffectEntries, applyEffectSpecs, positionOfEntity, parseEffectSpec,
   type EffectContext, type EffectExecutor, type EffectSpec, type EffectEntry,
 } from "framework/simulation/effects/effectRegistry";
 export { registerBuiltinEffects } from "framework/simulation/effects/builtinEffects";
@@ -63,11 +63,16 @@ export {
 } from "framework/simulation/timer/timer";
 export { timerSystem } from "framework/simulation/timer/timerSystem";
 
-// 修饰符（AoS 组件 + 属性合成）
-export { Modifiers, addModifier, computeStat, type ModifierEntry, type ModifierSet } from "framework/simulation/modifiers/modifiers";
+// 修饰符（AoS 组件 + 属性合成 + 过期清理系统）
+export {
+  Modifiers, addModifier, computeStat, computeNumericStat,
+  STAT_MOVE_SPEED, STAT_ATTACK, STAT_DEFENSE,
+  type ModifierEntry, type ModifierSet,
+} from "framework/simulation/modifiers/modifiers";
+export { modifierSystem } from "framework/simulation/modifiers/modifierSystem";
 
 // 触发器（AoS 组件 + 注册表 + 系统）
-export { Triggers, addTrigger, type TriggerEntry } from "framework/simulation/triggers/triggers";
+export { Triggers, addTrigger, initTriggers, type TriggerEntry } from "framework/simulation/triggers/triggers";
 export {
   registerTrigger, getTrigger, hasTrigger, listTriggers, listTriggerEntries, registerBuiltinTriggers,
   type TriggerContext, type TriggerEvaluator, type TriggerEvaluatorEntry,
@@ -102,9 +107,17 @@ export { createFileRepository } from "framework/persistence/fileRepository";
 export type { Repository, WorldRecord, SerializedEntity } from "framework/repository";
 
 export { dayNightCycleSystem } from "framework/systems/gameplay/dayNightCycleSystem";
+export { environmentSystem } from "framework/systems/gameplay/environmentSystem";
 export { portalSystem } from "framework/systems/gameplay/portalSystem";
 export { movePlayerToMap } from "framework/map/switchMap";
-export { registerSpawnCondition, getSpawnCondition, hasSpawnCondition, listSpawnConditions, registerBuiltinSpawnConditions, type SpawnCondition, type SpawnConditionEntry } from "framework/systems/gameplay/spawnConditions";
+export { registerSpawnCondition, registerParameterizedSpawnCondition, getSpawnCondition, hasSpawnCondition, listSpawnConditions, registerBuiltinSpawnConditions, SPAWN_CONDITION_ARG_SEPARATOR, type SpawnCondition, type ParameterizedSpawnCondition, type SpawnConditionEntry } from "framework/systems/gameplay/spawnConditions";
+
+// WorldClock 相位/环境派生（tick 纯函数；不含累积状态）
+export {
+  environmentAt, phaseAt, weatherAt, weatherSlotAt, cycleTicks, resolveModifiers,
+  getEnvironmentRule, NEUTRAL_ENVIRONMENT,
+  type EnvironmentView, type PhaseView, type TileContext, type GroundDerivationFn,
+} from "framework/simulation/worldClock";
 export { placeEntity } from "framework/systems/gameplay/placeableSystem";
 export { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";
 export { startDialogue, advanceDialogue, applyDialogueEffect, END_DIALOGUE } from "framework/systems/gameplay/dialogueSystem";
@@ -115,9 +128,9 @@ export { overlapsAnyEntity, overlapsMapBlocked, overlapsOccupiedGrid, snapToGrid
 
 export { GameDefinitionSchema, WorldTileSchema, WorldSchema, type GameDefinition, type WorldTile, type WorldConfig, type LoadedGameDefinition, type BehaviorDefinition, type SystemEnableEntry, type NetSyncField } from "framework/config/schema/GameDefinitionSchema";
 export { normalizeTileUnits } from "framework/config/tileUnits";
-export { ItemKindSchema, type ItemKindSpec, type ConsumeEffect, type EquipEffect, type PlaceEffect } from "framework/config/schema/ItemKindSchema";
+export { ItemKindSchema, type ItemKindSpec, type ConsumeEffect, type ItemEffectSpec, type EquipEffect, type PlaceEffect } from "framework/config/schema/ItemKindSchema";
 export { registerRuleSchema, getRuleSchema, hasRuleSchema, registerBuiltinRuleSchemas } from "framework/config/schema/ruleSchemas";
-export { CombatRuleSchema, NeedsRuleSchema, CraftingRuleSchema, DayNightRuleSchema, ServerRuleSchema, type CombatRule, type NeedsRule, type CraftingRule, type CraftingRecipe, type DayNightRule, type ServerRule } from "framework/config/schema/RuleSchema";
+export { CombatRuleSchema, NeedsRuleSchema, CraftingRuleSchema, DayNightRuleSchema, EnvironmentRuleSchema, ServerRuleSchema, EnvironmentModifierSchema, EnvironmentPhaseSchema, PhaseWeatherOptionSchema, type CombatRule, type NeedsRule, type CraftingRule, type CraftingRecipe, type DayNightRule, type EnvironmentRule, type EnvironmentPhase, type EnvironmentModifier, type PhaseWeatherOption, type ServerRule } from "framework/config/schema/RuleSchema";
 
 export {
   registerSystem,

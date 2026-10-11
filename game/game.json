@@ -12,6 +12,8 @@
   },
   "systems": [
     { "id": "dayNight" },
+    { "id": "environment" },
+    { "id": "modifier" },
     { "id": "perception" },
     { "id": "ai" },
     { "id": "physics" },
@@ -28,7 +30,9 @@
     { "id": "death" },
     { "id": "respawn" },
     { "id": "portal" },
-    { "id": "quest" }
+    { "id": "quest" },
+    { "id": "timer" },
+    { "id": "trigger" }
   ],
   "entities": "./entities/*.json",
   "behaviors": "./behaviors/*.json",

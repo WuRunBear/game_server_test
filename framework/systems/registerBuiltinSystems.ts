@@ -17,6 +17,7 @@ import { needDecaySystem } from "framework/systems/gameplay/needDecaySystem";
 import { gatheringSystem } from "framework/systems/gameplay/gatheringSystem";
 import { equipmentSystem } from "framework/systems/gameplay/equipmentSystem";
 import { dayNightCycleSystem } from "framework/systems/gameplay/dayNightCycleSystem";
+import { environmentSystem } from "framework/systems/gameplay/environmentSystem";
 import { portalSystem } from "framework/systems/gameplay/portalSystem";
 import { createQuestSystem } from "framework/systems/gameplay/questSystem";
 import { createNestSystem } from "framework/systems/gameplay/nestSystem";
@@ -26,6 +27,7 @@ import { setDefaultActionRegistry } from "framework/ai/btFactory";
 import { registerBuiltinActions } from "framework/ai/registerBuiltinActions";
 import { timerSystem } from "framework/simulation/timer/timerSystem";
 import { triggerSystem } from "framework/simulation/triggers/triggerSystem";
+import { modifierSystem } from "framework/simulation/modifiers/modifierSystem";
 import { projectileSystem } from "framework/systems/gameplay/projectileSystem";
 
 export function registerBuiltinSystems(
@@ -81,6 +83,14 @@ export function registerBuiltinSystems(
     id: "dayNight",
     description: "昼夜循环：按 daynight 规则推进世界时间并计算日夜相位。",
     factory: (_world: GameWorld) => dayNightCycleSystem,
+  });
+
+  // 环境时钟：按 environment 规则从 tick 派生相位/天气（纯函数，排在 dayNight 之后）
+  systemRegistry.register({
+    id: "environment",
+    description: "环境时钟：按 environment 规则从 tick 派生相位与天气（WorldClock，纯函数派生）。",
+    factory: (_world: GameWorld) => environmentSystem,
+    after: ["dayNight"],
   });
 
   systemRegistry.register({
@@ -164,6 +174,15 @@ export function registerBuiltinSystems(
     description: "定时器：到期或到周期时触发效果引用并清理条目。",
     factory: (_world: GameWorld) => timerSystem,
     after: ["quest"],
+  });
+
+  // 修饰符清理：每 tick 剔除过期属性修饰符条目（在战斗等消费方之前），
+  // 避免持久化的 Modifiers 集合随状态反复施加无限膨胀
+  systemRegistry.register({
+    id: "modifier",
+    description: "修饰符清理：每 tick 剔除过期属性修饰符条目并回收空集合。",
+    factory: (_world: GameWorld) => modifierSystem,
+    before: ["combat"],
   });
 
   // 触发器：固定阶段消费事件总线，求值实体 Triggers 声明的效果列表

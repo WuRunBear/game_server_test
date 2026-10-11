@@ -34,6 +34,7 @@ import { computeInterest } from "./interest";
 import { createInputGuard, type InputGuard } from "./inputValidation";
 import { openOffer, acceptOffer, cancelOffer } from "framework/economy/offer";
 import { queueEvent } from "framework/simulation/events/eventBus";
+import { mixSeed } from "framework/simulation/rng";
 import { createLogger } from "framework/utils/logger";
 
 /** 装配期日志器（world.logger 尚不可用的开机阶段使用）。 */
@@ -369,7 +370,13 @@ export class GameSimulation implements SimulationPort {
     } else {
       const geometry = this.world.maps[this.world.defaultMapId];
       const rule = this.world.gameDef.resolvedPlayerRule?.spawn;
-      const picked = geometry && rule ? pickSpawnPosition(geometry, rule) : undefined;
+      // random 模式确定性种子：世界/地图 seed + 玩家标识（nextNetworkId，稳定且逐玩家不同）
+      const spawnSeed = mixSeed(
+        mapSeedOf(this.world, this.world.defaultMapId) ?? this.world.defaultMapId,
+        this.world.nextNetworkId,
+      );
+      const picked =
+        geometry && rule ? pickSpawnPosition(geometry, rule, spawnSeed) : undefined;
       if (geometry && rule && !picked) {
         // 候选池为空（区域缺失/全不可走）：显式报错，回退地图几何中心
         this.world.logger.error("玩家出生规则无合法候选点，回退地图几何中心", {

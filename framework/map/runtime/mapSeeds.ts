@@ -37,6 +37,11 @@ export function mapSeedOf(world: GameWorld, mapKey: string): number | undefined 
 /**
  * 随机 32 位无符号种子（配置缺省 seed 且无快照固化值时的兜底）。
  * 每图独立调用——同一次开机内各图 seed 互不相关。
+ *
+ * **这是世界创建时的一次性随机选择，不参与 tick 内确定性推演**：结果在开机
+ * 即固化进 WorldRecord.mapSeeds（弱表 + 首存快照），此后的生成与演化流都从
+ * 该固化 seed 派生，因而同一存档世界完全可复现。此处保留 Math.random 是
+ * 有意为之，不要把它并入 tick 级确定性随机服务。
  */
 export function randomUint32(): number {
   return Math.floor(Math.random() * 0x1_0000_0000) >>> 0;

@@ -3,6 +3,7 @@ import { Resource, ResourceNode, Needs, Inventory, entityMapOf, type ResourceNod
 import type { GameWorld } from "world";
 import { addToInventory, spawnDroppedItem, DROP_PICKUP_AFTER_MS } from "framework/systems/gameplay/inventoryOps";
 import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
+import { applyEffectSpecs } from "framework/simulation/effects/effectRegistry";
 import type { ConsumeEffect } from "framework/config/schema/ItemKindSchema";
 
 /**
@@ -30,6 +31,10 @@ export function harvest(world: GameWorld, actorEid: number, nodeEid: number): bo
   if (nodeState.directConsume) {
     // 直接施加 consume 效果（如直接饮用），不经过背包
     applyConsumeEffects(world, actorEid, item.consume, amount);
+    // 附加效果引用（目标 = 采集者）：如直接饮用带状态/定时副作用
+    if (item.effects && item.effects.length > 0) {
+      applyEffectSpecs(world, actorEid, [actorEid], item.effects);
+    }
   } else {
     const inv = Inventory[actorEid];
     if (!inv) return false; // 采集者无背包 → 拒
@@ -45,6 +50,7 @@ export function harvest(world: GameWorld, actorEid: number, nodeEid: number): bo
         0,
         world.time.tick * world.time.fixedDtMs + DROP_PICKUP_AFTER_MS,
         entityMapOf(world, actorEid),
+        actorEid,
       );
     }
   }

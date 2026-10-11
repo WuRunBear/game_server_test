@@ -8,9 +8,11 @@
  */
 import { hasComponent } from "bitecs";
 import type { GameWorld } from "world";
+import { rngFrom } from "framework/simulation/rng";
 import { Inventory, ItemMeta, Needs, type InventoryEntry, type ItemStack } from "components";
 import { EntityMap, Item, Transform, entityMapOf } from "components";
 import { spawnEntity } from "framework/entities/spawn";
+import { applyEffectSpecs } from "framework/simulation/effects/effectRegistry";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { ItemKindSpec, ConsumeEffect } from "framework/config/schema/ItemKindSchema";
@@ -124,6 +126,11 @@ export function consumeSlot(world: GameWorld, ownerEid: number, slot: number): b
     }
   }
 
+  // 附加效果引用：目标 = 使用者（状态效果/定时效果等，经 effectRegistry 求值）
+  if (item?.effects && item.effects.length > 0) {
+    applyEffectSpecs(world, ownerEid, [ownerEid], item.effects);
+  }
+
   stack.count -= 1;
   if (stack.count <= 0) inv.slots[slot] = null;
   return true;
@@ -146,6 +153,7 @@ export function dropSlot(world: GameWorld, ownerEid: number, slot: number): bool
     Transform.y[ownerEid],
     now + DROP_PICKUP_AFTER_MS,
     entityMapOf(world, ownerEid),
+    ownerEid,
   );
   inv.slots[slot] = null;
   return true;
@@ -154,7 +162,11 @@ export function dropSlot(world: GameWorld, ownerEid: number, slot: number): bool
 /** 丢弃/溢出物防瞬回延迟（ms）：掉落者就在旁边，给走开时间。 */
 export const DROP_PICKUP_AFTER_MS = 1000;
 
-/** 生成一个地面 item 实体并写 ItemMeta（供 drop 与 loot 共用）。 */
+/** 生成一个地面 item 实体并写 ItemMeta（供 drop 与 loot 共用）。
+ *
+ * `sourceEid` 是丢弃/死亡来源实体，用于派生确定性散布流（tick + 来源 eid）；
+ * 缺省用 -1（无来源调用）——同 tick 同来源的多次掉落共享同一条流，仍确定。
+ */
 export function spawnDroppedItem(
   world: GameWorld,
   stack: ItemStack,
@@ -162,14 +174,17 @@ export function spawnDroppedItem(
   y: number,
   pickupAfterMs: number,
   mapId: string,
+  sourceEid?: number,
 ): number {
   const archetypeRegistry = world.archetypes as ArchetypeRegistry;
   const componentRegistry = world.components_registry as ComponentRegistry;
   const archetype = archetypeRegistry.get("item");
 
-  // 随机偏移到 16~24px，避免与丢弃者重叠导致瞬捡回
-  const angle = Math.random() * Math.PI * 2;
-  const dist = 16 + Math.random() * 8;
+  // 确定性地散布到 16~24px，避免与丢弃者重叠导致瞬捡回
+  // （tick + 来源 eid 派生，同世界状态恒同落点）
+  const rng = rngFrom(world.time.tick, sourceEid ?? -1, "drop");
+  const angle = rng.next() * Math.PI * 2;
+  const dist = 16 + rng.next() * 8;
   const eid = spawnEntity(world, archetype, componentRegistry, {
     x: x + Math.cos(angle) * dist,
     y: y + Math.sin(angle) * dist,

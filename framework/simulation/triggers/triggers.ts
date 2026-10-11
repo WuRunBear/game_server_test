@@ -8,6 +8,7 @@
  * 组件默认随实体持久化（声明式配置数据，恢复后语义不变）。
  */
 import type { EffectSpec } from "framework/simulation/effects/effectRegistry";
+import { parseEffectSpec } from "framework/simulation/effects/effectRegistry";
 
 /** 单条触发器声明：触发器名 + 效果引用列表。 */
 export interface TriggerEntry {
@@ -29,4 +30,40 @@ export function addTrigger(eid: number, entry: TriggerEntry): void {
     list = Triggers[eid] = [];
   }
   list.push({ trigger: entry.trigger, effects: entry.effects.map((spec) => ({ ...spec })) });
+}
+
+/**
+ * AoS archetype 初始化钩子：按实体原型的 Triggers 配置写入声明列表。
+ *
+ * 配置形态为 TriggerEntry[]（trigger 字符串 + effects 效果引用数组）；
+ * 结构非法（非数组/缺 trigger 名）的条目跳过，不影响其余声明。
+ * 游戏无关——trigger 名与效果参数对框架均为不透明配置。
+ */
+export function initTriggers(_world: unknown, eid: number, config: unknown): void {
+  if (!Array.isArray(config)) return;
+  const list: TriggerEntry[] = [];
+  for (const raw of config) {
+    const trigger = parseEffectTriggerName(raw);
+    if (!trigger) continue;
+    list.push({ trigger, effects: parseEffectSpecs((raw as { effects?: unknown }).effects) });
+  }
+  Triggers[eid] = list;
+}
+
+/** 读取触发器条目的 trigger 名（非对象/非字符串 → 空）。 */
+function parseEffectTriggerName(raw: unknown): string {
+  if (!raw || typeof raw !== "object") return "";
+  const trigger = (raw as { trigger?: unknown }).trigger;
+  return typeof trigger === "string" ? trigger : "";
+}
+
+/** 解析效果引用数组（结构非法项跳过）。 */
+function parseEffectSpecs(raw: unknown): EffectSpec[] {
+  if (!Array.isArray(raw)) return [];
+  const specs: EffectSpec[] = [];
+  for (const item of raw) {
+    const spec = parseEffectSpec(item);
+    if (spec) specs.push(spec);
+  }
+  return specs;
 }

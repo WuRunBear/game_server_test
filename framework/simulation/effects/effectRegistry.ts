@@ -40,6 +40,22 @@ export interface EffectSpec {
   params?: Record<string, unknown>;
 }
 
+/**
+ * 从任意配置值解析一条 EffectSpec（用于声明式嵌套引用，如 Triggers 挂载、
+ * set-timer 的到期效果）。结构非法（非对象 / 无名 / 名非字符串）返回 undefined。
+ * 游戏无关——只按 name/params 通用字段解读。
+ */
+export function parseEffectSpec(raw: unknown): EffectSpec | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const name = (raw as { name?: unknown }).name;
+  if (typeof name !== "string" || name === "") return undefined;
+  const params = (raw as { params?: unknown }).params;
+  return {
+    name,
+    params: params && typeof params === "object" ? (params as Record<string, unknown>) : undefined,
+  };
+}
+
 /** 效果注册条目（含可选元数据），供配置编辑器消费。 */
 export interface EffectEntry extends RegistrationMetadata {
   /** 效果注册名（EffectSpec.name 引用键）。 */

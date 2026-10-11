@@ -13,17 +13,16 @@
  * - 生成走 spawnEntity（AoS 初始化钩子照常）；spawnKind 原型缺失记 warn
  *   （每 kind 一次）并跳过该巢——配置错误可见但不砸 tick
  *
- * 确定性：每次尝试的随机流由 (tick, eid, attempt) 经 createRng 派生——
+ * 确定性：每次尝试的随机流由 (tick, eid, attempt) 经统一随机服务派生——
  * 不用 Math.random，同世界状态恒产生同落点序列，测试可精确断言。
  * 巢（实体）被摧毁即 AoS 条目消失 → 自然停产，无独立生命周期代码。
  */
 import { query } from "bitecs";
 import { Nest, Kind, Transform, entityMapOf } from "components";
-import { createRng } from "framework/map/generate/rng";
+import { attemptRng } from "framework/simulation/rng";
 import {
   PLACEMENT_MAX_ATTEMPTS,
   DEFAULT_SPAWN_RADIUS_TILES,
-  attemptSeed,
   effectiveMapOf,
   randomTileCenterNear,
   trySpawnAtPixel,
@@ -91,7 +90,7 @@ export function createNestSystem(config?: Record<string, unknown>) {
 
       // 补足至容量：半径内随机 tile + 可走/占位合法性，尝试数有界
       for (let attempt = 0; attempt < maxAttempts && alive < nest.capacity; attempt += 1) {
-        const rng = createRng(attemptSeed(tick, nestEid, 0, attempt));
+        const rng = attemptRng(tick, nestEid, 0, attempt);
         const { px, py } = randomTileCenterNear(rng, geometry, nestTx, nestTy, radiusTiles);
         if (trySpawnAtPixel(world, geometry, mapId, archetype, px, py)) alive += 1;
       }

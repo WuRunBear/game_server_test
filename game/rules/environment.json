@@ -1,0 +1,53 @@
+{
+  "seed": 20261,
+  "weatherSlotTicks": 600,
+  "phases": [
+    {
+      "id": "mild",
+      "durationTicks": 24000,
+      "modifiers": { "temperatureOffset": 0, "growthScale": 1 },
+      "weather": [
+        { "id": "clear", "weight": 5 },
+        { "id": "rain", "weight": 2 },
+        { "id": "fog", "weight": 1 }
+      ]
+    },
+    {
+      "id": "dry",
+      "durationTicks": 18000,
+      "modifiers": {
+        "temperatureOffset": { "from": 2, "to": 8 },
+        "growthScale": { "from": 0.8, "to": 0.3 }
+      },
+      "weather": [
+        { "id": "clear", "weight": 7 },
+        { "id": "drought", "weight": 2 }
+      ]
+    },
+    {
+      "id": "wet",
+      "durationTicks": 18000,
+      "modifiers": {
+        "temperatureOffset": { "from": 8, "to": 3 },
+        "growthScale": { "from": 0.3, "to": 1.2 }
+      },
+      "weather": [
+        { "id": "rain", "weight": 6 },
+        { "id": "fog", "weight": 2 },
+        { "id": "clear", "weight": 1 }
+      ]
+    },
+    {
+      "id": "storm",
+      "durationTicks": 12000,
+      "modifiers": {
+        "temperatureOffset": { "from": 3, "to": 1 },
+        "growthScale": 0.5
+      },
+      "weather": [
+        { "id": "storm", "weight": 5 },
+        { "id": "rain", "weight": 3 }
+      ]
+    }
+  ]
+}

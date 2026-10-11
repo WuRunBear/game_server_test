@@ -3,7 +3,8 @@
  *
  * pickSpawnPosition 按 spawn 规则三模式在 MapGeometry 上选一个落点
  * （返回 **像素坐标**——tile 中心，可直接写入 Transform）：
- * - random：可走候选池内独立随机（每玩家互不影响）；
+ * - random：可走候选池内由 `(worldSeed, mapKey, 玩家标识)` 派生的种子确定性选点
+ *   （不再用 Math.random；seed 缺省时回退地图内容指纹，仍确定）；
  * - seededRandom：以地图内容指纹派生种子的确定性选点（同图同点）；
  * - exact：固定落点 at（tile 坐标）取中心，不做通行校验——静态落点的
  *   合法性由开机引用校验兜底（boot.ts U5）。
@@ -77,11 +78,14 @@ function candidateTiles(geometry: MapGeometry, region: string | undefined): numb
  *
  * @param geometry 地图几何
  * @param rule 出生规则
+ * @param seed random 模式的确定性种子（世界种子 + 地图 + 来源标识派生；
+ *   缺省回退地图内容指纹——仍为确定性，绝不用 Math.random）
  * @returns 落点像素坐标；random/seededRandom 无候选时 undefined（exact 恒有值）
  */
 export function pickSpawnPosition(
   geometry: MapGeometry,
   rule: SpawnPointRule,
+  seed?: number,
 ): { x: number; y: number } | undefined {
   if (rule.mode === "exact") {
     const at = rule.at ?? { x: 0, y: 0 };
@@ -98,5 +102,8 @@ export function pickSpawnPosition(
     const rng = mulberry32(fnv1a32(geometry.version));
     return tileCenter(geometry, pool[Math.floor(rng() * pool.length)]);
   }
-  return tileCenter(geometry, pool[Math.floor(Math.random() * pool.length)]);
+  // random：注入种子确定性选点；缺省用「命名空间 + 地图内容指纹」兜底（不用 Math.random）
+  const rngSeed = seed !== undefined ? seed >>> 0 : fnv1a32(`spawn-random:${geometry.version}`);
+  const rng = mulberry32(rngSeed);
+  return tileCenter(geometry, pool[Math.floor(rng() * pool.length)]);
 }

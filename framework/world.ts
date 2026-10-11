@@ -28,6 +28,31 @@ export interface TimeOfDay {
   phase: number;
 }
 
+/**
+ * world 级环境状态（WorldClock 相位/天气的**派生缓存**，非累积字段）。
+ *
+ * 全部数值都是 `world.time.tick` 与 environment 规则的纯函数（见
+ * framework/simulation/worldClock）：每 tick 由 environmentSystem 重算写入，
+ * 因此离线补差天然正确、无需重放。字段语义游戏无关——相位/天气 id 均来自
+ * game/ 配置字符串，框架只做字符串透传，不解释其含义。
+ */
+export interface EnvironmentState {
+  /** 当前相位在规则 phases 数组中的索引（0 起）。 */
+  phaseIndex: number;
+  /** 当前相位 id（来自配置；无 environment 规则时为空串）。 */
+  phaseId: string;
+  /** 当前相位内进度 [0, 1)。 */
+  progress: number;
+  /** 已完成的完整相位循环数（floor(tick / 一周期总 tick)，即“日/周期索引”）。 */
+  dayIndex: number;
+  /** 当前天气 id（来自配置；该相位无天气候选时为空串）。 */
+  weatherId: string;
+  /** 当前天气槽索引（floor(tick / weatherSlotTicks)）。 */
+  weatherSlot: number;
+  /** 当前相位修饰数值（常量或按进度线性求值后的标量）。 */
+  modifiers: Record<string, number>;
+}
+
 export interface GameTime {
   /** 已推进的逻辑帧号（每 tick +1）。 */
   tick: Tick;
@@ -37,6 +62,8 @@ export interface GameTime {
   fixedDtMs: number;
   /** 昼夜状态，由 dayNightCycleSystem 推进（缺省配置时保持初始值）。 */
   timeOfDay: TimeOfDay;
+  /** 环境状态（相位/天气派生缓存），由 environmentSystem 每 tick 重算。 */
+  environment: EnvironmentState;
 }
 
 export type GameWorld = ReturnType<typeof createWorld> & {
@@ -91,6 +118,15 @@ export function createGameWorld(fixedDtMs: number): GameWorld {
       dtMs: fixedDtMs,
       fixedDtMs,
       timeOfDay: { hour: 8, phase: PHASE_DAY },
+      environment: {
+        phaseIndex: 0,
+        phaseId: "",
+        progress: 0,
+        dayIndex: 0,
+        weatherId: "",
+        weatherSlot: 0,
+        modifiers: {},
+      },
     },
     metrics: createMetrics(),
     logger: createLogger("world"),

@@ -3,7 +3,9 @@
  *
  * 与放置链（placeableSystem）共用同一套占位合法性语义——全框架只有这一套：
  * footprintOf（Placeable 声明，16px 兜底）→ overlapsAnyEntity / overlapsMapBlocked。
- * 另含确定性尝试种子与「实体归属图解析」惯例（effectiveMapOf），供各刷怪系统复用。
+ * 另含「实体归属图解析」惯例（effectiveMapOf），供各刷怪系统复用；
+ * 确定性尝试种子已抽到统一随机服务（framework/simulation/rng），此处仅为
+ * 历史调用方保留转发（新代码请直接从 framework/simulation/rng 取流）。
  */
 import { entityMapOf, footprintOf } from "components";
 import { walkableAt } from "map/geometry/query";
@@ -14,29 +16,14 @@ import type { MapGeometry } from "map/geometry/types";
 import type { ArchetypeSpec } from "framework/entities/archetypeRegistry";
 import type { GameWorld } from "world";
 
+/** 确定性尝试种子（定义已迁 framework/simulation/rng，此处转发保持兼容）。 */
+export { attemptSeed } from "framework/simulation/rng";
+
 /** 单实体单门控的落位尝试上限（PLACEMENT_MAX_ATTEMPTS 惯例，同演化引擎选点）。 */
 export const PLACEMENT_MAX_ATTEMPTS = 32;
 
 /** 刷位搜索/计数缺省半径（tile）。 */
 export const DEFAULT_SPAWN_RADIUS_TILES = 4;
-
-/**
- * 确定性尝试种子：把 (tick, eid, slot, attempt) 混叠为一个 32 位整数。
- * 只求确定性（同输入恒同序列）；散列碰撞仅意味着两档尝试复用同一随机序列，无害。
- */
-export function attemptSeed(
-  tick: number,
-  eid: number,
-  slot: number,
-  attempt: number,
-): number {
-  return (
-    Math.imul(tick, 2654435761) ^
-    Math.imul(eid, 40503) ^
-    Math.imul(slot, 7919) ^
-    Math.imul(attempt, 97)
-  ) >>> 0;
-}
 
 /**
  * 刷怪判定的实体地图 id：mapId 解析不到已构建图（归属异常 = 配置/存档 bug）

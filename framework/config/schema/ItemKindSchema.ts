@@ -31,6 +31,18 @@ const EquipEffectSchema = z.object({
   gatherMult: z.number().positive().optional(),
 });
 
+/**
+ * 效果引用：效果名 + 可选参数（结构对齐 effectRegistry 的 EffectSpec）。
+ * item 消费时经 effectRegistry 求值——具体效果语义（加成/状态/定时等）由
+ * game/ 配置声明，schema 层只校验通用结构。
+ */
+const EffectSpecSchema = z.object({
+  /** 效果名（effectRegistry 注册名，如 apply-status / set-timer / heal）。 */
+  name: z.string(),
+  /** 效果参数（透传给执行器；结构由具体效果约定）。 */
+  params: z.record(z.string(), z.unknown()).optional(),
+});
+
 /** 放置效果：把物品放置成指定 archetype 实体（玩家 place 命令用）。 */
 const PlaceEffectSchema = z.object({
   /** 目标实体原型 kind（placeableSystem 经原型注册表查找；其 Placeable 组件配置决定占位尺寸与放置校验）。 */
@@ -48,6 +60,12 @@ export const ItemKindSchema = z.object({
   maxStack: z.number().int().positive().optional(),
   /** 被 consume 时对持有者 Needs 的恢复效果列表；缺省表示不可食用。 */
   consume: z.array(ConsumeEffectSchema).optional(),
+  /**
+   * 被 consume（食用/直接使用）时附加施加的效果引用列表（经 effectRegistry
+   * 求值，目标 = 使用者）。与 consume 的 Needs 恢复独立——用于状态效果、
+   * 定时效果等通用副作用；缺省无附加效果。
+   */
+  effects: z.array(EffectSpecSchema).optional(),
   /** 穿戴效果（槽位 + 加成）；缺省表示不可穿戴。 */
   equip: EquipEffectSchema.optional(),
   /** 可放置声明（目标 archetype）；缺省表示不可放置。 */
@@ -56,6 +74,8 @@ export const ItemKindSchema = z.object({
 
 /** 食用/消耗效果的类型推断。 */
 export type ConsumeEffect = z.infer<typeof ConsumeEffectSchema>;
+/** item 消费附加效果引用的类型推断（结构对齐 effectRegistry.EffectSpec）。 */
+export type ItemEffectSpec = z.infer<typeof EffectSpecSchema>;
 /** 穿戴效果的类型推断。 */
 export type EquipEffect = z.infer<typeof EquipEffectSchema>;
 /** 放置效果的类型推断。 */

@@ -14,7 +14,13 @@
       { "name": "thirst", "current": 100, "max": 100, "decayPerSec": 0.7, "depletionDmg": 1 }
     ],
     "Inventory": { "capacity": 12 },
-    "Equipment": { "weaponSlot": -1, "toolSlot": -1, "armorSlot": -1 }
+    "Equipment": { "weaponSlot": -1, "toolSlot": -1, "armorSlot": -1 },
+    "Triggers": [
+      {
+        "trigger": "on-timer",
+        "effects": [{ "name": "damage", "params": { "amount": 3 } }]
+      }
+    ]
   },
   "team": 1
 }

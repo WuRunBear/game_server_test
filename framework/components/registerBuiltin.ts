@@ -47,7 +47,7 @@ import { Cooldown, Duration } from "framework/components/timer";
 import { Ledger, initLedger } from "framework/components/ledger";
 import { Projectile } from "framework/components/projectile";
 import { Modifiers } from "framework/simulation/modifiers/modifiers";
-import { Triggers } from "framework/simulation/triggers/triggers";
+import { Triggers, initTriggers } from "framework/simulation/triggers/triggers";
 import { ExpiresAt, Interval } from "framework/simulation/timer/timer";
 import { Player, Enemy, NPC, Item, Resource } from "framework/components/tags";
 import { Kind } from "framework/components/kind";
@@ -364,4 +364,5 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.registerAosInitializer("Portal", initPortal);
   registry.registerAosInitializer("DialogueSource", initDialogueSource);
   registry.registerAosInitializer("Ledger", initLedger);
+  registry.registerAosInitializer("Triggers", initTriggers);
 }

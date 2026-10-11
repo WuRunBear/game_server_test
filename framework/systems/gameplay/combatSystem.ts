@@ -5,7 +5,9 @@ import type { GameWorld } from "world";
 import { getRuleModule } from "framework/api";
 import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
 import { computeStandardDamage } from "framework/systems/gameplay/damageFormula";
+import { computeNumericStat, STAT_ATTACK, STAT_DEFENSE } from "framework/simulation/modifiers/modifiers";
 import { emitEvent } from "framework/events/gameEvents";
+import { queueEvent } from "framework/simulation/events/eventBus";
 
 /** 攻击冷却缺省值（毫秒；rules/combat.json 可覆盖）。 */
 export const DEFAULT_COOLDOWN_MS = 1000;
@@ -99,9 +101,12 @@ export function attackTarget(world: GameWorld, attackerEid: number, targetEid: n
   );
   if (dist > attackerRange) return false;
 
-  const attackerDamage = (Attack.value[attackerEid] ?? 10) + getEquipModifiers(world, attackerEid).attackBonus;
-  const targetDefense =
+  // 攻击力/防御力在基础值（组件 + 装备加成）上叠属性修饰符（apply-status 等）
+  const baseAttack = (Attack.value[attackerEid] ?? 10) + getEquipModifiers(world, attackerEid).attackBonus;
+  const attackerDamage = computeNumericStat(world, attackerEid, STAT_ATTACK, baseAttack);
+  const baseDefense =
     (Defense.value[targetEid] ?? 0) + getEquipModifiers(world, targetEid).defenseBonus;
+  const targetDefense = computeNumericStat(world, targetEid, STAT_DEFENSE, baseDefense);
 
   // 标准公式抽为纯函数（damageFormula），与 damage 效果共用同一数值路径
   let damage = computeStandardDamage(attackerDamage, targetDefense);
@@ -117,6 +122,14 @@ export function attackTarget(world: GameWorld, attackerEid: number, targetEid: n
   }
 
   Health.current[targetEid] = (Health.current[targetEid] ?? 0) - damage;
+
+  // 命中事件（产生方接线）：通用载荷只放 攻击者/被命中者/实际伤害
+  queueEvent(world, "on-hit", {
+    eid: attackerEid,
+    attacker: attackerEid,
+    target: targetEid,
+    damage,
+  });
 
   // 致命一击：发射击杀事件（同帧 questSystem 等系统消费；需求耗尽等非攻击致死无事件）
   if ((Health.current[targetEid] ?? 0) <= 0) {

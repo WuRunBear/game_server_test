@@ -1,5 +1,15 @@
 {
   "kind": "raw_meat",
   "maxStack": 20,
-  "consume": [{ "need": "hunger", "amount": 30 }]
+  "consume": [{ "need": "hunger", "amount": 30 }],
+  "effects": [
+    {
+      "name": "apply-status",
+      "params": { "stat": "moveSpeed", "mul": -0.5, "durationTicks": 60, "source": "raw_meat" }
+    },
+    {
+      "name": "set-timer",
+      "params": { "mode": "interval", "periodTicks": 10, "delayTicks": 10, "ticks": 3 }
+    }
+  ]
 }

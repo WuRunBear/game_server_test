@@ -4,6 +4,7 @@ import {
   NeedsRuleSchema,
   CraftingRuleSchema,
   DayNightRuleSchema,
+  EnvironmentRuleSchema,
   ServerRuleSchema,
   RaidRuleSchema,
 } from "framework/config/schema/RuleSchema";
@@ -47,6 +48,7 @@ export function registerBuiltinRuleSchemas(): void {
   registerRuleSchema("needs", NeedsRuleSchema);
   registerRuleSchema("crafting", CraftingRuleSchema);
   registerRuleSchema("daynight", DayNightRuleSchema);
+  registerRuleSchema("environment", EnvironmentRuleSchema);
   registerRuleSchema("server", ServerRuleSchema);
   registerRuleSchema("player", PlayerRuleSchema);
   registerRuleSchema("raid", RaidRuleSchema);

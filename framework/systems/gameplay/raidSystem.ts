@@ -19,13 +19,12 @@
  */
 import { query } from "bitecs";
 import { Player, Transform } from "components";
-import { createRng } from "framework/map/generate/rng";
+import { attemptRng } from "framework/simulation/rng";
 import { getRuleModule } from "framework/api";
 import { getSpawnCondition } from "framework/systems/gameplay/spawnConditions";
 import {
   PLACEMENT_MAX_ATTEMPTS,
   DEFAULT_SPAWN_RADIUS_TILES,
-  attemptSeed,
   effectiveMapOf,
   randomTileCenterNear,
   trySpawnAtPixel,
@@ -93,7 +92,7 @@ export function createRaidSystem(_config?: Record<string, unknown>) {
       } else {
         wave = [];
         for (let i = 0; i < waveSize && kinds.length > 0; i += 1) {
-          const rng = createRng(attemptSeed(world.time.tick, playerEid, i, 0));
+          const rng = attemptRng(world.time.tick, playerEid, i, 0);
           wave.push({ kind: kinds[rng.int(kinds.length)] });
         }
       }
@@ -124,7 +123,7 @@ export function createRaidSystem(_config?: Record<string, unknown>) {
         }
         // 缺省落位：玩家半径内随机 tile + 可走/占位合法性，每成员尝试数有界
         for (let attempt = 0; attempt < PLACEMENT_MAX_ATTEMPTS; attempt += 1) {
-          const rng = createRng(attemptSeed(world.time.tick, playerEid, i, attempt + 1));
+          const rng = attemptRng(world.time.tick, playerEid, i, attempt + 1);
           const { px, py } = randomTileCenterNear(rng, geometry, playerTx, playerTy, radiusTiles);
           if (trySpawnAtPixel(world, geometry, mapId, archetype, px, py)) break;
         }
