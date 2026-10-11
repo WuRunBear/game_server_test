@@ -50,6 +50,7 @@ import { Modifiers } from "framework/simulation/modifiers/modifiers";
 import { Triggers, initTriggers } from "framework/simulation/triggers/triggers";
 import { ExpiresAt, Interval } from "framework/simulation/timer/timer";
 import { StateMachine, initStateMachine } from "framework/simulation/stateMachine/stateMachine";
+import { Population, initPopulation } from "framework/simulation/population/population";
 import { Player, Enemy, NPC, Item, Resource } from "framework/components/tags";
 import { Kind } from "framework/components/kind";
 
@@ -377,6 +378,27 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
       ),
     }),
   });
+  // 族群节点（AoS，持久化——数量/上限/归属区域入档）：服务端权威演进数值；
+  // 可选最小生产通路（spawnInstances）。不注册 netSync 适配器（客户端不需要）。
+  registry.register("Population", Population, {
+    description: "族群节点：一处种群的记账数据（物种、数量、承载力、增长率、归属区域），由族群系统确定性演进。",
+    configSchema: z.object({
+      /** 产出的实体原型 kind（archetypes 注册表引用）；必填非空。 */
+      species: z.string().min(1),
+      /** 每 tile 承载力密度；上限 = floor(区域面积 × 本值)。 */
+      carryingDensity: z.number().nonnegative().default(0),
+      /** 每个增长周期期望新增个体数（小数部分经确定性随机流掷骰）。 */
+      growthRate: z.number().nonnegative().default(0),
+      /** 增长周期（tick 数；槽绝对对齐）。 */
+      growthIntervalTicks: z.number().int().positive().default(1),
+      /** 归属区域名（MapGeometry.regions 键）；空串时按实体所在格惰性解析。 */
+      homeRegion: z.string().default(""),
+      /** 初始数量。 */
+      count: z.number().int().nonnegative().default(0),
+      /** 最小生产通路开关：true 时在来源实体周围把 species 补足到 count。 */
+      spawnInstances: z.boolean().default(false),
+    }),
+  });
   // 标签（bitecs 空组件）
   registry.register("Player", Player, {
     description: "玩家标签：标记实体为玩家。",
@@ -409,4 +431,5 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.registerAosInitializer("Ledger", initLedger);
   registry.registerAosInitializer("Triggers", initTriggers);
   registry.registerAosInitializer("StateMachine", initStateMachine);
+  registry.registerAosInitializer("Population", initPopulation);
 }

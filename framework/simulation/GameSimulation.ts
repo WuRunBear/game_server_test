@@ -29,6 +29,7 @@ import { mapSeedOf } from "map/runtime/mapSeeds";
 import { advanceTickTo, computeOfflineTicks } from "map/runtime/clock";
 import { noopBootDeps, type BootDeps } from "map/runtime/boot";
 import { fastForwardStateMachines } from "framework/simulation/stateMachine/stateMachineSystem";
+import { fastForwardPopulations } from "framework/simulation/population/populationSystem";
 import type { Repository, WorldRecord } from "framework/repository";
 import type { ServerRule } from "framework/config/schema/RuleSchema";
 import { computeInterest } from "./interest";
@@ -274,6 +275,9 @@ export class GameSimulation implements SimulationPort {
     // 状态机离线快进：迁移步进（非逐 tick）把全部实体状态机推到演化边界，
     // 落地「读档后状态正确恢复 + 离线等价」——与逐 tick 推进最终状态一致。
     fastForwardStateMachines(this.world, fromTick + offlineTicks);
+    // 族群节点离线快进：槽步进（非逐 tick）把全部节点数量推到演化边界——
+    // 与逐 tick 推进最终数量/上限/最后演进 tick 完全一致（核心断言）。
+    fastForwardPopulations(this.world, fromTick + offlineTicks);
     advanceTickTo(this.world, fromTick + offlineTicks);
     this.world.logger.info("offline catch-up complete", {
       savedTick: fromTick,

@@ -5,6 +5,15 @@
     "Size": { "w": 24, "h": 24 },
     "Collider": { "shape": 1, "halfW": 12, "halfH": 12 },
     "Health": { "current": 60, "max": 60 },
-    "Nest": { "spawnKind": "spider", "capacity": 4, "intervalTicks": 600 }
+    "Nest": { "spawnKind": "spider", "capacity": 4, "intervalTicks": 600 },
+    "Population": {
+      "species": "spider",
+      "carryingDensity": 0.0006,
+      "growthRate": 0.5,
+      "growthIntervalTicks": 300,
+      "homeRegion": "forest",
+      "count": 4,
+      "spawnInstances": false
+    }
   }
 }

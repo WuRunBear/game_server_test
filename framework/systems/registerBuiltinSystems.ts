@@ -29,6 +29,7 @@ import { timerSystem } from "framework/simulation/timer/timerSystem";
 import { triggerSystem } from "framework/simulation/triggers/triggerSystem";
 import { modifierSystem } from "framework/simulation/modifiers/modifierSystem";
 import { stateMachineSystem } from "framework/simulation/stateMachine/stateMachineSystem";
+import { createPopulationSystem } from "framework/simulation/population/populationSystem";
 import { projectileSystem } from "framework/systems/gameplay/projectileSystem";
 
 export function registerBuiltinSystems(
@@ -221,6 +222,21 @@ export function registerBuiltinSystems(
     id: "raid",
     description: "周期袭击：按 raid 规则周期在玩家周围生成敌对波。",
     factory: (_world: GameWorld) => raidSystem,
+    after: ["combat"],
+  });
+
+  // 族群节点：按增长率确定性演进节点数量（离线快进在 GameSimulation.runOfflineCatchUp）；
+  // 可选的实体生产通路（spawnInstances）参数走 systems[].config
+  systemRegistry.register({
+    id: "population",
+    description: "族群节点：按承载力与增长率确定性演进节点数量，可选把节点数量落地为实体。",
+    configSchema: z.object({
+      /** 生产通路计数/落位搜索半径（tile）。 */
+      radiusTiles: z.number().positive().default(4),
+      /** 单节点单门控的落位尝试上限。 */
+      maxPerSlot: z.number().positive().default(32),
+    }),
+    factory: (_world: GameWorld, config?: Record<string, unknown>) => createPopulationSystem(config),
     after: ["combat"],
   });
 }
