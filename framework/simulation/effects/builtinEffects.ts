@@ -1,12 +1,13 @@
 /**
- * 内置效果装配：注册框架自带的七个通用效果执行器。
+ * 内置效果装配：注册框架自带的通用效果执行器（damage/heal/spawn-projectile/
+ * apply-status/set-timer/restore-resource/impulse/ledger/spawn-entity）。
  *
  * 由 bootstrapFramework 调用一次（注册表查重，重复注册抛错）。
- * 全部效果为通用机制词（damage/heal/status/impulse/ledger/spawn 等），
+ * 全部效果为通用机制词（damage/heal/status/impulse/ledger/spawn/resource 等），
  * 具体数值与语义由 EffectSpec.params / game/ 配置声明。
  */
 import { hasComponent } from "bitecs";
-import { Health, Defense, Kind, Transform } from "components";
+import { Health, Defense, Kind, Transform, ResourceNode } from "components";
 import type { GameWorld } from "framework/world";
 import { registerEffect, positionOfEntity, parseEffectSpec } from "framework/simulation/effects/effectRegistry";
 import { computeStandardDamage } from "framework/systems/gameplay/damageFormula";
@@ -176,6 +177,24 @@ export function registerBuiltinEffects(): void {
       applied = true;
     }
     return applied;
+  });
+
+  /**
+   * restore-resource：把目标的资源节点剩余量回满到上限（通用资源机制词）。
+   *
+   * 供状态机在「回到可采集状态」迁移时引用（如再生完成），与 `ResourceNode.regenMs`
+   * 的自动回满互不冲突；目标是资源节点（无 ResourceNode 数据则跳过）。
+   */
+  registerEffect("restore-resource", (ctx) => {
+    let restored = false;
+    for (const target of ctx.targets) {
+      const node = ResourceNode[target];
+      if (!node) continue;
+      node.remaining = node.max;
+      node.depletedSinceMs = null;
+      restored = true;
+    }
+    return restored;
   });
 
   /** impulse：位移脉冲——对目标做瞬时位移（params.dx/dy 像素增量）。 */

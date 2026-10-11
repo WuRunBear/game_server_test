@@ -25,6 +25,7 @@
     { "id": "needDecay" },
     { "id": "inventory" },
     { "id": "gathering" },
+    { "id": "stateMachine" },
     { "id": "interaction", "config": { "range": 24 } },
     { "id": "equipment" },
     { "id": "death" },

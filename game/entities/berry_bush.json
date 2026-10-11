@@ -7,8 +7,25 @@
       "remaining": 5,
       "max": 5,
       "amountPerHit": 1,
-      "regenMs": 60000,
+      "regenMs": 0,
       "yieldsKind": "berry"
+    },
+    "StateMachine": {
+      "initial": "ready",
+      "states": {
+        "ready": {
+          "transitions": [{ "on": "depleted", "to": "regrowing" }]
+        },
+        "regrowing": {
+          "transitions": [
+            {
+              "afterTicks": 1200,
+              "to": "ready",
+              "effects": [{ "name": "restore-resource" }]
+            }
+          ]
+        }
+      }
     }
   }
 }

@@ -4,6 +4,12 @@ import type { GameWorld } from "world";
 import { addToInventory, spawnDroppedItem, DROP_PICKUP_AFTER_MS } from "framework/systems/gameplay/inventoryOps";
 import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
 import { applyEffectSpecs } from "framework/simulation/effects/effectRegistry";
+import {
+  StateMachine,
+  FSM_SIGNAL_HARVESTED,
+  FSM_SIGNAL_DEPLETED,
+} from "framework/simulation/stateMachine/stateMachine";
+import { signalStateMachine } from "framework/simulation/stateMachine/stateMachineSystem";
 import type { ConsumeEffect } from "framework/config/schema/ItemKindSchema";
 
 /**
@@ -59,6 +65,15 @@ export function harvest(world: GameWorld, actorEid: number, nodeEid: number): bo
   if (nodeState.remaining <= 0) {
     nodeState.remaining = 0;
     nodeState.depletedSinceMs = world.time.tick * world.time.fixedDtMs;
+  }
+
+  // 通用状态机联动（可选）：资源状态变化作为即时信号广播给该实体的状态机。
+  // 框架不解释信号语义——具体迁移由 game/ 配置按同名 `on` 声明。
+  if (StateMachine[nodeEid]) {
+    signalStateMachine(world, nodeEid, FSM_SIGNAL_HARVESTED);
+    if (nodeState.remaining <= 0) {
+      signalStateMachine(world, nodeEid, FSM_SIGNAL_DEPLETED);
+    }
   }
   return true;
 }

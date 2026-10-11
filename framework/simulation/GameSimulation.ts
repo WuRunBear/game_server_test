@@ -28,6 +28,7 @@ import { createMapEvolveDeps } from "map/runtime/evolveDeps";
 import { mapSeedOf } from "map/runtime/mapSeeds";
 import { advanceTickTo, computeOfflineTicks } from "map/runtime/clock";
 import { noopBootDeps, type BootDeps } from "map/runtime/boot";
+import { fastForwardStateMachines } from "framework/simulation/stateMachine/stateMachineSystem";
 import type { Repository, WorldRecord } from "framework/repository";
 import type { ServerRule } from "framework/config/schema/RuleSchema";
 import { computeInterest } from "./interest";
@@ -270,6 +271,9 @@ export class GameSimulation implements SimulationPort {
 
     const fromTick = record.tick;
     this.evolveMaps(fromTick, fromTick + offlineTicks);
+    // 状态机离线快进：迁移步进（非逐 tick）把全部实体状态机推到演化边界，
+    // 落地「读档后状态正确恢复 + 离线等价」——与逐 tick 推进最终状态一致。
+    fastForwardStateMachines(this.world, fromTick + offlineTicks);
     advanceTickTo(this.world, fromTick + offlineTicks);
     this.world.logger.info("offline catch-up complete", {
       savedTick: fromTick,

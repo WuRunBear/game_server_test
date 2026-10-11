@@ -49,6 +49,7 @@ import { Projectile } from "framework/components/projectile";
 import { Modifiers } from "framework/simulation/modifiers/modifiers";
 import { Triggers, initTriggers } from "framework/simulation/triggers/triggers";
 import { ExpiresAt, Interval } from "framework/simulation/timer/timer";
+import { StateMachine, initStateMachine } from "framework/simulation/stateMachine/stateMachine";
 import { Player, Enemy, NPC, Item, Resource } from "framework/components/tags";
 import { Kind } from "framework/components/kind";
 
@@ -334,6 +335,48 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("Interval", Interval, {
     description: "周期定时器：触发周期、下次触发 tick 与剩余次数，由效果/系统在运行时设置。",
   });
+  // 通用状态机（AoS，持久化——当前状态是正式世界状态）：状态图由原型配置声明
+  registry.register("StateMachine", StateMachine, {
+    description: "通用状态机：按配置状态图推进实体的定时/条件/信号迁移（当前状态入档）。",
+    configSchema: z.object({
+      /** 初始状态 id（必须存在于 states）。 */
+      initial: z.string(),
+      /** 状态图：状态 id → { transitions: 迁移声明[] }。 */
+      states: z.record(
+        z.string(),
+        z.object({
+          /** 该状态的迁移声明列表（缺省为空 = 终态）。 */
+          transitions: z
+            .array(
+              z.object({
+                /** 目标状态 id（必须已声明）。 */
+                to: z.string(),
+                /** 定时迁移：进入本状态后经过的 tick 数（≥0）。 */
+                afterTicks: z.number().int().nonnegative().optional(),
+                /** 即时信号迁移：外部信号 id。 */
+                on: z.string().optional(),
+                /** 条件迁移：spawnConditions 注册表条件名。 */
+                condition: z.string().optional(),
+                /** 进入目标状态时求值的效果引用列表。 */
+                effects: z
+                  .array(
+                    z.object({
+                      /** 效果注册名。 */
+                      name: z.string(),
+                      /** 效果参数（标量表）。 */
+                      params: z
+                        .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+                        .optional(),
+                    }),
+                  )
+                  .optional(),
+              }),
+            )
+            .optional(),
+        }),
+      ),
+    }),
+  });
   // 标签（bitecs 空组件）
   registry.register("Player", Player, {
     description: "玩家标签：标记实体为玩家。",
@@ -365,4 +408,5 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.registerAosInitializer("DialogueSource", initDialogueSource);
   registry.registerAosInitializer("Ledger", initLedger);
   registry.registerAosInitializer("Triggers", initTriggers);
+  registry.registerAosInitializer("StateMachine", initStateMachine);
 }

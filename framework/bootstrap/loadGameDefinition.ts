@@ -37,6 +37,7 @@ import {
 import type { PlayerRule } from "framework/config/schema/PlayerRuleSchema";
 import { getRuleSchema } from "framework/config/schema/ruleSchemas";
 import { hasSpawnCondition } from "framework/systems/gameplay/spawnConditions";
+import { compileStateMachine } from "framework/simulation/stateMachine/stateMachine";
 import { WILDERNESS } from "map/generate/blocks/climateRegions";
 import { WALLS_REGION } from "map/generate/blocks/slotRooms";
 import { tiledRegionNames } from "map/generate/blocks/tiledSource";
@@ -493,6 +494,19 @@ function validateIntegrity(data: LoadedGameDefinition): void {
       for (const compName of Object.keys(entity.components)) {
         if (!componentRegistry.has(compName)) {
           throw new Error(`Component "${compName}" referenced by archetype "${entity.kind}" is not registered`);
+        }
+      }
+      // StateMachine 配置编译校验（未知状态 / 无初始状态 / 环状自动迁移在此 fail-fast）
+      const stateMachine = entity.components["StateMachine"];
+      if (stateMachine !== undefined) {
+        try {
+          compileStateMachine(stateMachine);
+        } catch (err) {
+          throw new Error(
+            `Archetype "${entity.kind}" StateMachine config invalid: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
         }
       }
     }

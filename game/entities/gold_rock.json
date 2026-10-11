@@ -7,8 +7,17 @@
       "remaining": 10,
       "max": 10,
       "amountPerHit": 2,
-      "regenMs": 120000,
+      "regenMs": 0,
       "yieldsKind": "stone"
+    },
+    "StateMachine": {
+      "initial": "intact",
+      "states": {
+        "intact": {
+          "transitions": [{ "on": "depleted", "to": "exhausted" }]
+        },
+        "exhausted": {}
+      }
     }
   }
 }

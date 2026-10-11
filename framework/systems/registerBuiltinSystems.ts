@@ -28,6 +28,7 @@ import { registerBuiltinActions } from "framework/ai/registerBuiltinActions";
 import { timerSystem } from "framework/simulation/timer/timerSystem";
 import { triggerSystem } from "framework/simulation/triggers/triggerSystem";
 import { modifierSystem } from "framework/simulation/modifiers/modifierSystem";
+import { stateMachineSystem } from "framework/simulation/stateMachine/stateMachineSystem";
 import { projectileSystem } from "framework/systems/gameplay/projectileSystem";
 
 export function registerBuiltinSystems(
@@ -191,6 +192,14 @@ export function registerBuiltinSystems(
     description: "触发器：固定阶段消费事件总线，按实体 Triggers 声明求值效果。",
     factory: (_world: GameWorld) => triggerSystem,
     after: ["timer"],
+  });
+
+  // 状态机：按配置状态图推进实体的定时/条件迁移（采集等即时信号在动作处同步应用）
+  systemRegistry.register({
+    id: "stateMachine",
+    description: "状态机：按配置状态图推进实体的定时/条件状态迁移（通用 FSM，状态入档）。",
+    factory: (_world: GameWorld) => stateMachineSystem,
+    after: ["gathering"],
   });
 
   // 巢穴：周期在巢周围把 spawnKind 实体补到容量（radiusTiles/maxAttempts 走 systems[].config）
