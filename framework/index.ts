@@ -119,6 +119,9 @@ export {
   type EnvironmentView, type PhaseView, type TileContext, type GroundDerivationFn,
 } from "framework/simulation/worldClock";
 export { registerPopulationModel, getPopulationModel, listPopulationModels, registerBuiltinPopulationModels, type PopulationModel, type PopulationModelContext } from "framework/map/evolution/populationModels";
+export { sameLevelDistance, isGameplayReachable, type GameplayEndpoint, type GameplayLosCheck } from "framework/utils/gameplayDistance";
+export { collectBuiltStructures, collectConnectorLookup, floodSameLevel, getBuiltStructuresEpoch, bumpBuiltStructuresEpoch, emptyBuiltStructuresIndex, type BuiltStructuresIndex, type StructureConnector } from "framework/map/runtime/builtStructures";
+export { spaceExposureAt, isIndoors, entitySpaceExposure, entityIsIndoors, listIndoorEntities, type SpaceExposure, type IndoorsOptions, DEFAULT_MAX_ENCLOSED_AREA } from "framework/map/runtime/indoors";
 export { placeEntity } from "framework/systems/gameplay/placeableSystem";
 export { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";
 export { startDialogue, advanceDialogue, applyDialogueEffect, END_DIALOGUE } from "framework/systems/gameplay/dialogueSystem";

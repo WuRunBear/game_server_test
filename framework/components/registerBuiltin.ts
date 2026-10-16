@@ -37,6 +37,15 @@ import { CraftingStation } from "framework/components/craftingStation";
 import { LightSource } from "framework/components/lightSource";
 import { Placeable } from "framework/components/placeable";
 import { GridOccupancy } from "framework/components/gridOccupancy";
+import {
+  Structure,
+  STRUCTURE_ROLE_NONE,
+  STRUCTURE_ROLE_FLOOR,
+  STRUCTURE_ROLE_WALL,
+  STRUCTURE_ROLE_CONNECTOR,
+  CONNECTOR_DIR_UP,
+  CONNECTOR_DIR_DOWN,
+} from "framework/components/structure";
 import { Portal, initPortal } from "framework/components/portal";
 import { Dialogue } from "framework/components/dialogue";
 import { DialogueSource, initDialogueSource } from "framework/components/dialogueSource";
@@ -260,6 +269,20 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   });
   registry.register("GridOccupancy", GridOccupancy, {
     description: "网格占用：记录实体占据的格组（tile 对齐）；由放置系统在运行时写入。",
+  });
+  registry.register("Structure", Structure, {
+    description:
+      "建造结构角色：楼板（自身层提供可站面、其下一格有顶）/墙（同层挡通行与视线）/层间连接器（声明连接的两层与方向）。挂载实体的层号在放置/生成时显式写入，不随地形推导。",
+    configSchema: z.object({
+      /** 建造角色：0=无 1=楼板 2=墙 3=层间连接器。 */
+      role: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]).optional(),
+      /** 连接器低层号（role=3 时有效）。 */
+      connectLow: z.number().int().min(-128).max(127).optional(),
+      /** 连接器高层号（role=3 时有效）。 */
+      connectHigh: z.number().int().min(-128).max(127).optional(),
+      /** 连接器方向：0=上行（low→high） 1=下行（high→low）。 */
+      connectDir: z.union([z.literal(0), z.literal(1)]).optional(),
+    }),
   });
   // 传送/对话/任务/好感/意图（AoS）
   registry.register("Portal", Portal, {

@@ -1,5 +1,7 @@
 import { query } from "bitecs";
 import { Inventory, Transform, Player, Item, ItemMeta, entityMapOf } from "components";
+import { entityLevelOf } from "framework/components/entityLevel";
+import { isGameplayReachable } from "framework/utils/gameplayDistance";
 import type { GameWorld } from "world";
 import { addToInventory } from "framework/systems/gameplay/inventoryOps";
 import { destroyEntity } from "framework/entities/destroyEntity";
@@ -42,11 +44,16 @@ export function inventorySystem(world: GameWorld): GameWorld {
       if (now < meta.pickupAfterMs) continue;
       if (effectiveMapOf(world, itemEid) !== effectiveMapOf(world, playerEid)) continue;
 
-      const dist = Math.hypot(
-        Transform.x[playerEid] - Transform.x[itemEid],
-        Transform.y[playerEid] - Transform.y[itemEid],
-      );
-      if (dist > 16) continue;
+      // 统一距离检查（前置修正 4）：同层欧氏距离 ≤ 16；异层掉落物不可拾取
+      if (
+        !isGameplayReachable(
+          { x: Transform.x[playerEid], y: Transform.y[playerEid], level: entityLevelOf(playerEid) },
+          { x: Transform.x[itemEid], y: Transform.y[itemEid], level: entityLevelOf(itemEid) },
+          16,
+        )
+      ) {
+        continue;
+      }
 
       const leftover = addToInventory(inv, itemsByKind, meta.kind, meta.count);
       if (leftover <= 0) {

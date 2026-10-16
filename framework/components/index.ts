@@ -23,6 +23,7 @@ export { Cooldown, Duration } from "components/timer";
 // —— 计数账本 / 投射物 ——
 export { Ledger, initLedger, type LedgerRecord } from "components/ledger";
 export { Projectile } from "components/projectile";
+export { Structure, STRUCTURE_ROLE_NONE, STRUCTURE_ROLE_FLOOR, STRUCTURE_ROLE_WALL, STRUCTURE_ROLE_CONNECTOR, CONNECTOR_DIR_UP, CONNECTOR_DIR_DOWN } from "components/structure";
 // —— 标签（bitecs 空组件） ——
 export { Player, Enemy, NPC, Item, Resource, Container } from "components/tags";
 // —— 需求/资源/掉落（AoS 数据组件） ——

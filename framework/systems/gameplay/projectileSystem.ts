@@ -17,9 +17,11 @@ import { hasComponent, query, addComponent, addEntity } from "bitecs";
 import { Projectile, Transform, NetworkId, entityMapOf, EntityMap } from "components";
 import { EntityLevel, entityLevelOf } from "framework/components/entityLevel";
 import { isOfflineRetained } from "components/offline";
+import { sameLevelDistance } from "framework/utils/gameplayDistance";
 import type { GameWorld, EntityId } from "world";
 import { destroyEntity } from "framework/entities/destroyEntity";
 import { walkableAtLevel } from "map/geometry/query";
+import { collectBuiltStructures, type BuiltStructuresIndex } from "framework/map/runtime/builtStructures";
 import { queueEvent } from "framework/simulation/events/eventBus";
 import { setEntityKind } from "framework/systems/gameplay/aiSystem";
 
@@ -62,6 +64,17 @@ export function spawnProjectile(
 /** 投射物 tick 体：移动 → 墙阻挡 → 接触 → 寿命。 */
 export function projectileSystem(world: GameWorld): GameWorld {
   const dtSec = world.time.dtMs / 1000;
+  // 建造层索引按图缓存（本 tick 内复用；楼板参与墙阻挡判定——前置修正 3）
+  const builtByMap = new Map<string, BuiltStructuresIndex>();
+  const builtOf = (mapId: string): BuiltStructuresIndex | undefined => {
+    if (!world.maps[mapId]) return undefined;
+    let built = builtByMap.get(mapId);
+    if (!built) {
+      built = collectBuiltStructures(world, mapId);
+      builtByMap.set(mapId, built);
+    }
+    return built;
+  };
 
   for (const eid of query(world, [Projectile, Transform])) {
     const nx = Transform.x[eid] + Projectile.vx[eid] * dtSec;
@@ -70,12 +83,13 @@ export function projectileSystem(world: GameWorld): GameWorld {
     const level = entityLevelOf(eid);
 
     // 墙阻挡：目标格在投射物层视角下不可走 → 销毁（越界同样销毁；
-    // cliff 格对不高于投射物层号的视角单向可越，与 collisionSystem 同源规则）
+    // cliff 格对不高于投射物层号的视角单向可越，与 collisionSystem 同源规则；
+    // 楼板实体所在格在楼板层视角下可越——楼板不挡同层投射物）
     const geometry = world.maps[mapId];
     if (geometry) {
       const tx = Math.floor(nx / geometry.grid.tileWidth);
       const ty = Math.floor(ny / geometry.grid.tileHeight);
-      if (!walkableAtLevel(geometry, tx, ty, level)) {
+      if (!walkableAtLevel(geometry, tx, ty, level, builtOf(mapId))) {
         destroyEntity(world, eid);
         continue;
       }
@@ -92,9 +106,11 @@ export function projectileSystem(world: GameWorld): GameWorld {
       if (isOfflineRetained(world, other)) continue;
       // 分图隔离：仅与投射物同图实体判定接触（与 combat 同语义）
       if (entityMapOf(world, other) !== mapId) continue;
-      // 按层隔离（锁单层）：异层实体不构成接触目标（跨层射击 v1 不支持）
-      if (entityLevelOf(other) !== level) continue;
-      const d = Math.hypot(Transform.x[other] - nx, Transform.y[other] - ny);
+      // 统一距离检查（前置修正 4）：同层欧氏距离（异层不构成接触目标——
+      // 锁单层语义经 sameLevelDistance 的异层 undefined 表达，原显式层级
+      // 过滤 + Math.hypot 合并为单一判定源）
+      const d = sameLevelDistance(nx, ny, level, Transform.x[other], Transform.y[other], entityLevelOf(other));
+      if (d === undefined) continue;
       if (d <= radius + CONTACT_PADDING) {
         hit = other;
         break;

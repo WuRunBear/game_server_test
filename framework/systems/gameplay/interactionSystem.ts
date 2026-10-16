@@ -1,5 +1,7 @@
 import { query } from "bitecs";
 import { Player, NPC, Transform, Resource, Enemy, Health, Intent, entityMapOf } from "components";
+import { entityLevelOf } from "framework/components/entityLevel";
+import { sameLevelDistance } from "framework/utils/gameplayDistance";
 import type { GameWorld } from "world";
 import { harvest } from "framework/systems/gameplay/gatheringSystem";
 import { attackTarget } from "framework/systems/gameplay/combatSystem";
@@ -64,7 +66,16 @@ export function createInteractionSystem(config?: Record<string, unknown>) {
         let nearestDist = Infinity;
         for (const nodeEid of query(world, [Resource, Transform])) {
           if (effectiveMapOf(world, nodeEid) !== effectiveMapOf(world, playerEid)) continue;
-          const d = Math.hypot(px - Transform.x[nodeEid], py - Transform.y[nodeEid]);
+          // 统一距离检查（前置修正 4）：同层欧氏距离，异层不可交互
+          const d = sameLevelDistance(
+            px,
+            py,
+            entityLevelOf(playerEid),
+            Transform.x[nodeEid],
+            Transform.y[nodeEid],
+            entityLevelOf(nodeEid),
+          );
+          if (d === undefined) continue;
           if (d <= range && d < nearestDist) {
             nearestEid = nodeEid;
             nearestDist = d;
@@ -79,7 +90,16 @@ export function createInteractionSystem(config?: Record<string, unknown>) {
         let nearestDist = Infinity;
         for (const enemyEid of query(world, [Enemy, Health, Transform])) {
           if (effectiveMapOf(world, enemyEid) !== effectiveMapOf(world, playerEid)) continue;
-          const d = Math.hypot(px - Transform.x[enemyEid], py - Transform.y[enemyEid]);
+          // 统一距离检查（前置修正 4）：异层不构成最近目标（射程由 attackTarget 复核）
+          const d = sameLevelDistance(
+            px,
+            py,
+            entityLevelOf(playerEid),
+            Transform.x[enemyEid],
+            Transform.y[enemyEid],
+            entityLevelOf(enemyEid),
+          );
+          if (d === undefined) continue;
           if (d < nearestDist) {
             nearestEid = enemyEid;
             nearestDist = d;
@@ -94,7 +114,16 @@ export function createInteractionSystem(config?: Record<string, unknown>) {
         let nearestDist = Infinity;
         for (const npcEid of query(world, [NPC, Transform])) {
           if (effectiveMapOf(world, npcEid) !== effectiveMapOf(world, playerEid)) continue;
-          const d = Math.hypot(px - Transform.x[npcEid], py - Transform.y[npcEid]);
+          // 统一距离检查（前置修正 4）：同层欧氏距离，异层不可对话
+          const d = sameLevelDistance(
+            px,
+            py,
+            entityLevelOf(playerEid),
+            Transform.x[npcEid],
+            Transform.y[npcEid],
+            entityLevelOf(npcEid),
+          );
+          if (d === undefined) continue;
           if (d <= range && d < nearestDist) {
             nearestEid = npcEid;
             nearestDist = d;

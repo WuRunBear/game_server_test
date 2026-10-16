@@ -13,7 +13,7 @@
  * 池为空（区域不存在/全不可走）时 random/seededRandom 返回 undefined，
  * 由调用方决定回退。
  */
-import { regionOf, walkableAt } from "map/geometry/query";
+import { regionOf, walkableAtLevel } from "map/geometry/query";
 import type { MapGeometry } from "map/geometry/types";
 
 /** 出生点规则（与 PlayerRuleSchema 的 spawn 段结构对齐）。 */
@@ -62,10 +62,13 @@ function tileCenter(geometry: MapGeometry, index: number): { x: number; y: numbe
 function candidateTiles(geometry: MapGeometry, region: string | undefined): number[] {
   const pool: number[] = [];
   for (let i = 0; i < geometry.walkable.length; i++) {
-    if (geometry.walkable[i] !== 1) continue;
+    // 通行判定走 walkableAtLevel 统一查询（前置修正 3）：视角层号取该格
+    // 自身地形层——候选池语义 = 「实体落在本格地形层上可站」，与逐格
+    // walkable=1 全等（cliff 格在其自身层视角下可越，也属可站格）。
+    const tx = i % geometry.grid.width;
+    const ty = Math.floor(i / geometry.grid.width);
+    if (!walkableAtLevel(geometry, tx, ty, geometry.level[i] ?? 0)) continue;
     if (region !== undefined) {
-      const tx = i % geometry.grid.width;
-      const ty = Math.floor(i / geometry.grid.width);
       if (regionOf(geometry, tx, ty) !== region) continue;
     }
     pool.push(i);

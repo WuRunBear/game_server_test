@@ -27,6 +27,11 @@ export const ArchetypeSchema = z.object({
   behavior: z.string().optional(),
   /** 队伍编号（战斗归属判断用；缺省无队伍）。 */
   team: z.number().optional(),
+  /**
+   * 固定层号（离散层）：建造类原型（上层楼板/墙/连接器）声明所在层；
+   * 声明后实体生成即落该层号条目。未声明保持地形推导语义。
+   */
+  level: z.number().int().optional(),
 });
 
 /** 实体原型配置的类型推断（即 game/entities/*.json 数组元素类型）。 */

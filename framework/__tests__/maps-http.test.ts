@@ -173,7 +173,7 @@ describe("地图 HTTP 端点（/maps/runtime 与 /maps/meta）", () => {
   it("/maps/meta：列出全部配置图，字段齐全，kind 为管道首积木名", async () => {
     const meta = await getMeta();
     expect(meta.default).toBe("island");
-    expect(meta.maps.map((m) => m.id)).toEqual(["island", "cave", "tiled-demo", "swamp", "ruins", "highlands", "island-v2"]);
+    expect(meta.maps.map((m) => m.id)).toEqual(["island", "cave", "tiled-demo", "swamp", "ruins", "highlands", "island-v2", "building-demo"]);
     expect(meta.maps).toHaveLength(gameDef.resolvedMapConfigs.length);
 
     // 与测试侧重建几何逐字段一致（顺序 = 配置声明序）
@@ -259,7 +259,7 @@ describe("地图 HTTP 端点（/maps/runtime 与 /maps/meta）", () => {
     expect(res.status).toBe(404);
     const body = (await res.json()) as ErrorBody;
     expect(body.error).toBe("unknown map");
-    expect(body.available).toEqual(["island", "cave", "tiled-demo", "swamp", "ruins", "highlands", "island-v2"]);
+    expect(body.available).toEqual(["island", "cave", "tiled-demo", "swamp", "ruins", "highlands", "island-v2", "building-demo"]);
 
     // 空串视为显式 id（清单中不存在）→ 同样 404
     const empty = await fetch(`${baseUrl}/maps/runtime?mapId=`);

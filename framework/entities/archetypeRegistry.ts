@@ -23,6 +23,12 @@ export interface ArchetypeSpec extends RegistrationMetadata {
   behavior?: string;
   /** 阵营 id（战斗系统按它区分敌我；无则不挂 Team 组件）。 */
   team?: number;
+  /**
+   * 固定层号（离散层）：声明后实体生成即落该层号条目，且（挂 Structure 时）
+   * 不随地形推导——建造类原型（上层楼板/墙/连接器）用其声明所在层；
+   * 未声明保持旧语义（entityLevelSystem 按地形确立）。
+   */
+  level?: number;
 }
 
 export interface ArchetypeRegistry {

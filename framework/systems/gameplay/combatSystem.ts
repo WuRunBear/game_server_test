@@ -1,6 +1,8 @@
 import { hasComponent, query } from "bitecs";
 import { Health, Attack, Defense, Team, Kind, entityMapOf } from "components";
 import { Cooldown, Transform } from "components";
+import { entityLevelOf } from "framework/components/entityLevel";
+import { isGameplayReachable } from "framework/utils/gameplayDistance";
 import type { GameWorld } from "world";
 import { getRuleModule } from "framework/api";
 import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
@@ -95,11 +97,17 @@ export function attackTarget(world: GameWorld, attackerEid: number, targetEid: n
       ? componentRange
       : (rules?.attackRange ?? DEFAULT_ATTACK_RANGE);
 
-  const dist = Math.hypot(
-    Transform.x[attackerEid] - Transform.x[targetEid],
-    Transform.y[attackerEid] - Transform.y[targetEid],
-  );
-  if (dist > attackerRange) return false;
+  // 统一距离检查（前置修正 4，utils/gameplayDistance）：同层欧氏距离 ≤ 射程；
+  // 异层目标不可达（跨层交战 v1 只允许经连接器移动后的同层结算）
+  if (
+    !isGameplayReachable(
+      { x: Transform.x[attackerEid], y: Transform.y[attackerEid], level: entityLevelOf(attackerEid) },
+      { x: Transform.x[targetEid], y: Transform.y[targetEid], level: entityLevelOf(targetEid) },
+      attackerRange,
+    )
+  ) {
+    return false;
+  }
 
   // 攻击力/防御力在基础值（组件 + 装备加成）上叠属性修饰符（apply-status 等）
   const baseAttack = (Attack.value[attackerEid] ?? 10) + getEquipModifiers(world, attackerEid).attackBonus;

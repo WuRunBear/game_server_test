@@ -6,9 +6,15 @@
  *
  * 所有判定均**按指定地图**进行：mapId 决定使用哪张地图的网格/阻挡，
  * 实体过滤也只考虑与该图同图的实体（不同图互不干扰）。
+ *
+ * v2 地图切片 6：三个判定均支持可选层号——提供 `level` 时只在同层判定
+ * （异层实体/异层格组/异层楼板不构成冲突，同格多层共存）；缺省保持旧
+ * 全层语义（既有调用零回归）。
  */
 import { query } from "bitecs";
 import { Collider, ColliderShape, GridOccupancy, Transform, entityMapOf } from "components";
+import { entityLevelOf } from "framework/components/entityLevel";
+import { walkableAtLevel, type BuiltFloorsByLevel } from "map/geometry/query";
 import type { MapGeometry } from "map/geometry/types";
 import type { GameWorld } from "world";
 
@@ -26,7 +32,11 @@ function mapGeometryOf(world: GameWorld, mapId: string): MapGeometry | undefined
   return geometry;
 }
 
-/** 以 (x, y) 为中心、w×h 的矩形是否与 mapId 图上任何带 Collider 实体重叠（圆按包围盒近似）。 */
+/**
+ * 以 (x, y) 为中心、w×h 的矩形是否与 mapId 图上任何带 Collider 实体重叠（圆按包围盒近似）。
+ *
+ * @param level 可选层号：提供时只与同层实体判定（异层不构成放置冲突）
+ */
 export function overlapsAnyEntity(
   world: GameWorld,
   mapId: string,
@@ -34,12 +44,14 @@ export function overlapsAnyEntity(
   y: number,
   w: number,
   h: number,
+  level?: number,
 ): boolean {
   const halfW = w / 2;
   const halfH = h / 2;
 
   for (const eid of query(world, [Transform, Collider])) {
     if (entityMapOf(world, eid) !== mapId) continue;
+    if (level !== undefined && entityLevelOf(eid) !== level) continue;
     const isCircle = Collider.shape[eid] === ColliderShape.Circle;
     const eHalfW = isCircle ? (Collider.radius[eid] ?? 0) : (Collider.halfW[eid] ?? 0);
     const eHalfH = isCircle ? (Collider.radius[eid] ?? 0) : (Collider.halfH[eid] ?? 0);
@@ -89,7 +101,12 @@ export function snapToGrid(
   };
 }
 
-/** 格组 (cellX, cellY, cellW, cellH) 与 mapId 图上任何带 GridOccupancy 实体的格组是否相交。 */
+/**
+ * 格组 (cellX, cellY, cellW, cellH) 与 mapId 图上任何带 GridOccupancy 实体的格组是否相交。
+ *
+ * @param cellLevel 可选占用层号：提供时只与同层格组判定（GridOccupancy.cellLevel；
+ *   未写层号的既有放置物按 0 层参与判定）
+ */
 export function overlapsOccupiedGrid(
   world: GameWorld,
   mapId: string,
@@ -97,9 +114,11 @@ export function overlapsOccupiedGrid(
   cellY: number,
   cellW: number,
   cellH: number,
+  cellLevel?: number,
 ): boolean {
   for (const eid of query(world, [GridOccupancy])) {
     if (entityMapOf(world, eid) !== mapId) continue;
+    if (cellLevel !== undefined && (GridOccupancy.cellLevel[eid] ?? 0) !== cellLevel) continue;
     const ox = GridOccupancy.cellX[eid];
     const oy = GridOccupancy.cellY[eid];
     const ow = GridOccupancy.cellW[eid];
@@ -113,7 +132,13 @@ export function overlapsOccupiedGrid(
   return false;
 }
 
-/** 以 (x, y) 为中心、w×h 的矩形是否压到 mapId 图的地图阻挡格。 */
+/**
+ * 以 (x, y) 为中心、w×h 的矩形是否压到 mapId 图的地图阻挡格。
+ *
+ * @param level 可选层号：提供时按层视角判定（walkableAtLevel：地形 OR 楼板
+ *   建造，cliff 单向语义同源）；缺省保持旧的层级无关 walkable 位判定
+ * @param built 可选建造索引（level 提供时生效；缺省仅地形）
+ */
 export function overlapsMapBlocked(
   world: GameWorld,
   mapId: string,
@@ -121,6 +146,8 @@ export function overlapsMapBlocked(
   y: number,
   w: number,
   h: number,
+  level?: number,
+  built?: BuiltFloorsByLevel,
 ): boolean {
   const map = mapGeometryOf(world, mapId);
   if (!map) return false;
@@ -133,8 +160,14 @@ export function overlapsMapBlocked(
 
   for (let ty = Math.max(0, minTy); ty <= Math.min(height - 1, maxTy); ty += 1) {
     for (let tx = Math.max(0, minTx); tx <= Math.min(width - 1, maxTx); tx += 1) {
-      // walkable=0 即阻挡格（MapGeometry 通行位图语义，与旧 blocked 取反等价）
-      if (map.walkable[ty * width + tx] === 0) return true;
+      const index = ty * width + tx;
+      // 提供层号：walkableAtLevel 统一查询（与投射物/碰撞同源）；
+      // 缺省：walkable=0 即阻挡格（MapGeometry 通行位图语义，与旧 blocked 取反等价）
+      const blocked =
+        level !== undefined
+          ? !walkableAtLevel(map, tx, ty, level, built)
+          : map.walkable[index] === 0;
+      if (blocked) return true;
     }
   }
 

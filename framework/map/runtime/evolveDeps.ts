@@ -32,7 +32,8 @@ import { Kind } from "framework/components/kind";
 import { EntityMap } from "framework/components/entityMap";
 import { footprintOf } from "framework/components/placeable";
 import { spawnEntity } from "framework/entities/spawn";
-import { regionOf } from "map/geometry/query";
+import { regionOf, walkableAtLevel } from "map/geometry/query";
+import { collectBuiltStructures, type BuiltStructuresIndex } from "framework/map/runtime/builtStructures";
 import type { MapGeometry } from "map/geometry/types";
 import type { EvolutionDeps } from "map/evolution/engine";
 import type { GameWorld } from "framework/world";
@@ -58,12 +59,18 @@ function tileOf(geometry: MapGeometry, px: number, py: number): { tx: number; ty
 export function createMapEvolveDeps(world: GameWorld, geometry: MapGeometry, seed: number): EvolutionDeps {
   const { width, height, tileWidth, tileHeight } = geometry.grid;
 
-  // 占用集：tile 线性索引（y*width+x）→ 按 footprint 整矩形登记
-  const occupied = new Set<number>();
+  // 占用集：`${tile 线性索引}:${层号}` → 按 footprint 整矩形登记（v2 切片 6
+  // 起占用按 (格, 层) 判定——同格不同层的建造物共存，如 L0 家具上方的 L1 楼板）
+  const occupied = new Set<string>();
   // 计数索引：`${region}\u0000${kind}` → 实体数（region = 中心 tile 的 regionOf）
   const countsByRegionKind = new Map<string, number>();
   // footprint tile 数按 kind 缓存（同一 kind 的原型规格单次调用内不变）
   const footprintTilesByKind = new Map<string, { wt: number; ht: number }>();
+  // 固定层号按 kind 缓存（原型 level 声明；未声明 undefined = 按地形层）
+  const fixedLevelByKind = new Map<string, number | undefined>();
+  // 建造层索引（本调用开始时投影一次；调用内实体只增不删，新楼板经
+  // registerFootprint 之外的 floors 集合不回流——本调用内楼板落点由占用集排斥）
+  const built: BuiltStructuresIndex = collectBuiltStructures(world, geometry.key);
 
   const toTileIndex = (tx: number, ty: number): number => ty * width + tx;
 
@@ -86,6 +93,20 @@ export function createMapEvolveDeps(world: GameWorld, geometry: MapGeometry, see
   };
 
   /**
+   * kind 原型的落位层号：原型声明 level（建造类）→ 固定层；未声明 → 落位
+   * 中心 tile 的地形层号（既有语义：实体所在格决定其层）。
+   */
+  const levelOfKind = (kind: string, tx: number, ty: number): number => {
+    if (!fixedLevelByKind.has(kind)) {
+      const spec = world.archetypes.has(kind) ? world.archetypes.get(kind) : undefined;
+      fixedLevelByKind.set(kind, spec?.level);
+    }
+    const fixed = fixedLevelByKind.get(kind);
+    if (fixed !== undefined) return fixed;
+    return geometry.level[toTileIndex(tx, ty)] ?? 0;
+  };
+
+  /**
    * kind footprint 以 (tx, ty) 中心 tile 锚定的覆盖矩形（左上角 + tile 数）。
    * 锚定与放置链 snapToGrid 的 tile 中心量化一致：x0 = tx - ⌊(wt-1)/2⌋
    * （奇数尺寸居中、偶数尺寸向右/下扩展；中心 tile 恒在矩形内）。
@@ -95,16 +116,17 @@ export function createMapEvolveDeps(world: GameWorld, geometry: MapGeometry, see
     return { x0: tx - ((wt - 1) >> 1), y0: ty - ((ht - 1) >> 1), wt, ht };
   };
 
-  /** 按 footprint 整矩形登记占用（界外格跳过）。 */
+  /** 按 footprint 整矩形登记占用（界外格跳过；占用键含层号）。 */
   const registerFootprint = (kind: string, tx: number, ty: number): void => {
     const { x0, y0, wt, ht } = rectOf(kind, tx, ty);
+    const level = levelOfKind(kind, tx, ty);
     for (let dy = 0; dy < ht; dy++) {
       const yy = y0 + dy;
       if (yy < 0 || yy >= height) continue;
       for (let dx = 0; dx < wt; dx++) {
         const xx = x0 + dx;
         if (xx < 0 || xx >= width) continue;
-        occupied.add(toTileIndex(xx, yy));
+        occupied.add(`${toTileIndex(xx, yy)}:${level}`);
       }
     }
   };
@@ -140,14 +162,18 @@ export function createMapEvolveDeps(world: GameWorld, geometry: MapGeometry, see
     },
     canPlace: (_mapKey, kind, x, y) => {
       const { x0, y0, wt, ht } = rectOf(kind, x, y);
+      // 落位层号：固定层原型（建造类）按声明层判通行，其余按中心格地形层
+      // （与实体确立层号同源）。逐格通行走 walkableAtLevel（地形 OR 楼板，
+      // 前置修正 3 的统一查询；楼板原型落在其自身层视角下可站的格上）。
+      const level = levelOfKind(kind, x, y);
       for (let dy = 0; dy < ht; dy++) {
         const yy = y0 + dy;
         if (yy < 0 || yy >= height) return false;
         for (let dx = 0; dx < wt; dx++) {
           const xx = x0 + dx;
           if (xx < 0 || xx >= width) return false;
-          if (geometry.walkable[toTileIndex(xx, yy)] !== 1) return false;
-          if (occupied.has(toTileIndex(xx, yy))) return false;
+          if (!walkableAtLevel(geometry, xx, yy, level, built)) return false;
+          if (occupied.has(`${toTileIndex(xx, yy)}:${level}`)) return false;
         }
       }
       return true;

@@ -1,5 +1,7 @@
 import { hasComponent, query } from "bitecs";
 import { CraftingStation, Inventory, Transform } from "components";
+import { entityLevelOf } from "framework/components/entityLevel";
+import { sameLevelDistance } from "framework/utils/gameplayDistance";
 import type { GameWorld } from "world";
 import { addToInventory } from "framework/systems/gameplay/inventoryOps";
 import type { CraftingRecipe } from "framework/config/schema/RuleSchema";
@@ -63,8 +65,17 @@ function hasStationNearby(
   const oy = Transform.y[ownerEid];
   for (const eid of query(world, [CraftingStation, Transform])) {
     if (CraftingStation.stationType[eid] !== stationType) continue;
-    const d = Math.hypot(ox - Transform.x[eid], oy - Transform.y[eid]);
-    if (d <= range) return true;
+    // 统一距离检查（前置修正 4）：同层欧氏距离（历史无同图过滤，保持不变——
+    // 仅收敛距离语义，异层站点不可达）
+    const d = sameLevelDistance(
+      ox,
+      oy,
+      entityLevelOf(ownerEid),
+      Transform.x[eid],
+      Transform.y[eid],
+      entityLevelOf(eid),
+    );
+    if (d !== undefined && d <= range) return true;
   }
   return false;
 }

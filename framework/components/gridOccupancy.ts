@@ -14,6 +14,8 @@ export const GridOccupancy = defineComponent({
   cellX: Types.i32,
   /** 占用格组左上角 Y（tile 索引）。 */
   cellY: Types.i32,
+  /** 占用格组左上角所在层号（离散层，0=地面基准层；v2 切片 6 起格组按层判定）。 */
+  cellLevel: Types.i32,
   /** 占用的列数（沿 X 方向）。 */
   cellW: Types.i32,
   /** 占用的行数（沿 Y 方向）。 */

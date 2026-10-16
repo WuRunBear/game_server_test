@@ -8,7 +8,12 @@ const check2d = require("check2d") as typeof import("check2d");
 import { Collider, ColliderShape, Transform, Velocity } from "components";
 import { entityMapOf } from "framework/components/entityMap";
 import { entityLevelOf } from "framework/components/entityLevel";
-import { distinctLevels, walkableAtLevel } from "map/geometry/query";
+import { distinctLevels, walkableAtLevel, type BuiltFloorsByLevel } from "map/geometry/query";
+import {
+  collectBuiltStructures,
+  getBuiltStructuresEpoch,
+  type BuiltStructuresIndex,
+} from "framework/map/runtime/builtStructures";
 import type { MapGeometry } from "map/geometry/types";
 import type { EntityId, GameWorld } from "world";
 
@@ -111,6 +116,8 @@ type CollisionRuntime = {
   mapBodies: CollisionBody[];
   entityBodies: Map<EntityId, CollisionBody>;
   pairs: CollisionDebugPair[];
+  /** 构建静态体时的建造纪元（楼板增删 → 纪元变化 → 静态体重建）。 */
+  builtEpoch: number;
 };
 
 /** 单图按层的碰撞运行时表：level → CollisionRuntime（每层一个碰撞世界）。 */
@@ -230,18 +237,21 @@ function createMapBody(
  *
  * 阻挡判定走 walkableAtLevel（与 projectile 同源的按层查询）：每层的阻挡 =
  * 该层视角下的不可走格——cliff 格对不高于其层号的视角单向可越（跳下语义），
- * 其余不可走格在任何层都阻挡。合并是纯性能改进（阻挡集合与逐格并集等价，
+ * 其余不可走格在任何层都阻挡；`built` 提供时楼板实体让其所在格在该层可站
+ * （前置修正 3：地形 OR 建造）。合并是纯性能改进（阻挡集合与逐格并集等价，
  * map-block 运行时测试有等价性对照）。
  *
  * @param system check2d 系统
  * @param map 地图几何
  * @param level 该碰撞世界的层号
+ * @param built 建造层楼板索引（可选；缺省仅地形判定）
  * @returns 静态碰撞体列表
  */
 export function buildLevelMapBodies(
   system: Check2dSystem<CollisionBody>,
   map: MapGeometry,
   level: number,
+  built?: BuiltFloorsByLevel,
 ): CollisionBody[] {
   const bodies: CollisionBody[] = [];
   const { width, height, tileWidth, tileHeight } = map.grid;
@@ -250,7 +260,7 @@ export function buildLevelMapBodies(
     let runStart = -1;
     for (let tileX = 0; tileX <= width; tileX += 1) {
       const blocked =
-        tileX < width && !walkableAtLevel(map, tileX, tileY, level);
+        tileX < width && !walkableAtLevel(map, tileX, tileY, level, built);
       if (blocked && runStart < 0) {
         runStart = tileX;
       } else if (!blocked && runStart >= 0) {
@@ -377,6 +387,10 @@ function getCollisionMapSource(world: GameWorld, mapId: string): MapGeometry | u
  * 懒初始化某图某层的碰撞运行时，并把该层视角下的阻挡格（行游程合并）
  * 注册为静态碰撞体。
  *
+ * 静态体的阻挡判定含建造楼板（地形 OR 建造，前置修正 3）：运行时记录构建
+ * 时的建造纪元，楼板增删（纪元递增）后下次访问即重建静态体——实体碰撞体
+ * 缓存保留（墙/连接器是实体体，不随静态体重建）。
+ *
  * @param world ECS World
  * @param mapId 地图 id
  * @param level 层号（碰撞世界分区键）
@@ -390,22 +404,51 @@ function ensureCollisionRuntime(world: GameWorld, mapId: string, level: number):
     runtimeMap.set(mapId, byLevel);
   }
   const existing = byLevel.get(level);
-  if (existing) return existing;
+  const builtEpoch = getBuiltStructuresEpoch(world, mapId);
+  if (existing) {
+    if (existing.builtEpoch !== builtEpoch) {
+      rebuildMapBodies(world, existing, mapId, level, builtEpoch);
+    }
+    return existing;
+  }
 
   const system = new check2d.System<CollisionBody>();
 
   const map = getCollisionMapSource(world, mapId);
-  const mapBodies = map ? buildLevelMapBodies(system, map, level) : [];
+  const built = map ? collectBuiltStructures(world, mapId) : undefined;
+  const mapBodies = map ? buildLevelMapBodies(system, map, level, built) : [];
 
   const runtime: CollisionRuntime = {
     system,
     mapBodies,
     entityBodies: new Map<EntityId, CollisionBody>(),
     pairs: [],
+    builtEpoch,
   };
 
   byLevel.set(level, runtime);
   return runtime;
+}
+
+/**
+ * 重建某图某层运行时的静态碰撞体（建造纪元变化时调用）：移除旧地图体、
+ * 按当前建造索引重建。低频事件（楼板放置/拆除触发，每运行时每 tick 至多
+ * 一次），非热路径。
+ */
+function rebuildMapBodies(
+  world: GameWorld,
+  runtime: CollisionRuntime,
+  mapId: string,
+  level: number,
+  builtEpoch: number,
+): void {
+  const map = getCollisionMapSource(world, mapId);
+  for (const body of runtime.mapBodies) {
+    runtime.system.remove(body);
+  }
+  const built: BuiltStructuresIndex | undefined = map ? collectBuiltStructures(world, mapId) : undefined;
+  runtime.mapBodies = map ? buildLevelMapBodies(runtime.system, map, level, built) : [];
+  runtime.builtEpoch = builtEpoch;
 }
 
 /**

@@ -329,12 +329,20 @@ describe("per-player integration", () => {
     expect(preSave.snapshot.playerMaps.get("sA")).toBe(CAVE_MAP_ID);
     expect(preSave.snapshot.playerMaps.get("sB")).toBe(DEFAULT_MAP_ID);
 
-    // 累计 300ms > 200ms → 自动存档（fire-and-forget 写盘）
+    // 累计 300ms > 200ms → 自动存档（fire-and-forget 写盘）。
     for (let i = 0; i < 6; i++) sim.tick(TICK_MS);
-    let record = null;
-    for (let i = 0; i < 100 && record === null; i++) {
+    // 轮询等待「含两名玩家的自动存档」落盘——开机首存（boot save，无玩家）
+    // 与自动存档共写同一 saveId，读取必须以自动存档为准（时序稳定的等待
+    // 条件，防拿到 boot 快照造成时序脆弱断言）。
+    let record: NonNullable<Awaited<ReturnType<typeof repo.loadWorld>>> | null = null;
+    for (let i = 0; i < 100; i++) {
       record = await repo.loadWorld(SAVE_ID);
-      if (record === null) await new Promise((r) => setTimeout(r, 15));
+      const hasBothPlayers =
+        record !== null &&
+        [nidA, nidB].every((nid) => record!.entities.some((e) => e.networkId === nid));
+      if (record !== null && hasBothPlayers) break;
+      record = null;
+      await new Promise((r) => setTimeout(r, 15));
     }
     expect(record).not.toBeNull();
     // 存档内玩家归属已按 EntityMap 入档（A→cave, B→generated-map）

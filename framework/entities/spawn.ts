@@ -19,6 +19,9 @@ import type { ComponentRegistry } from "framework/components/componentRegistry";
 import { Transform } from "framework/components/transform";
 import { NetworkId } from "framework/components/network";
 import { EntityMap } from "framework/components/entityMap";
+import { EntityLevel } from "framework/components/entityLevel";
+import { Structure, STRUCTURE_ROLE_FLOOR } from "framework/components/structure";
+import { bumpBuiltStructuresEpoch } from "framework/map/runtime/builtStructures";
 import { Player, NPC, Enemy, Item, Resource, Container } from "framework/components/tags";
 import { Team } from "framework/components/combat";
 import { setEntityKind } from "framework/systems/gameplay/aiSystem";
@@ -33,6 +36,11 @@ export interface SpawnOverrides {
   y?: number;
   /** 实体所属地图 id；缺省写 world.defaultMapId（无默认图时为空串）。 */
   mapId?: string;
+  /**
+   * 生成层号（离散层）：显式覆盖原型声明的固定层号（archetype.level）。
+   * 供放置/演化链为建造类实体写入运行时确定的层号（如楼板 = 放置者层 + 1）。
+   */
+  level?: number;
   /** 预留：未来可覆盖原型组件初始值（key = 组件字段名）。 */
   [key: string]: unknown;
 }
@@ -107,8 +115,25 @@ export function spawnEntity(
   // 写实体所属地图标识：显式 overrides.mapId 优先，回退世界默认图（无配置时空串）
   EntityMap[eid] = overrides?.mapId ?? world.defaultMapId;
 
+  // 写固定层号（建造类实体）：显式 overrides.level 优先，回退原型声明的
+  // archetype.level（配置摆放的楼板/墙/连接器）。entityLevelSystem 对挂
+  // Structure 的实体跳过地形推导，本值即该实体恒定层号；未声明则不落条目
+  // （层号由 entityLevelSystem 按地形确立——普通实体语义不变）。
+  const declaredLevel = overrides?.level ?? archetype.level;
+  if (declaredLevel !== undefined) {
+    EntityLevel[eid] = declaredLevel;
+  }
+
   // 写 Kind 组件：AI/行为系统按 kind 路由实体（kind 即原型名）
   setEntityKind(world, eid, archetype.kind);
+
+  // 楼板实体增删改变按层碰撞静态体（地形 OR 建造）→ 递增所在图建造纪元。
+  // 演化/读档路径的楼板（配置摆放/存档恢复）由此覆盖；玩家放置路径在
+  // placeableSystem 另有递增（幂等，重复递增无害）。
+  const structureConfig = archetype.components["Structure"] as { role?: number } | undefined;
+  if (structureConfig?.role === STRUCTURE_ROLE_FLOOR) {
+    bumpBuiltStructuresEpoch(world, EntityMap[eid] ?? "");
+  }
 
   return eid;
 }

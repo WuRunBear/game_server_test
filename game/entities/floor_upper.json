@@ -1,0 +1,10 @@
+{
+  "kind": "floor_upper",
+  "level": 1,
+  "components": {
+    "Size": { "w": 16, "h": 16 },
+    "Placeable": { "footprintW": 16, "footprintH": 16, "canCollide": 0 },
+    "Structure": { "role": 1 },
+    "GridOccupancy": {}
+  }
+}

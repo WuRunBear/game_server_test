@@ -56,33 +56,54 @@ export function walkableAt(geometry: MapGeometry, x: number, y: number): boolean
 }
 
 /**
- * 查询 (x, y) 格在指定层号的通行性（按层视角，v2 地图切片 5）。
+ * 查询 (x, y) 格在指定层号的通行性（按层视角，v2 地图切片 5；切片 6 扩展）。
  *
- * 规则（前置修正 8 的有向语义，地形侧）：
+ * 规则（前置修正 8 的有向语义，地形侧 + 前置修正 3 的建造侧）：
  * - walkable=1 → 可通行（与层无关）；
+ * - 建造侧（`built` 提供时）：该格在该层有楼板实体（结构角色 floor）→
+ *   **可站**（楼板让不可走的地面格在其上一层可站，如水面上的栈桥、
+ *   二层楼板）；
  * - walkable=0 且该格是 cliff 语义格、且格层号 ≤ 查询层号 → **可自上而下
  *   单向越过**（跳下：站在高层的实体可以越过/落经低于自己的崖格；低层
  *   视角下同一格仍不可走，禁止低→高攀爬）；
  * - 其余 walkable=0 → 不可通行（原有 nonWalkable 语义在任何层都阻挡）。
  *
  * 无 levelSemantics 的图（未量化 flat 图）与 walkableAt 完全同判——现有
- * 图零回归。建造层（楼板/墙实体）的通行性在楼层建造切片并线（前置修正 3
- * 的完整 walkableAtLevel = 地形 OR 建造）。
+ * 图零回归。`built` 缺省时只看地形（既有消费方语义不变；建造索引的构建
+ * 见 map/runtime/builtStructures——纯数据投影，本查询保持零 ECS 依赖）。
  *
  * @param geometry 地图几何数据
  * @param x tile 列坐标
  * @param y tile 行坐标
  * @param level 查询视角的层号（实体所在层）
+ * @param built 建造层索引（可选；缺省仅地形判定）
  * @returns 该格在该层视角下可通行时 true；越界时 false
  */
-export function walkableAtLevel(geometry: MapGeometry, x: number, y: number, level: number): boolean {
+export function walkableAtLevel(
+  geometry: MapGeometry,
+  x: number,
+  y: number,
+  level: number,
+  built?: BuiltFloorsByLevel,
+): boolean {
   const index = tileIndexOf(geometry, x, y);
   if (index < 0) return false;
   if (geometry.walkable[index] === 1) return true;
+  if (built?.floors.get(level)?.has(index)) return true;
   const semantics = geometry.levelSemantics;
   if (!semantics) return false;
   if (geometry.tiles[index] !== semantics.cliff) return false;
   return (geometry.level[index] ?? 0) <= level;
+}
+
+/**
+ * 建造层楼板索引的结构化最小类型（按层 → 楼板覆盖 tile 线性索引集）。
+ * 完整建造索引（含墙/连接器与构建器）见 map/runtime/builtStructures；
+ * 本查询只消费楼板位，用结构化类型保持 geometry 层零依赖。
+ */
+export interface BuiltFloorsByLevel {
+  /** level → 楼板覆盖 tile 线性索引集。 */
+  floors: Map<number, Set<number>>;
 }
 
 /**

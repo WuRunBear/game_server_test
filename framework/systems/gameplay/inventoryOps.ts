@@ -11,6 +11,7 @@ import type { GameWorld } from "world";
 import { rngFrom } from "framework/simulation/rng";
 import { Inventory, ItemMeta, Needs, NetworkId, type InventoryEntry, type ItemStack } from "components";
 import { EntityMap, Item, Transform, entityMapOf } from "components";
+import { EntityLevel, entityLevelOf } from "framework/components/entityLevel";
 import { spawnEntity } from "framework/entities/spawn";
 import { applyEffectSpecs } from "framework/simulation/effects/effectRegistry";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
@@ -244,6 +245,11 @@ export function spawnDroppedItem(
   });
 
   EntityMap[eid] = mapId;
+  // 掉落物继承来源实体层号（楼板上掉落落在楼上；无来源条目 = 地形推导旧语义，
+  // flat 图与既有行为全等）
+  if (sourceEid !== undefined) {
+    EntityLevel[eid] = entityLevelOf(sourceEid);
+  }
   ItemMeta[eid] = { kind: stack.kind, count: stack.count, pickupAfterMs };
   return eid;
 }

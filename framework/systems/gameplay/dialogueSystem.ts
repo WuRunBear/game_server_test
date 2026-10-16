@@ -13,6 +13,8 @@
 import { hasComponent, query } from "bitecs";
 
 import { Dialogue, DialogueSource, Kind, NetworkId, Transform, Player, Health, entityMapOf } from "components";
+import { entityLevelOf } from "framework/components/entityLevel";
+import { isGameplayReachable } from "framework/utils/gameplayDistance";
 import type { EntityId, GameWorld } from "world";
 import { acceptQuest, submitQuest } from "framework/systems/gameplay/questSystem";
 import { addRelation } from "framework/systems/gameplay/relation";
@@ -47,14 +49,19 @@ export function startDialogue(
   const src = DialogueSource[npcEid];
   if (!src || !src.treeId) return false;
 
-  // 距离校验（talk 路由同规则源；缺省 48）
+  // 距离校验（talk 路由同规则源；缺省 48）——统一距离检查（前置修正 4）：
+  // 同层欧氏距离，异层 NPC 不可对话
   const rules = world.gameDef.resolvedRules["dialogue"] as DialogueRules | undefined;
   const talkRange = rules?.talkRange ?? range ?? DEFAULT_TALK_RANGE;
-  const dist = Math.hypot(
-    Transform.x[playerEid] - Transform.x[npcEid],
-    Transform.y[playerEid] - Transform.y[npcEid],
-  );
-  if (dist > talkRange) return false;
+  if (
+    !isGameplayReachable(
+      { x: Transform.x[playerEid], y: Transform.y[playerEid], level: entityLevelOf(playerEid) },
+      { x: Transform.x[npcEid], y: Transform.y[npcEid], level: entityLevelOf(npcEid) },
+      talkRange,
+    )
+  ) {
+    return false;
+  }
 
   const tree = dialogueTreeOf(world, src.treeId);
   if (!tree) return false;

@@ -1,5 +1,7 @@
 import { hasComponent, query } from "bitecs";
 import { Perception, Transform, Team, Health, NPC, entityMapOf } from "components";
+import { entityLevelOf } from "framework/components/entityLevel";
+import { sameLevelDistance } from "framework/utils/gameplayDistance";
 import { isOfflineRetained } from "components/offline";
 import { bbSet, BB_PERCEPTION_TARGET, type PerceivedTarget } from "ai/blackboard";
 import { getOrCreateBlackboard } from "framework/systems/gameplay/aiSystem";
@@ -56,10 +58,17 @@ export function perceptionSystem(world: GameWorld): GameWorld {
         if (isOfflineRetained(world, other)) continue;
         // 火光回避：光内目标不可感知
         if (isPointInLight(world, Transform.x[other], Transform.y[other])) continue;
-        const dist = Math.hypot(
-          Transform.x[eid] - Transform.x[other],
-          Transform.y[eid] - Transform.y[other],
+        // 统一距离检查（前置修正 4）：同层欧氏距离，异层不可感知；
+        // dist 经黑板供 BT 条件（InAttackRange）复用，语义与原地 Math.hypot 一致
+        const dist = sameLevelDistance(
+          Transform.x[eid],
+          Transform.y[eid],
+          entityLevelOf(eid),
+          Transform.x[other],
+          Transform.y[other],
+          entityLevelOf(other),
         );
+        if (dist === undefined) continue;
         if (dist <= radius && (!best || dist < best.dist)) {
           best = { eid: other, dist };
         }

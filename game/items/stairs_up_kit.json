@@ -1,0 +1,5 @@
+{
+  "kind": "stairs_up_kit",
+  "maxStack": 1,
+  "place": { "archetype": "stairs_up" }
+}

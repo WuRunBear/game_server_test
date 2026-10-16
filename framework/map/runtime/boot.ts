@@ -157,12 +157,17 @@ function chebyshev(a: { x: number; y: number }, b: { x: number; y: number }): nu
  * ruleIdentity = map|region|kind|mode，身份完全相同的两条规则共享同一选点流
  * 且互相重复补种——配置错误，开机即抛（消息点名重复身份）。
  *
+ * **exact 模式豁免**：exact 规则落点固定（at），不消费选点流——身份相同的
+ * 多条 exact 规则各自落各自的位置，互不干扰（多层建造的配置摆放在同一
+ * 区域对同 kind 反复落位，正是合法用例）。density/template 仍全量去重。
+ *
  * 校验点在静态规则与生态展开产物**合并之后**、本图初始演化之前——单点
  * 覆盖 static-static、expanded-expanded、static-expanded 三类冲突。
  */
 function assertUniqueRuleIdentity(rules: EntityRule[]): void {
   const seen = new Set<string>();
   for (const rule of rules) {
+    if (rule.mode === "exact") continue; // 固定落点不共享选点流，豁免去重
     const identity = ruleIdentity(rule);
     if (seen.has(identity)) {
       throw new Error(`重复规则身份 \`${identity}\`（entity-rules/ecosystems 展开产物冲突）`);
