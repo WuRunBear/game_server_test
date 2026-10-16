@@ -53,7 +53,10 @@ export function buildMapGeometry(config: MapGenerationConfig, registry: Generato
   validateMapGeometry(draft);
 
   // 冻结：draft 仅存在于本函数内部，缓冲直接移交（零拷贝）；
-  // regions Map 插入顺序即 regionOfTile 索引序，原样保留
+  // regions Map 插入顺序即 regionOfTile 索引序，原样保留。
+  // level 归一化：管道未量化（无积木分配 level 缓冲）时补全尺寸的全 0
+  // （flat）——MapGeometry 契约要求 level 与网格等长，消费方无需判空。
+  const total = draft.width * draft.height;
   const grid = {
     width: draft.width,
     height: draft.height,
@@ -65,6 +68,7 @@ export function buildMapGeometry(config: MapGenerationConfig, registry: Generato
     grid,
     tiles: draft.tiles,
     walkable: draft.walkable,
+    level: draft.level.length === total ? draft.level : new Int8Array(total),
     regions: draft.regions,
     regionOfTile: draft.regionOfTile,
     version: "",

@@ -25,6 +25,7 @@ import { AIState, Target, BlackboardRef } from "framework/components/ai";
 import { Inventory, initInventory } from "framework/components/inventory";
 import { ItemMeta } from "framework/components/itemMeta";
 import { EntityMap } from "framework/components/entityMap";
+import { EntityLevel } from "framework/components/entityLevel";
 import { SpawnPoint } from "framework/components/spawnPoint";
 import { Needs, initNeeds } from "framework/components/needs";
 import { ResourceNode, initResourceNode } from "framework/components/resourceNode";
@@ -294,6 +295,12 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   // 地图分区（AoS）：实体所属地图标识，无条目回退 world.defaultMapId
   registry.register("EntityMap", EntityMap, {
     description: "地图归属：实体所属地图 id，由生成链路在运行时写入，无条目回退默认地图。",
+  });
+  // 离散层号（AoS）：实体所在层（0=地面，负层地下预留），无条目视为第 0 层。
+  // 载体先行：无 archetype initializer（运行时层号依赖几何/连接器查询）、
+  // 无 netSync 适配器（跨层移动切片接线）——写入方与消费方在后续切片落地。
+  registry.register("EntityLevel", EntityLevel, {
+    description: "离散层号：实体所在整数层级（0=地面基准层，负层为地下预留），由跨层移动链路在运行时写入，无条目视为第 0 层。",
   });
   // 出生点（AoS）：实体持久化出生落点，由玩家创建链路写入（重生依据，随实体入档）
   registry.register("SpawnPoint", SpawnPoint, {

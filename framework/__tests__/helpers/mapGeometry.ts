@@ -32,6 +32,7 @@ export function makeTestGeometry(options: TestGeometryOptions = {}): MapGeometry
   const total = width * height;
   const tiles = new Uint8Array(total);
   const walkable = new Uint8Array(total);
+  const level = new Int8Array(total);
   const regionOfTile = new Uint16Array(total);
   for (let ty = 0; ty < height; ty++) {
     for (let tx = 0; tx < width; tx++) {
@@ -46,6 +47,7 @@ export function makeTestGeometry(options: TestGeometryOptions = {}): MapGeometry
     grid: { width, height, tileWidth, tileHeight },
     tiles,
     walkable,
+    level,
     regions: new Map(regionNames.map((name) => [name, { name, meta: {} }])),
     regionOfTile,
     version: "",

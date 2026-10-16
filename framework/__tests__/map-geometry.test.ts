@@ -3,15 +3,16 @@
  *
  * 覆盖 geometry 数据层三块能力（计划 todo 1 验收）：
  * - 快照序列化：serialize→deserialize 往返深相等（含 regions Map 与
- *   区域插入顺序），且 serialize 输出为纯 JSON 可序列化形态；
- * - 内容指纹：相同内容版本稳定；grid/tiles/walkable/regions/regionOfTile
- *   任一字段变化即版本变化；key/version 不参与指纹；
+ *   区域插入顺序），且 serialize 输出为纯 JSON 可序列化形态；level
+ *   往返保真（含负层值），旧档快照缺 level 即拒绝读档；
+ * - 内容指纹：相同内容版本稳定；grid/tiles/walkable/level/regions/
+ *   regionOfTile 任一字段变化即版本变化；key/version 不参与指纹；
  * - 地理查询：界内返回正确值；越界坐标返回安全值（false/undefined/0），
  *   永不抛错。
  */
 import { describe, expect, it } from "vitest";
 
-import { regionOf, tileAt, walkableAt } from "map/geometry/query";
+import { levelAt, regionOf, tileAt, walkableAt } from "map/geometry/query";
 import { deserializeGeometry, serializeGeometry } from "map/geometry/snapshot";
 import type { SerializedMapGeometry } from "map/geometry/snapshot";
 import { computeGeometryVersion } from "map/geometry/version";
@@ -23,6 +24,7 @@ import type { MapGeometry, RegionMeta } from "map/geometry/types";
  * 默认 4×4、16px/tile：
  * - tiles 全 1，仅 tiles[0]=2（区分语义 id）；
  * - walkable 全 1，仅 walkable[5]=0（(1,1) 格不可通行）；
+ * - level 全 0（flat 基准，分层行为由分层用例自建非平坦 level）；
  * - regions 插入序：0="wilderness"、1="inner"；首行 4 格 regionOfTile=1（"inner"），
  *   其余 0（"wilderness"）。
  * 每次调用产出全新实例（测试间互不共享可变引用）。
@@ -32,6 +34,7 @@ function makeGeometry(): MapGeometry {
   tiles[0] = 2;
   const walkable = new Uint8Array(16).fill(1);
   walkable[5] = 0;
+  const level = new Int8Array(16);
   const regionOfTile = new Uint16Array(16);
   for (let x = 0; x < 4; x++) regionOfTile[x] = 1;
 
@@ -40,6 +43,7 @@ function makeGeometry(): MapGeometry {
     grid: { width: 4, height: 4, tileWidth: 16, tileHeight: 16 },
     tiles,
     walkable,
+    level,
     regions: new Map<string, RegionMeta>([
       ["wilderness", { name: "wilderness", meta: {} }],
       ["inner", { name: "inner", meta: { weight: 2 } }],
@@ -56,6 +60,7 @@ function cloneGeometry(g: MapGeometry): MapGeometry {
     grid: { ...g.grid },
     tiles: Uint8Array.from(g.tiles),
     walkable: Uint8Array.from(g.walkable),
+    level: Int8Array.from(g.level),
     regions: new Map(
       Array.from(g.regions, ([key, meta]): [string, RegionMeta] => [
         key,
@@ -97,6 +102,40 @@ describe("MapGeometry 快照序列化", () => {
     // 区域插入顺序经 JSON 往返保持，regionOf 解析不受影响
     expect(regionOf(restored, 0, 0)).toBe("inner");
     expect(regionOf(restored, 2, 2)).toBe("wilderness");
+  });
+
+  it("POSITIVE：level 快照往返保真（非平坦 + 负层值，Int8Array 复原）", () => {
+    const geometry = makeGeometry();
+    // 非平坦层号：含负层（地下预留）与正层
+    geometry.level[0] = 3;
+    geometry.level[5] = -1;
+    geometry.level[15] = 2;
+
+    const snapshot = serializeGeometry(geometry);
+    expect(snapshot.level).toBeInstanceOf(Array);
+    expect(snapshot.level[5]).toBe(-1);
+
+    // 纯 JSON 可序列化：经真实 JSON 往返后仍能还原
+    const json: SerializedMapGeometry = JSON.parse(JSON.stringify(snapshot));
+    const restored = deserializeGeometry(json);
+
+    expect(restored.level).toBeInstanceOf(Int8Array);
+    expect(Array.from(restored.level)).toEqual(Array.from(geometry.level));
+    expect(restored).toEqual(geometry);
+    // levelAt 直查与快照前一致
+    expect(levelAt(restored, 0, 0)).toBe(3);
+    expect(levelAt(restored, 1, 1)).toBe(-1);
+    expect(levelAt(restored, 3, 3)).toBe(2);
+  });
+
+  it("NEGATIVE：快照缺 level 字段（旧档）→ deserializeGeometry 抛错拒绝读档", () => {
+    const geometry = makeGeometry();
+    const legacy = JSON.parse(JSON.stringify(serializeGeometry(geometry))) as Record<string, unknown>;
+    delete legacy.level; // 模拟 level 进快照之前的旧存档
+
+    expect(() => deserializeGeometry(legacy as unknown as SerializedMapGeometry)).toThrowError(
+      /missing the "level" field/,
+    );
   });
 });
 
@@ -152,6 +191,18 @@ describe("computeGeometryVersion 内容指纹", () => {
     expect(computeGeometryVersion(mutated)).not.toBe(computeGeometryVersion(base));
   });
 
+  it("POSITIVE：level 变化 → 版本变化（level 必须参与指纹，防同 version 不同 level 的无声错配）", () => {
+    const base = makeGeometry();
+    const mutated = cloneGeometry(base);
+    mutated.level[15] = 1;
+
+    expect(computeGeometryVersion(mutated)).not.toBe(computeGeometryVersion(base));
+
+    // 同 level 同指纹：变异复原后与基准一致
+    mutated.level[15] = 0;
+    expect(computeGeometryVersion(mutated)).toBe(computeGeometryVersion(base));
+  });
+
   it("POSITIVE：key 与 version 字段不参与指纹", () => {
     const base = makeGeometry();
     const mutated = cloneGeometry(base);
@@ -172,6 +223,29 @@ describe("地理查询越界安全", () => {
     expect(regionOf(geometry, 2, 2)).toBe("wilderness");
     expect(tileAt(geometry, 0, 0)).toBe(2);
     expect(tileAt(geometry, 1, 1)).toBe(1);
+    // flat 基准：level 全 0
+    expect(levelAt(geometry, 0, 0)).toBe(0);
+  });
+
+  it("POSITIVE：levelAt 界内取值与越界安全（负层值原样返回，越界回退 0 不抛错）", () => {
+    const geometry = makeGeometry();
+    geometry.level[6] = -2; // (2,1)
+    geometry.level[9] = 3; // (1,2)
+
+    expect(levelAt(geometry, 2, 1)).toBe(-2);
+    expect(levelAt(geometry, 1, 2)).toBe(3);
+
+    const outOfBounds: Array<[number, number]> = [
+      [-1, 0],
+      [0, -1],
+      [4, 0],
+      [0, 4],
+      [-1, -1],
+      [100, 100],
+    ];
+    for (const [x, y] of outOfBounds) {
+      expect(levelAt(geometry, x, y)).toBe(0);
+    }
   });
 
   it("POSITIVE：越界坐标返回安全值不抛错（负值/超宽/超高）", () => {

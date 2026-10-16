@@ -80,6 +80,7 @@ function makeGeometry(): MapGeometry {
     grid: { width: 6, height: 6, tileWidth: 16, tileHeight: 16 },
     tiles: new Uint8Array(36).fill(1),
     walkable,
+    level: new Int8Array(36),
     regions: new Map<string, RegionMeta>([
       ["plain", { name: "plain", meta: {} }],
       ["cove", { name: "cove", meta: {} }],

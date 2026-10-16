@@ -86,3 +86,19 @@ export function tileAt(geometry: MapGeometry, x: number, y: number): number {
   const index = tileIndexOf(geometry, x, y);
   return geometry.tiles[index] ?? 0;
 }
+
+/**
+ * 查询 (x, y) 格的离散层号。
+ *
+ * 层是纯序数（0 = 地面基准层，负层为地下预留），没有物理高度；跨层判定
+ * 由消费方（移动/碰撞/视线）按「比大小 + 判相邻」组合本查询实现。
+ *
+ * @param geometry 地图几何数据
+ * @param x tile 列坐标
+ * @param y tile 行坐标
+ * @returns 该格 level；越界时 0
+ */
+export function levelAt(geometry: MapGeometry, x: number, y: number): number {
+  const index = tileIndexOf(geometry, x, y);
+  return geometry.level[index] ?? 0;
+}

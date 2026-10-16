@@ -47,6 +47,7 @@ function fnv1a32Hex(bytes: Uint8Array): string {
  *   grid: { width, height, tileWidth, tileHeight },
  *   tiles: [语义id, ...],        // 行主序展平
  *   walkable: [0|1, ...],        // 行主序展平
+ *   level: [层号, ...],          // 行主序展平（Int8，负层 = 地下预留）
  *   regions: [{ key, name, meta }, ...],  // Map 插入顺序（即 regionOfTile 索引序）
  *   regionOfTile: [区域索引, ...],         // 行主序展平
  * }
@@ -55,6 +56,8 @@ function fnv1a32Hex(bytes: Uint8Array): string {
  * 说明：
  * - regions 以条目数组（插入顺序）参与序列化——插入顺序决定 regionOfTile
  *   的解释，属于内容的一部分，顺序变化即版本变化；
+ * - level 必须参与指纹：漏加会出现「同 version 不同 level」的缓存/存档
+ *   无声错配（写回入口重算指纹时同样经本函数，天然覆盖 level）；
  * - key 与 version 不参与（见 GeometryVersionInput）；
  * - 选择 JSON.stringify 而非手工字节拼接，理由同旧 computeMapVersion：
  *   规范对象形状直观可审计，键序在本函数内显式固定。
@@ -72,6 +75,7 @@ export function computeGeometryVersion(geometry: GeometryVersionInput): string {
     },
     tiles: Array.from(geometry.tiles),
     walkable: Array.from(geometry.walkable),
+    level: Array.from(geometry.level),
     regions: Array.from(geometry.regions.entries()).map(([key, meta]) => ({
       key,
       name: meta.name,

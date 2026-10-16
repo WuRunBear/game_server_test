@@ -55,6 +55,7 @@ function makeGeometry(): MapGeometry {
     grid: { width: size, height: size, tileWidth: 16, tileHeight: 16 },
     tiles: new Uint8Array(size * size).fill(1),
     walkable: new Uint8Array(size * size).fill(1),
+    level: new Int8Array(size * size),
     regions: new Map<string, RegionMeta>([["den", { name: "den", meta: {} }]]),
     regionOfTile: new Uint16Array(size * size), // 全 0 = den
     version: "node-test",

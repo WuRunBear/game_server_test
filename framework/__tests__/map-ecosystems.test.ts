@@ -52,6 +52,7 @@ function makeSplitGeometry(key: string, alphaCount: number): MapGeometry {
     grid: { width: 4, height: 4, tileWidth: 16, tileHeight: 16 },
     tiles: new Uint8Array(total).fill(1),
     walkable: new Uint8Array(total).fill(1),
+    level: new Int8Array(total),
     regions,
     regionOfTile,
     version: "eco-test-fingerprint",

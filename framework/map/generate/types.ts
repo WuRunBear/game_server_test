@@ -20,6 +20,9 @@ import type { Rng } from "map/generate/rng";
  * 字段与 MapGeometry 一一对应（grid 摊平为四个标量），全部可变：
  * - 首个积木负责设定 width/height/tileWidth/tileHeight 并分配
  *   tiles/walkable/regionOfTile 缓冲（长度 = width × height，行主序）；
+ * - level 为离散层号缓冲（Int8，行主序）：不强制由尺寸积木分配——量化类
+ *   积木（quantize-terrain）按需分配并写入；管道未量化时冻结归一化为
+ *   全 0（flat），见 buildMapGeometry；
  * - regions 为「区域名 → 元信息」Map，插入顺序即 regionOfTile 的索引序；
  * - key 为地图稳定标识，冻结时原样带入 MapGeometry；
  * - aux 为积木间结构化中间产物暂存池：仅存在于 buildMapGeometry 执行期，
@@ -40,6 +43,8 @@ export interface GeometryDraft {
   tiles: Uint8Array;
   /** 每格通行位图（行主序展平，1=可通行，0=不可通行）。 */
   walkable: Uint8Array;
+  /** 每格离散层号（行主序展平，Int8 有符号；未量化时长度 0，冻结归一化为全 0）。 */
+  level: Int8Array;
   /** 区域名 → 区域元信息（插入顺序即 regionOfTile 的索引序）。 */
   regions: Map<string, RegionMeta>;
   /** 每格所属区域的索引（行主序展平，指向 regions 的插入顺序）。 */
@@ -68,6 +73,7 @@ export function createGeometryDraft(key: string): GeometryDraft {
     tileHeight: 0,
     tiles: new Uint8Array(0),
     walkable: new Uint8Array(0),
+    level: new Int8Array(0),
     regions: new Map<string, RegionMeta>(),
     regionOfTile: new Uint16Array(0),
     aux: new Map<string, unknown>(),
