@@ -3,7 +3,9 @@
  *
  * 职责：
  * - `serializeWorld`：把 ECS world 的全部持久状态导出为纯 JSON（WorldRecord，
- *   含全部已构建图的地理快照 maps——与实体同盘）
+ *   含全部已构建图的地理快照 maps——与实体同盘；地形写回复切片起单图条目
+ *   增量优先：登记了出厂底板且有未超阈修改的图写稀疏修改项，其余走现行
+ *   全量快照）
  * - `restoreWorld`：按 WorldRecord 恢复实体与全局时刻（tick/timeOfDay）并把
  *   快照图接入激活集（幂等，先清空当前实体；world.maps 回填归 bootMaps）
  *
@@ -25,6 +27,12 @@ import { Player } from "framework/components/tags";
 import { spawnEntity } from "framework/entities/spawn";
 import { destroyEntity } from "framework/entities/destroyEntity";
 import { serializeGeometry, type SerializedMapGeometry } from "map/geometry/snapshot";
+import {
+  computeTileModifications,
+  exceedsDeltaThreshold,
+  type SerializedMapDelta,
+} from "map/geometry/delta";
+import { terrainBaselineOf } from "map/runtime/terrainWriteback";
 import { getMapSeeds } from "map/runtime/mapSeeds";
 import type { GameWorld } from "framework/world";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
@@ -99,6 +107,30 @@ function serializeEntity(
   return { networkId: NetworkId.value[eid], kind: Kind[eid] ?? "", components };
 }
 
+/**
+ * 单图快照条目序列化（地形写回复切片起增量优先）：
+ * - 登记了出厂底板且存在修改、且修改数未超阈值 → 增量条目
+ *   （SerializedMapDelta：稀疏终态修改项 + 底板指纹——底板由读档按 seed 重算，
+ *   不重复落盘）；
+ * - 无底板（全量回填路径）、零修改、修改数超阈值（>10% tiles，降级）→ 现行
+ *   全量条目（serializeGeometry）。零修改也走全量：保持「键集 = 已构建图键集」
+ *   且全量条目读档即逐字节还原（现行读档契约不变）。
+ */
+function serializeMapEntry(
+  world: GameWorld,
+  key: string,
+  geometry: Parameters<typeof serializeGeometry>[0],
+): SerializedMapGeometry | SerializedMapDelta {
+  const baseline = terrainBaselineOf(world, key);
+  if (baseline) {
+    const modifications = computeTileModifications(geometry, baseline);
+    if (modifications.length > 0 && !exceedsDeltaThreshold(modifications.length, geometry)) {
+      return { format: "delta", key, baseVersion: baseline.version, modifications };
+    }
+  }
+  return serializeGeometry(geometry);
+}
+
 /** 导出世界为纯 JSON 存档（含全部已构建图的地理快照——maps 与实体同盘）。 */
 export function serializeWorld(world: GameWorld, id: string): WorldRecord {
   const registry = world.components_registry;
@@ -106,9 +138,9 @@ export function serializeWorld(world: GameWorld, id: string): WorldRecord {
   for (const eid of query(world, [NetworkId])) {
     entities.push(serializeEntity(world, eid, registry));
   }
-  const maps: Record<string, SerializedMapGeometry> = {};
+  const maps: Record<string, SerializedMapGeometry | SerializedMapDelta> = {};
   for (const [key, geometry] of Object.entries(world.maps)) {
-    maps[key] = serializeGeometry(geometry);
+    maps[key] = serializeMapEntry(world, key, geometry);
   }
   // 每图 seed 解析结果固化进存档（bootMaps 两条开机分支写入弱表；读档路径
   // 据此恢复演化选点流——快照回填不重建几何，但演化流须与存档世界同 seed）

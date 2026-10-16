@@ -4,10 +4,13 @@
  * bootMaps 是「有没有存档」这一分支的**唯一**归属地（其余模块零开机分支）：
  * - 无档：逐图 buildMapGeometry → 出口校验 → 初始演化 evolve(0 → initialAgeTicks)，
  *   推进 world.time.tick 到最大初始年龄，组装首个 WorldRecord（maps 与实体
- *   同盘）交 deps.saveRecord（saveId 未定义时由 deps 侧 no-op）；
- * - 有档：逐图判定——快照含该 key 则反序列化回填（结构完整性校验，截断/
- *   缺字段抛错）；快照缺该 key（配置新增图）则走生成+校验+初始演化；
- *   快照中配置已删的 key 自然丢弃（只按 config 键加载）。
+ *   同盘）交 deps.saveRecord（saveId 未定义时由 deps 侧 no-op）；生成产物
+ *   同时登记出厂底板（内存驻留，供存档 diff——地形写回复切片）。
+ * - 有档：逐图判定——快照含该 key 则按条目形态回填：全量条目反序列化回填
+ *   （结构完整性校验，截断/缺字段抛错）；增量条目（format:"delta"）种子重算
+ *   出厂底板 → 指纹比对（不一致拒绝读档）→ 叠加稀疏终态修改项；快照缺该
+ *   key（配置新增图）则走生成+校验+初始演化；快照中配置已删的 key 自然丢弃
+ *   （只按 config 键加载）。
  *
  * 职责单一：bootMaps 只拥有 map 快照回填与开机分支；实体/tick/timeOfDay
  * 恢复归 restoreWorld（持久化切换 todo）。全部配置图加入 world.activeMaps
@@ -28,7 +31,13 @@
  */
 import { buildMapGeometry } from "map/generate/pipeline";
 import { validateMapGeometry } from "map/generate/validate";
-import { deserializeGeometry } from "map/geometry/snapshot";
+import { deserializeGeometry, type SerializedMapGeometry } from "map/geometry/snapshot";
+import {
+  applyTileModifications,
+  type SerializedMapDelta,
+} from "map/geometry/delta";
+import { computeGeometryVersion } from "map/geometry/version";
+import { registerTerrainBaseline } from "map/runtime/terrainWriteback";
 import { walkableAt } from "map/geometry/query";
 import type { MapGeometry } from "map/geometry/types";
 import { evolve } from "map/evolution/engine";
@@ -41,6 +50,7 @@ import { advanceTickTo } from "map/runtime/clock";
 import { serializeWorld } from "framework/persistence/worldSerializer";
 import { createLogger } from "framework/utils/logger";
 import type { GameWorld } from "framework/world";
+import type { GeneratorRegistry } from "framework/map/generate/generatorRegistry";
 import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
 import type { MapConfig } from "framework/config/schema/MapRegistrySchema";
 import type { WorldRecord } from "framework/repository";
@@ -153,6 +163,47 @@ function chebyshev(a: { x: number; y: number }, b: { x: number; y: number }): nu
 }
 
 /**
+ * 判定快照条目形态：format:"delta" 为增量条目，其余（无 format 字段）为
+ * 现行全量快照。
+ */
+function isDeltaMapEntry(
+  snapshot: SerializedMapGeometry | SerializedMapDelta,
+): snapshot is SerializedMapDelta {
+  return "format" in snapshot && snapshot.format === "delta";
+}
+
+/**
+ * 增量地图快照回填（地形写回复切片）：种子重算出厂底板 → 底板指纹比对
+ * （不一致**拒绝读档**——配置/种子漂移显式报错，沿用「旧档直接废弃」立场，
+ * 不迁移）→ 一致则把稀疏终态修改项原地叠加到底板数组并重算内容指纹。
+ *
+ * 出厂底板（重算产物）在**叠加前**登记进内存基线表——本 world 后续存档的
+ * diff 基准与首次生成路径一致（再存档产出同一组修改项，幂等）。修改项的
+ * 值域/索引范围硬校验在 applyTileModifications 内；图级结构约束（含分层
+ * 可达性）由调用方的 validateMapGeometry 统一兜底。
+ *
+ * @throws Error 底板指纹不匹配（读档被拒绝）或修改项畸形
+ */
+function restoreDeltaGeometry(
+  world: GameWorld,
+  config: MapConfig,
+  seed: number,
+  entry: SerializedMapDelta,
+  registry: GeneratorRegistry,
+): MapGeometry {
+  const factory = buildMapGeometry({ key: config.key, seed, pipeline: config.pipeline }, registry);
+  if (factory.version !== entry.baseVersion) {
+    throw new Error(
+      `map "${config.key}": save baseVersion "${entry.baseVersion}" does not match the factory geometry regenerated from seed (${factory.version}) — map config or seed drifted since the save; the save is rejected (delete the save file and reboot)`,
+    );
+  }
+  registerTerrainBaseline(world, config.key, factory);
+  applyTileModifications(factory, entry.modifications);
+  factory.version = computeGeometryVersion(factory);
+  return factory;
+}
+
+/**
  * 重复规则身份校验（map-system 设计 §5.4 修复项 3，schema.ts 遗留 todo）：
  * ruleIdentity = map|region|kind|mode，身份完全相同的两条规则共享同一选点流
  * 且互相重复补种——配置错误，开机即抛（消息点名重复身份）。
@@ -228,8 +279,16 @@ export function bootMaps(world: GameWorld, gameDef: LoadedGameDefinition, deps: 
     let geometry: MapGeometry;
     const snapshot = snapshotMaps?.[config.key];
     if (snapshot) {
-      // 快照回填：反序列化后做结构完整性校验（截断/缺字段在此抛错）
-      geometry = deserializeGeometry(snapshot);
+      if (isDeltaMapEntry(snapshot)) {
+        // 增量回填（地形写回复切片）：种子重算出厂底板 → 指纹比对（不一致
+        // 拒绝读档）→ 叠加稀疏终态修改项 → 重算指纹。出厂底板在叠加前登记
+        // （后续存档 diff 基准与首次生成路径一致）。
+        geometry = restoreDeltaGeometry(world, config, seed, snapshot, registry);
+      } else {
+        // 快照回填：反序列化后做结构完整性校验（截断/缺字段在此抛错）。
+        // 全量条目不登记出厂底板——出厂底板未知，该图存档恒走全量格式。
+        geometry = deserializeGeometry(snapshot);
+      }
       validateMapGeometry(geometry);
       world.maps[config.key] = geometry;
     } else {
@@ -237,6 +296,9 @@ export function bootMaps(world: GameWorld, gameDef: LoadedGameDefinition, deps: 
       // 时随机值同样参与几何生成）→ 出口校验（buildMapGeometry 内置）
       geometry = buildMapGeometry({ key: config.key, seed, pipeline: config.pipeline }, registry);
       world.maps[config.key] = geometry;
+      // 出厂底板登记（内存驻留，不持久化）：存档时对当前数组 diff 出稀疏
+      // 修改项（地形写回复切片）；须在初始演化/任何写回之前捕获
+      registerTerrainBaseline(world, config.key, geometry);
     }
 
     // 生态声明层展开（B1 编译器模式）：density 声明需查区域面积，几何在

@@ -15,7 +15,8 @@ import { bootstrapFramework, createDefaultGameDefinition, createGameInstance } f
 import { getMapSeeds } from "map/runtime/mapSeeds";
 import { evolve } from "map/evolution/engine";
 import { createMapEvolveDeps } from "map/runtime/evolveDeps";
-import { serializeGeometry, type SerializedMapGeometry } from "map/geometry/snapshot";
+import { serializeGeometry } from "map/geometry/snapshot";
+import type { SerializedMapEntry } from "framework/repository";
 import { Kind } from "framework/components/kind";
 import { Transform } from "framework/components/transform";
 import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
@@ -67,14 +68,14 @@ function buildDef(seed?: number): LoadedGameDefinition {
   return def;
 }
 
-function snapshotMapsOf(world: GameWorld): Record<string, SerializedMapGeometry> {
+function snapshotMapsOf(world: GameWorld): Record<string, SerializedMapEntry> {
   return Object.fromEntries(
     Object.entries(world.maps).map(([key, geometry]) => [key, serializeGeometry(geometry)]),
   );
 }
 
 function makeRecord(
-  maps: Record<string, SerializedMapGeometry>,
+  maps: Record<string, SerializedMapEntry>,
   tick: number,
   mapSeeds?: Record<string, number>,
 ): WorldRecord {
@@ -135,7 +136,7 @@ describe("新档随机种子入口（mapSeeds）", () => {
 
   it("读档分支：seed 取快照固化值（弱表 = record.mapSeeds），几何按快照回填", () => {
     // 先做一次开机拿到几何快照（作为读档输入），再以手工 mapSeeds 读档
-    let snapshotMaps: Record<string, SerializedMapGeometry> | undefined;
+    let snapshotMaps: Record<string, SerializedMapEntry> | undefined;
     createGameInstance(buildDef(1), {
       loadRecord: () => null,
       saveRecord: (record) => {
@@ -152,7 +153,7 @@ describe("新档随机种子入口（mapSeeds）", () => {
   });
 
   it("旧格式存档（无 mapSeeds 字段）：回退配置 seed", () => {
-    let snapshotMaps: Record<string, SerializedMapGeometry> | undefined;
+    let snapshotMaps: Record<string, SerializedMapEntry> | undefined;
     createGameInstance(buildDef(1), {
       loadRecord: () => null,
       saveRecord: (record) => {
@@ -169,7 +170,7 @@ describe("新档随机种子入口（mapSeeds）", () => {
   });
 
   it("演化流同源：同一 record 两次读档开机 → 同 seed 同选点流（逐格一致）；换 seed 则不同", () => {
-    let snapshotMaps: Record<string, SerializedMapGeometry> | undefined;
+    let snapshotMaps: Record<string, SerializedMapEntry> | undefined;
     createGameInstance(buildDef(1), {
       loadRecord: () => null,
       saveRecord: (record) => {

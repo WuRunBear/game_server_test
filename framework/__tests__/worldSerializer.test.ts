@@ -18,7 +18,7 @@ import {
   createGameSimulation,
   serializeWorld,
 } from "framework/index";
-import { serializeGeometry } from "map/geometry/snapshot";
+import { serializeGeometry, type SerializedMapGeometry } from "map/geometry/snapshot";
 import { memoryRepository } from "./helpers/persistence";
 import type { WorldRecord } from "framework/repository";
 import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
@@ -86,7 +86,8 @@ describe("worldSerializer 快照入档", () => {
 
   it("快照截断（walkable 数组切短）→ 启动抛结构错误，绝不静默加载", async () => {
     const entries = Object.entries(suite.record.maps ?? {});
-    const [key, snapshot] = entries[0];
+    // 首存记录（零修改）恒为全量条目——断言面按全量形态收窄
+    const [key, snapshot] = entries[0] as [string, SerializedMapGeometry];
     const corrupted: WorldRecord = {
       ...suite.record,
       maps: {
@@ -105,7 +106,7 @@ describe("worldSerializer 快照入档", () => {
 
   it("快照缺字段（缺 tiles）→ 启动抛错，绝不静默加载", async () => {
     const entries = Object.entries(suite.record.maps ?? {});
-    const [key, snapshot] = entries[0];
+    const [key, snapshot] = entries[0] as [string, SerializedMapGeometry];
     const corrupted = {
       ...suite.record,
       maps: {

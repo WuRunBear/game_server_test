@@ -14,6 +14,7 @@ import {
   getBuiltStructuresEpoch,
   type BuiltStructuresIndex,
 } from "framework/map/runtime/builtStructures";
+import { getTerrainEpoch } from "framework/map/runtime/terrainWriteback";
 import type { MapGeometry } from "map/geometry/types";
 import type { EntityId, GameWorld } from "world";
 
@@ -118,6 +119,8 @@ type CollisionRuntime = {
   pairs: CollisionDebugPair[];
   /** 构建静态体时的建造纪元（楼板增删 → 纪元变化 → 静态体重建）。 */
   builtEpoch: number;
+  /** 构建静态体时的地形纪元（写回入口改 tiles/walkable → 纪元变化 → 静态体重建）。 */
+  terrainEpoch: number;
 };
 
 /** 单图按层的碰撞运行时表：level → CollisionRuntime（每层一个碰撞世界）。 */
@@ -388,8 +391,9 @@ function getCollisionMapSource(world: GameWorld, mapId: string): MapGeometry | u
  * 注册为静态碰撞体。
  *
  * 静态体的阻挡判定含建造楼板（地形 OR 建造，前置修正 3）：运行时记录构建
- * 时的建造纪元，楼板增删（纪元递增）后下次访问即重建静态体——实体碰撞体
- * 缓存保留（墙/连接器是实体体，不随静态体重建）。
+ * 时的建造纪元与地形纪元，任一变化即重建静态体——楼板增删（建造纪元递增）
+ * 或地形写回（地形纪元递增，见 map/runtime/terrainWriteback）后下次访问即
+ * 重建；实体碰撞体缓存保留（墙/连接器是实体体，不随静态体重建）。
  *
  * @param world ECS World
  * @param mapId 地图 id
@@ -405,9 +409,10 @@ function ensureCollisionRuntime(world: GameWorld, mapId: string, level: number):
   }
   const existing = byLevel.get(level);
   const builtEpoch = getBuiltStructuresEpoch(world, mapId);
+  const terrainEpoch = getTerrainEpoch(world, mapId);
   if (existing) {
-    if (existing.builtEpoch !== builtEpoch) {
-      rebuildMapBodies(world, existing, mapId, level, builtEpoch);
+    if (existing.builtEpoch !== builtEpoch || existing.terrainEpoch !== terrainEpoch) {
+      rebuildMapBodies(world, existing, mapId, level, builtEpoch, terrainEpoch);
     }
     return existing;
   }
@@ -424,6 +429,7 @@ function ensureCollisionRuntime(world: GameWorld, mapId: string, level: number):
     entityBodies: new Map<EntityId, CollisionBody>(),
     pairs: [],
     builtEpoch,
+    terrainEpoch,
   };
 
   byLevel.set(level, runtime);
@@ -431,9 +437,9 @@ function ensureCollisionRuntime(world: GameWorld, mapId: string, level: number):
 }
 
 /**
- * 重建某图某层运行时的静态碰撞体（建造纪元变化时调用）：移除旧地图体、
- * 按当前建造索引重建。低频事件（楼板放置/拆除触发，每运行时每 tick 至多
- * 一次），非热路径。
+ * 重建某图某层运行时的静态碰撞体（建造/地形纪元变化时调用）：移除旧地图体、
+ * 按当前建造索引与地形重建。低频事件（楼板放置/拆除、地形写回触发，每运行时
+ * 每 tick 至多一次），非热路径。
  */
 function rebuildMapBodies(
   world: GameWorld,
@@ -441,6 +447,7 @@ function rebuildMapBodies(
   mapId: string,
   level: number,
   builtEpoch: number,
+  terrainEpoch: number,
 ): void {
   const map = getCollisionMapSource(world, mapId);
   for (const body of runtime.mapBodies) {
@@ -449,6 +456,7 @@ function rebuildMapBodies(
   const built: BuiltStructuresIndex | undefined = map ? collectBuiltStructures(world, mapId) : undefined;
   runtime.mapBodies = map ? buildLevelMapBodies(runtime.system, map, level, built) : [];
   runtime.builtEpoch = builtEpoch;
+  runtime.terrainEpoch = terrainEpoch;
 }
 
 /**
