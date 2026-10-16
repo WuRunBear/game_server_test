@@ -50,6 +50,7 @@
       { "component": "Size", "fields": ["w", "h"] },
       { "component": "Needs", "tags": ["Player"], "fields": ["name", "current", "max"] },
       { "component": "Inventory", "tags": ["Player"], "fields": ["slots"] },
+      { "component": "Inventory", "tags": ["Container"], "fields": ["slots"] },
       { "component": "ItemMeta", "tags": ["Item"], "fields": ["kind", "count"] },
       { "component": "ResourceNode", "tags": ["Resource"], "fields": ["remaining"] },
       { "component": "Equipment", "fields": ["weaponSlot", "toolSlot", "armorSlot"] },

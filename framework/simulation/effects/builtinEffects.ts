@@ -7,7 +7,7 @@
  * 具体数值与语义由 EffectSpec.params / game/ 配置声明。
  */
 import { hasComponent } from "bitecs";
-import { Health, Defense, Kind, Transform, ResourceNode } from "components";
+import { Health, Defense, Kind, Transform, ResourceNode, NetworkId } from "components";
 import type { GameWorld } from "framework/world";
 import { registerEffect, positionOfEntity, parseEffectSpec } from "framework/simulation/effects/effectRegistry";
 import { computeStandardDamage } from "framework/systems/gameplay/damageFormula";
@@ -18,6 +18,7 @@ import { emitEvent } from "framework/events/gameEvents";
 import { insertContainer, removeContainer, type ContainerRef } from "framework/economy/container";
 import { spawnProjectile } from "framework/systems/gameplay/projectileSystem";
 import { spawnEntity } from "framework/entities/spawn";
+import { destroyEntity } from "framework/entities/destroyEntity";
 
 /** 参数读取工具：数值参数（非法/缺失回退缺省值）。 */
 function numParam(params: Record<string, unknown>, key: string, fallback: number): number {
@@ -235,6 +236,20 @@ export function registerBuiltinEffects(): void {
       }
     }
     return ok;
+  });
+
+  /**
+   * despawn：销毁目标实体（限期容器的到期出口；其 AoS 数据随 destroyEntity
+   * 一并清理，内容物随之消失）。目标已不存在（无 NetworkId）时跳过。
+   */
+  registerEffect("despawn", (ctx) => {
+    let destroyed = false;
+    for (const target of ctx.targets) {
+      if (!hasComponent(ctx.world, target, NetworkId)) continue;
+      destroyEntity(ctx.world, target);
+      destroyed = true;
+    }
+    return destroyed;
   });
 
   /**

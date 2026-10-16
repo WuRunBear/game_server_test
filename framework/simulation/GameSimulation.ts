@@ -2,8 +2,9 @@
  * 仿真层实现——SimulationPort 接口的具体实现（类级 JSDoc 见下方 GameSimulation，
  * 完整说明架构位置、玩家管理/输入处理/快照构建/持久化等职责，此处不重复）。
  */
-import { query } from "bitecs";
-import { NetworkId, Velocity, Inventory, Intent, Health, entityMapOf, SpawnPoint } from "components";
+import { query, hasComponent, addComponent, removeComponent } from "bitecs";
+import { NetworkId, Velocity, Inventory, Intent, Health, entityMapOf, SpawnPoint, Player } from "components";
+import { Offline, isOfflineRetained } from "components/offline";
 import { spawnEntity } from "framework/entities/spawn";
 import { destroyEntity } from "framework/entities/destroyEntity";
 import { createGameInstance, type GameInstance } from "framework/bootstrap/GameInstance";
@@ -15,7 +16,7 @@ import { recordTick } from "framework/metrics";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import type { EntityId, GameWorld } from "world";
-import { consumeSlot, dropSlot, transferSlot } from "framework/systems/gameplay/inventoryOps";
+import { consumeSlot, dropSlot, transferSlot, lootContainerSlot } from "framework/systems/gameplay/inventoryOps";
 import { equipSlot } from "framework/systems/gameplay/equipmentSystem";
 import { craftRecipe } from "framework/systems/gameplay/craftingSystem";
 import { placeEntity } from "framework/systems/gameplay/placeableSystem";
@@ -49,9 +50,16 @@ const assemblyLogger = createLogger("game-simulation");
  */
 export const DEFAULT_MAX_OFFLINE_TICKS = 1_728_000;
 
+/**
+ * 断线保留缺省时长（秒）：rules/server.json 未配置 offlineRetentionTicks 时
+ * 生效，按 tickRate 折算为 tick（20tps 下 = 6000 tick）。防闪断丢进度的
+ * 缺省保留窗口；0 配置值表示维持旧行为（断线立即销毁）。
+ */
+export const DEFAULT_OFFLINE_RETENTION_SEC = 300;
+
 import type { SimulationPort } from "./SimulationPort";
 import type {
-  PlayerInput, PlayerJoinResult, TickSnapshot, TickResult, DebugSnapshotOptions, PlayerCommand, EntitySnapshot,
+  PlayerInput, PlayerJoinResult, PlayerJoinOptions, TickSnapshot, TickResult, DebugSnapshotOptions, PlayerCommand, EntitySnapshot,
   SimulationOptions,
 } from "./types";
 
@@ -77,7 +85,8 @@ import type {
  *
  * ## 主要职责
  *
- * 1. **玩家管理**：`addPlayer()` 创建玩家实体，`removePlayer()` 销毁并清理
+ * 1. **玩家管理**：`addPlayer()` 创建/复用玩家实体，`removePlayer()` 按断线
+ *    保留策略标记或销毁实体并清理会话缓存；保留到期由 tick 内清扫点销毁
  * 2. **输入处理**：`submitInput()` 接收 + seq 去重，`applyInputs()` 写入 ECS；`submitCommand()` 处理离散动作
  * 3. **快照构建**：`buildSnapshot()` 用配置的 netSync 字段从 ECS 派生快照（含 AoS 适配）
  * 4. **指标记录**：`tick()` 中记录性能数据，帧过慢时输出告警
@@ -150,6 +159,9 @@ export class GameSimulation implements SimulationPort {
   /** 输入校验器（速度上限 + 命令频率限流；无规则时全放行）。 */
   private inputGuard: InputGuard;
 
+  /** 断线保留时长（tick，来自 rules/server.json；0 = 断线立即销毁旧行为）。 */
+  private offlineRetentionTicks: number;
+
   /** 读档恢复出的、尚未绑定 session 的玩家实体 eid 队列（addPlayer 时复用）。 */
   private orphanPlayerEids: number[] = [];
 
@@ -196,6 +208,12 @@ export class GameSimulation implements SimulationPort {
     this.viewRadius = serverRules?.viewRadius;
     const tickRate = this.world.time.fixedDtMs > 0 ? Math.max(1, Math.round(1000 / this.world.time.fixedDtMs)) : 20;
     this.inputGuard = createInputGuard(serverRules, tickRate);
+
+    // 断线保留时长：配置值优先；缺省按 tickRate 折算 5 分钟（防闪断丢进度）。
+    this.offlineRetentionTicks = Math.max(
+      0,
+      Math.floor(serverRules?.offlineRetentionTicks ?? tickRate * DEFAULT_OFFLINE_RETENTION_SEC),
+    );
 
     // 离线补差：restore 完成后按墙钟一次性折算离线跨度，逐激活图一次
     // evolve 推到演化边界（与开机初始演化/每 tick 增量共用同一 evolve，D6）。
@@ -317,6 +335,10 @@ export class GameSimulation implements SimulationPort {
       });
     }
 
+    // 断线保留清扫点：系统循环之后、快照构建之前——到期实体销毁并立即存档，
+    // 本帧快照即不含已到期实体（客户端同帧看到移除，无幽灵残留）。
+    this.sweepExpiredOfflinePlayers();
+
     const snapshot = this.buildSnapshot();
     const tickMs = performance.now() - start;
 
@@ -358,55 +380,52 @@ export class GameSimulation implements SimulationPort {
   /**
    * 玩家加入——创建玩家实体并返回网络标识。
    *
-   * 内部做了三件事：
-   * 1. 按玩家出生规则（game/rules/player.json → resolvedPlayerRule.spawn）在
-   *    默认图选出生点（random 每玩家独立随机 / seededRandom 同图同点 / exact 固定），
-   *    并写入持久化 SpawnPoint 组件（重生回出生点的唯一依据，随实体入档）
-   * 2. 从原型注册表获取 "player" archetype 的组件规格
-   * 3. 调用 spawnEntity 创建实体（自动分配 NetworkId + Transform 等组件）
+   * 实体来源按优先级：
+   * 1. **断线保留实体**：options.networkId 命中保留中的离线实体 → 复用
+   *    （清除 Offline 保留标记、恢复会话映射，背包/位置/进度原样保留）
+   * 2. **读档 orphan**：restoreWorld 恢复的玩家实体（networkId 保持存档值）
+   * 3. **新生成**：按玩家出生规则（game/rules/player.json → resolvedPlayerRule.spawn）
+   *    在默认图选出生点（random 每玩家独立随机 / seededRandom 同图同点 /
+   *    exact 固定），写入持久化 SpawnPoint 组件，并按 "player" archetype 生成
    *
    * @param sessionId Colyseus 连接标识
-   * @returns { networkId } 新实体的网络标识
+   * @param options 可选加入参数（重连复用保留实体的匹配键）
+   * @returns { networkId } 玩家实体的网络标识
    */
-  addPlayer(sessionId: string): PlayerJoinResult {
-    let eid: number;
+  addPlayer(sessionId: string, options?: PlayerJoinOptions): PlayerJoinResult {
+    let eid: number | undefined;
 
-    // 读档恢复的玩家实体优先复用绑定（networkId 保持存档值，进度不丢）；
-    // 持久化出生点已随存档恢复，复用路径不重新选点。
-    if (this.orphanPlayerEids.length > 0) {
-      eid = this.orphanPlayerEids.shift()!;
-    } else {
-      const geometry = this.world.maps[this.world.defaultMapId];
-      const rule = this.world.gameDef.resolvedPlayerRule?.spawn;
-      // random 模式确定性种子：世界/地图 seed + 玩家标识（nextNetworkId，稳定且逐玩家不同）
-      const spawnSeed = mixSeed(
-        mapSeedOf(this.world, this.world.defaultMapId) ?? this.world.defaultMapId,
-        this.world.nextNetworkId,
+    // 1) 断线保留实体：按客户端自报 networkId 匹配（Player 限定，防误挂非玩家实体）
+    if (typeof options?.networkId === "number") {
+      const retained = [...query(this.world, [NetworkId, Player, Offline])].find(
+        (candidate) => NetworkId.value[candidate] === options.networkId,
       );
-      const picked =
-        geometry && rule ? pickSpawnPosition(geometry, rule, spawnSeed) : undefined;
-      if (geometry && rule && !picked) {
-        // 候选池为空（区域缺失/全不可走）：显式报错，回退地图几何中心
-        this.world.logger.error("玩家出生规则无合法候选点，回退地图几何中心", {
-          mapId: this.world.defaultMapId,
-          mode: rule.mode,
-          region: rule.region ?? null,
+      if (retained !== undefined) {
+        eid = retained;
+        removeComponent(this.world, eid, Offline);
+        this.world.logger.info("重连复用断线保留实体", {
+          sessionId,
+          eid,
+          networkId: NetworkId.value[eid],
+        });
+      } else {
+        // 提示键未命中（实体已到期销毁/存档恢复前断线等）：降级常规路径
+        this.world.logger.warn("重连提示 networkId 未命中保留实体，走常规加入", {
+          sessionId,
+          networkId: options.networkId,
         });
       }
-      const playerSpawn = picked ?? (geometry
-        ? {
-            x: (geometry.grid.width / 2) * geometry.grid.tileWidth,
-            y: (geometry.grid.height / 2) * geometry.grid.tileHeight,
-          }
-        : { x: 0, y: 0 });
-      const archetype = (this.world.archetypes as ArchetypeRegistry).get("player");
-      eid = spawnEntity(this.world, archetype, this.componentRegistry, {
-        x: playerSpawn.x,
-        y: playerSpawn.y,
-        mapId: this.world.defaultMapId,
-      });
-      // 持久化出生点：Transform 会被移动覆盖，重生（respawnSystem）读本字段
-      SpawnPoint[eid] = { mapId: this.world.defaultMapId, x: playerSpawn.x, y: playerSpawn.y };
+    }
+
+    // 2) 读档恢复的玩家实体优先复用绑定（networkId 保持存档值，进度不丢）；
+    // 持久化出生点已随存档恢复，复用路径不重新选点。
+    if (eid === undefined && this.orphanPlayerEids.length > 0) {
+      eid = this.orphanPlayerEids.shift()!;
+    }
+
+    // 3) 新生成
+    if (eid === undefined) {
+      eid = this.spawnNewPlayer();
     }
 
     // 建立 sessionId → eid 映射，后续输入可以通过 sessionId 找到玩家实体
@@ -415,10 +434,54 @@ export class GameSimulation implements SimulationPort {
     return { networkId: NetworkId.value[eid] };
   }
 
+  /** 新生成玩家实体（出生点选择 + SpawnPoint 落盘 + archetype 生成）。 */
+  private spawnNewPlayer(): number {
+    const geometry = this.world.maps[this.world.defaultMapId];
+    const rule = this.world.gameDef.resolvedPlayerRule?.spawn;
+    // random 模式确定性种子：世界/地图 seed + 玩家标识（nextNetworkId，稳定且逐玩家不同）
+    const spawnSeed = mixSeed(
+      mapSeedOf(this.world, this.world.defaultMapId) ?? this.world.defaultMapId,
+      this.world.nextNetworkId,
+    );
+    const picked =
+      geometry && rule ? pickSpawnPosition(geometry, rule, spawnSeed) : undefined;
+    if (geometry && rule && !picked) {
+      // 候选池为空（区域缺失/全不可走）：显式报错，回退地图几何中心
+      this.world.logger.error("玩家出生规则无合法候选点，回退地图几何中心", {
+        mapId: this.world.defaultMapId,
+        mode: rule.mode,
+        region: rule.region ?? null,
+      });
+    }
+    const playerSpawn = picked ?? (geometry
+      ? {
+          x: (geometry.grid.width / 2) * geometry.grid.tileWidth,
+          y: (geometry.grid.height / 2) * geometry.grid.tileHeight,
+        }
+      : { x: 0, y: 0 });
+    const archetype = (this.world.archetypes as ArchetypeRegistry).get("player");
+    const eid = spawnEntity(this.world, archetype, this.componentRegistry, {
+      x: playerSpawn.x,
+      y: playerSpawn.y,
+      mapId: this.world.defaultMapId,
+    });
+    // 持久化出生点：Transform 会被移动覆盖，重生（respawnSystem）读本字段
+    SpawnPoint[eid] = { mapId: this.world.defaultMapId, x: playerSpawn.x, y: playerSpawn.y };
+    return eid;
+  }
+
   /**
-   * 玩家离开——销毁玩家实体，清理所有关联缓存。
+   * 玩家离开——按断线保留策略处理玩家实体，清理所有会话关联缓存。
    *
-   * 要清理的缓存：
+   * 实体处理（offlineRetentionTicks 驱动）：
+   * - 保留时长 > 0：标记 Offline（瞬态组件，不入档）+ 记录到期 tick，
+   *   实体保留在 ECS 中——保留期内对同步与玩法系统不可见（isOfflineRetained
+   *   排除点），重连可按 networkId 复用；到期由 sweepExpiredOfflinePlayers
+   *   销毁并触发一次立即存档。
+   * - 保留时长 = 0：旧行为，立即销毁（destroyEntity 同时清理 AoS 残留，
+   *   防 eid 复用后被序列化进存档）。
+   *
+   * 无论哪种路径都要清理的会话缓存：
    * - playerEidBySessionId 映射（核心）
    * - lastSeqBySessionId（输入去重）
    * - latestInputBySessionId（待应用输入）
@@ -428,8 +491,17 @@ export class GameSimulation implements SimulationPort {
   removePlayer(sessionId: string): void {
     const eid = this.playerEidBySessionId.get(sessionId);
     if (typeof eid === "number") {
-      // destroyEntity 同时清理 AoS 残留（防 eid 复用后被序列化进存档）
-      destroyEntity(this.world, eid);
+      if (this.offlineRetentionTicks > 0) {
+        // 保留：挂标记 + 到期 tick（标记是"按标记跳过"排除逻辑的唯一依据）。
+        addComponent(this.world, eid, Offline);
+        Offline.untilTick[eid] = this.world.time.tick + this.offlineRetentionTicks;
+        // 脉冲输入模型下，断线实体不再被 applyInputs 清零速度——显式归零，
+        // 防止保留期内以最后速度惯性漂移（movement/physics 本身照常运行）。
+        Velocity.vx[eid] = 0;
+        Velocity.vy[eid] = 0;
+      } else {
+        destroyEntity(this.world, eid);
+      }
     }
 
     this.playerEidBySessionId.delete(sessionId);
@@ -501,6 +573,15 @@ export class GameSimulation implements SimulationPort {
       case "drop":
         return this.finishCommand(eid, command.type, dropSlot(this.world, eid, command.slot ?? -1));
       case "transfer":
+        if (command.target !== undefined) {
+          // transfer + target：从目标容器实体的槽位取回物品到本人背包
+          // （死亡容器等承载物；同图校验与满包不吞语义见 lootContainerSlot）
+          return this.finishCommand(
+            eid,
+            command.type,
+            lootContainerSlot(this.world, eid, command.target, command.slot ?? -1),
+          );
+        }
         return this.finishCommand(
           eid,
           command.type,
@@ -583,13 +664,59 @@ export class GameSimulation implements SimulationPort {
     if (this.sinceLastSaveMs < this.saveIntervalMs) return;
     this.sinceLastSaveMs = 0;
 
+    this.saveNow("autosave");
+  }
+
+  /**
+   * 立即存档：序列化当前世界并写盘（fire-and-forget，写盘失败仅记日志）。
+   *
+   * 复用 maybeAutosave 的序列化/写盘通路（同一 serializeWorld → repository
+   * 单一路径），只是绕过间隔门控——断线保留到期销毁时调用一次，把销毁后
+   * 的最后世界状态落盘。仅要求 repository + saveId 就绪（不要求配置了
+   * saveIntervalMs：到期落盘是保留语义的一部分，与定时存档开关正交）。
+   *
+   * @param reason 存档触发原因（日志定位用）
+   */
+  private saveNow(reason: string): void {
+    if (!this.repository || !this.saveId) return;
+
+    // 序列化同步完成；写盘 fire-and-forget（异步 I/O 不入 ECS 系统）
     const record = serializeWorld(this.world, this.saveId);
     void this.repository.saveWorld(record).catch((err) => {
       this.world.logger.error("存档写入失败", {
         saveId: this.saveId,
+        reason,
         error: err instanceof Error ? err.stack : String(err),
       });
     });
+    // 重置定时存档累计：立即存档已落盘，避免紧随其后的重复定时存档
+    this.sinceLastSaveMs = 0;
+  }
+
+  /**
+   * 断线保留清扫点（每 tick 一次，位于系统循环后、快照构建前）：
+   * 到期（untilTick ≤ 当前 tick）的保留实体销毁，并触发一次立即存档把
+   * 销毁后的最后状态落盘。无保留实体时空转（一次 query）。
+   */
+  private sweepExpiredOfflinePlayers(): void {
+    // 快照展开后销毁：bitecs query 为活迭代器，边查边删不安全
+    const expired = [...query(this.world, [NetworkId, Offline])].filter(
+      (eid) => Offline.untilTick[eid] <= this.world.time.tick,
+    );
+    if (expired.length === 0) return;
+
+    for (const eid of expired) {
+      const untilTick = Offline.untilTick[eid];
+      // destroyEntity 同时清理 AoS 残留（防 eid 复用后被序列化进存档）
+      destroyEntity(this.world, eid);
+      this.world.logger.info("断线保留到期，实体销毁", {
+        eid,
+        networkId: NetworkId.value[eid],
+        untilTick,
+        tick: this.world.time.tick,
+      });
+    }
+    this.saveNow("offline-retention-expired");
   }
 
   /**
@@ -681,6 +808,9 @@ export class GameSimulation implements SimulationPort {
         const adapter = getAosSyncAdapter(field.component);
         if (!adapter) continue;
         for (const eid of this.queryByTags(field.tags)) {
+          // 断线保留期实体不进快照 → 对所有在线玩家不可见（interest 只读
+          // 快照，兴趣排除由本门控传递达成）
+          if (isOfflineRetained(this.world, eid)) continue;
           const snap = ensure(NetworkId.value[eid], eid);
           const result = adapter(this.world, eid, field.fields);
           Object.assign(snap.values, result.numbers);
@@ -691,6 +821,8 @@ export class GameSimulation implements SimulationPort {
 
       // SoA 组件：按该组件查询实体（含 NetworkId），读标量数值
       for (const eid of query(this.world, [NetworkId, comp as object])) {
+        // 断线保留期实体不进快照（同上：对一切客户端不可见的唯一门控）
+        if (isOfflineRetained(this.world, eid)) continue;
         const id = NetworkId.value[eid];
         const snap = ensure(id, eid);
         for (const fname of field.fields) {

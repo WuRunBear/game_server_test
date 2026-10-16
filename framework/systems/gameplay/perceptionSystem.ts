@@ -1,5 +1,6 @@
 import { hasComponent, query } from "bitecs";
 import { Perception, Transform, Team, Health, NPC, entityMapOf } from "components";
+import { isOfflineRetained } from "components/offline";
 import { bbSet, BB_PERCEPTION_TARGET, type PerceivedTarget } from "ai/blackboard";
 import { getOrCreateBlackboard } from "framework/systems/gameplay/aiSystem";
 import { isPointInLight } from "framework/utils/light";
@@ -51,6 +52,8 @@ export function perceptionSystem(world: GameWorld): GameWorld {
         const otherTeam = Team.id[other];
         if (otherTeam === 0 || otherTeam === myTeam) continue;
         if (!hasComponent(world, other, Health) || (Health.current[other] ?? 0) <= 0) continue;
+        // 断线保留期实体不可被感知（AI 不瞄准不可见目标）
+        if (isOfflineRetained(world, other)) continue;
         // 火光回避：光内目标不可感知
         if (isPointInLight(world, Transform.x[other], Transform.y[other])) continue;
         const dist = Math.hypot(

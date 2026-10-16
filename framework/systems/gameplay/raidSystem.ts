@@ -19,6 +19,7 @@
  */
 import { query } from "bitecs";
 import { Player, Transform } from "components";
+import { isOfflineRetained } from "components/offline";
 import { attemptRng } from "framework/simulation/rng";
 import { getRuleModule } from "framework/api";
 import { getSpawnCondition } from "framework/systems/gameplay/spawnConditions";
@@ -78,6 +79,8 @@ export function createRaidSystem(_config?: Record<string, unknown>) {
       typeof rule.waveSize === "number" ? Math.max(0, Math.floor(rule.waveSize)) : 0;
 
     for (const playerEid of query(world, [Player, Transform])) {
+      // 断线保留期玩家不作为刷波中心（对玩法系统不可见语义）
+      if (isOfflineRetained(world, playerEid)) continue;
       const mapId = effectiveMapOf(world, playerEid);
       const geometry = mapId === "" ? undefined : world.maps[mapId];
       if (!geometry) continue;

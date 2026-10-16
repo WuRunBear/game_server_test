@@ -126,6 +126,15 @@
       "every": 20,
       "mode": "template",
       "templateRef": "camp"
+    },
+    {
+      "map": "island",
+      "region": "forest",
+      "kind": "spider",
+      "max": 6,
+      "every": 20,
+      "mode": "node",
+      "condition": "isNight"
     }
   ]
 }

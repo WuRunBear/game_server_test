@@ -236,10 +236,16 @@ export class GameRoom extends Room<{ state: RoomState }> {
    *   也带入本客户端编码，触发解码端 "refId not found" 告警，故不挂。
    * - 实体视图（可见表内容）由 applyInterest 每帧维护：进入视野 view.add、
    *   离开视野 view.remove（@view() 集合的每个元素必须显式 add，否则内容不编码）。
+   *
+   * 重连复用：客户端可在 join options 携带断线前的 networkId（可选字段，
+   * 老客户端不传则行为不变），仿真层命中断线保留实体则复用（进度不丢）。
    */
-  onJoin(client: Client): void {
-    // 让仿真层创建一个玩家实体，拿到稳定网络 ID
-    const { networkId } = this.sim.addPlayer(client.sessionId);
+  onJoin(client: Client, options?: Record<string, unknown>): void {
+    // 让仿真层创建/复用玩家实体，拿到稳定网络 ID
+    // （options.networkId 为客户端自报的断线前标识，仅结构校验，匹配在仿真层）
+    const hintedNetworkId =
+      typeof options?.networkId === "number" ? options.networkId : undefined;
+    const { networkId } = this.sim.addPlayer(client.sessionId, { networkId: hintedNetworkId });
 
     // 写入 Colyseus PlayerState——客户端通过它知道"自己控制哪个实体"
     const playerState = new PlayerState();
@@ -257,9 +263,10 @@ export class GameRoom extends Room<{ state: RoomState }> {
   }
 
   /**
-   * 玩家离开——销毁模拟实体，清理所有关联状态。
+   * 玩家离开——按断线保留策略处理模拟实体，清理所有关联状态。
    *
-   * 要清理的状态：
+   * 仿真层实体去留由 sim.removePlayer 内部决定（保留期配置驱动：标记保留
+   * 或立即销毁），本层零改动；要清理的状态：
    * - 仿真层：玩家实体（sim.removePlayer 负责）
    * - RoomState：players 映射（Colyseus 自动删除 + 增量同步给其他客户端）
    * - 调试订阅：debugSubscribers / debugMapSentSubscribers

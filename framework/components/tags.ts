@@ -25,3 +25,10 @@ export const Item = defineComponent({});
  * 游戏无关——「资源节点」是通用机制，具体产出由 ResourceNode.yieldsKind 决定。
  */
 export const Resource = defineComponent({});
+
+/**
+ * Container Tag：标记该实体为可存取的容器（死亡容器/储物箱等承载物）。
+ * 游戏无关——具体承载由 Inventory/Ledger 等数据组件决定，标签只供
+ * 查询过滤与 netSync 按类同步（如容器背包对客户端可见）。
+ */
+export const Container = defineComponent({});

@@ -43,6 +43,7 @@ import { Quest } from "framework/components/quest";
 import { Relation } from "framework/components/relation";
 import { Intent } from "framework/components/intent";
 import { NetworkId, LastSynced } from "framework/components/network";
+import { Offline } from "framework/components/offline";
 import { Cooldown, Duration } from "framework/components/timer";
 import { Ledger, initLedger } from "framework/components/ledger";
 import { Projectile } from "framework/components/projectile";
@@ -51,7 +52,7 @@ import { Triggers, initTriggers } from "framework/simulation/triggers/triggers";
 import { ExpiresAt, Interval } from "framework/simulation/timer/timer";
 import { StateMachine, initStateMachine } from "framework/simulation/stateMachine/stateMachine";
 import { Population, initPopulation } from "framework/simulation/population/population";
-import { Player, Enemy, NPC, Item, Resource } from "framework/components/tags";
+import { Player, Enemy, NPC, Item, Resource, Container } from "framework/components/tags";
 import { Kind } from "framework/components/kind";
 
 /**
@@ -305,6 +306,10 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("LastSynced", LastSynced, {
     description: "同步帧：记录最近一次被同步的逻辑帧，供增量同步使用。",
   });
+  // 断线保留标记（SoA，瞬态——运行时会话事实，不入档）
+  registry.register("Offline", Offline, {
+    description: "断线保留标记：会话断开后实体保留至到期 tick，期间对同步与玩法系统不可见；重连复用时摘除，到期由仿真层清扫销毁。",
+  });
   registry.register("Cooldown", Cooldown, {
     description: "冷却计时：剩余冷却毫秒，由战斗等系统在运行时递减。",
   });
@@ -414,6 +419,9 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   });
   registry.register("Resource", Resource, {
     description: "资源标签：标记实体为可采集资源节点。",
+  });
+  registry.register("Container", Container, {
+    description: "容器标签：标记实体为可存取的容器（背包/账本等承载物）。",
   });
   // 种类标签（AoS）
   registry.register("Kind", Kind, {

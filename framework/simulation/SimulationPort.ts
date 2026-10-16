@@ -3,7 +3,7 @@
  * 具体实现见 GameSimulation.ts；传输层只依赖本接口，不依赖任何 ECS 符号。
  */
 import type {
-  PlayerInput, PlayerJoinResult, TickResult, DebugSnapshotOptions, PlayerCommand,
+  PlayerInput, PlayerJoinResult, PlayerJoinOptions, TickResult, DebugSnapshotOptions, PlayerCommand,
 } from "./types";
 
 /**
@@ -48,10 +48,14 @@ export interface SimulationPort {
    * 内部创建玩家实体（spawn "player" archetype）、分配 NetworkId，
    * 并建立 sessionId → eid 的映射，后续 submitInput 通过 sessionId 找到正确实体。
    *
+   * 复用优先级：断线保留实体（按 options.networkId 匹配，清除保留标记）→
+   * 读档恢复的 orphan 实体（FIFO）→ 新生成。
+   *
    * @param sessionId Colyseus 连接标识
+   * @param options 可选加入参数（重连复用保留实体的匹配键）
    * @returns 玩家实体的 networkId，传输层写入 PlayerState.entityId
    */
-  addPlayer(sessionId: string): PlayerJoinResult;
+  addPlayer(sessionId: string, options?: PlayerJoinOptions): PlayerJoinResult;
 
   /**
    * 玩家离开时调用。

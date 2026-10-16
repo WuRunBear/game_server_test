@@ -183,6 +183,13 @@ export const ServerRuleSchema = z.object({
   maxMoveSpeed: z.number().positive().optional(),
   /** 命令频率上限（每秒条数，按逻辑 tick 窗口）；缺省不校验。 */
   maxCommandsPerSec: z.number().int().positive().optional(),
+  /**
+   * 断线保留时长（tick）：会话断开后玩家实体保留的 tick 数，保留期内实体
+   * 对同步与玩法系统不可见，到期销毁并触发一次立即存档。
+   * 缺省 5 分钟（按 tickRate 折算，见 GameSimulation.DEFAULT_OFFLINE_RETENTION_SEC）；
+   * 0 = 维持旧行为（断线立即销毁实体）。
+   */
+  offlineRetentionTicks: z.number().int().nonnegative().optional(),
 }).passthrough();
 
 /** 服务端规则的类型推断（即 game/rules/server.json）。 */
@@ -209,3 +216,35 @@ export const RaidRuleSchema = z.object({
 
 /** 周期袭击规则的类型推断（即 game/rules/raid.json）。 */
 export type RaidRule = z.infer<typeof RaidRuleSchema>;
+
+/**
+ * 死亡容器配置（respawn 规则的 deathContainer 段）。
+ *
+ * 玩家死亡时的通用惩罚机制：在死亡位置生成一个可取回的容器实体，
+ * 把背包整体转入（keepOnDeath 物品除外）；容器限期后销毁、内容物随之消失。
+ */
+const DeathContainerSchema = z.object({
+  /** 容器实体原型 kind（archetype 注册表引用；未注册原型时记 error 并跳过生成）。 */
+  archetype: z.string().min(1),
+  /**
+   * 容器存活时限（tick 数）；到期销毁（内容物一并消失）。
+   * 缺省 6000（≈5 分钟 @20tps）；0 = 永不过期。
+   */
+  ttlTicks: z.number().int().nonnegative().optional(),
+});
+
+/**
+ * 重生全局规则（game/rules/respawn.json）：作用于 respawnSystem（重生延迟/Needs
+ * 重置）与 deathSystem（死亡容器）。各字段语义游戏无关。
+ */
+export const RespawnRuleSchema = z.object({
+  /** 重生延迟（毫秒）。 */
+  delayMs: z.number().optional(),
+  /** 重生时是否重置 Needs；缺省 true。 */
+  resetNeeds: z.boolean().optional(),
+  /** 死亡容器配置；缺省 = 玩家死亡不生成容器（维持无惩罚旧行为）。 */
+  deathContainer: DeathContainerSchema.optional(),
+}).passthrough();
+
+/** 重生规则的类型推断（即 game/rules/respawn.json）。 */
+export type RespawnRule = z.infer<typeof RespawnRuleSchema>;

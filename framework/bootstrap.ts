@@ -13,6 +13,7 @@ import { createArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import { registerBuiltinArchetypes } from "framework/entities/registerBuiltinArchetypes";
 import { createGeneratorRegistry } from "map/generate/generatorRegistry";
 import { registerBuiltinMapGenerators } from "map/generate/registerBuiltin";
+import { registerBuiltinPopulationModels } from "map/evolution/populationModels";
 import { registerBuiltinRuleSchemas } from "framework/config/schema/ruleSchemas";
 import { registerBuiltinSpawnConditions } from "framework/systems/gameplay/spawnConditions";
 import { registerBuiltinEffects } from "framework/simulation/effects/builtinEffects";
@@ -58,6 +59,9 @@ export function bootstrapFramework(): FrameworkRegistries {
   registerBuiltinSpawnConditions();
   registerBuiltinEffects();
   registerBuiltinTriggers();
+  // 种群模型（演化引擎产出量决策）：模块加载时已自注册，此处显式声明接线点
+  // （幂等守卫吸收重复调用），与其它内置注册并列可查。
+  registerBuiltinPopulationModels();
 
   registries = { componentRegistry, systemRegistry, actionRegistry, archetypeRegistry, mapGeneratorRegistry };
   return registries;

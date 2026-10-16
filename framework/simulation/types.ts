@@ -84,7 +84,7 @@ export interface PlayerCommand {
   x?: number;
   /** 放置目标坐标（place 用，世界坐标）。 */
   y?: number;
-  /** 目标实体 networkId（deconstruct 用，拆除的放置物）。 */
+  /** 目标实体 networkId（deconstruct 拆除用；transfer + target 时为容器实体——从其槽位取回物品）。 */
   target?: number;
   /** 对话选项索引（dialogue 用，推进当前对话节点）。 */
   option?: number;
@@ -105,6 +105,18 @@ export interface PlayerCommand {
 export interface PlayerJoinResult {
   /** 玩家实体的网络标识（不等于 ECS 内部的 eid，是稳定对外 ID） */
   networkId: number;
+}
+
+/**
+ * 玩家加入的可选参数（重连复用保留实体的匹配键）。
+ *
+ * 断线保留期内重连：客户端在加入参数里自报断线前的 networkId，仿真层命中
+ * 保留中的离线实体则复用（清标记、恢复会话映射，进度不丢）；未提供或未命中
+ * 时走读档 orphan / 新生成路径。可选字段——老客户端不传，行为与历史一致。
+ */
+export interface PlayerJoinOptions {
+  /** 客户端自报的既有 networkId（断线保留实体的匹配键）。 */
+  networkId?: number;
 }
 
 /**

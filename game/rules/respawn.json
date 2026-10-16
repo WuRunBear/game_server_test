@@ -1,4 +1,8 @@
 {
   "delayMs": 2000,
-  "resetNeeds": true
+  "resetNeeds": true,
+  "deathContainer": {
+    "archetype": "corpse",
+    "ttlTicks": 6000
+  }
 }

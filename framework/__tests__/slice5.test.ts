@@ -445,10 +445,12 @@ describe("Slice 5：审查修复（destroyEntity / 存档防御 / 写盘串行 /
     expect(query(world, [NetworkId])).not.toContain(w);
   });
 
-  it("removePlayer 后存档不含玩家实体（含 AoS 残留清理）", async () => {
+  it("removePlayer 后存档不含玩家实体（含 AoS 残留清理；retention=0 旧行为）", async () => {
     const dir = mkdtempSync(join(tmpdir(), "s5-remove-"));
     const def = createDefaultGameDefinition();
-    def.resolvedRules["server"] = { saveId: "s1", saveIntervalMs: 100 };
+    // offlineRetentionTicks=0：断线立即销毁（B2 切片默认保留 5 分钟，此处显式关断
+    // 以固化「销毁即清 AoS 残留、存档不含玩家」的原有契约）
+    def.resolvedRules["server"] = { saveId: "s1", saveIntervalMs: 100, offlineRetentionTicks: 0 };
     const repo = createFileRepository(dir);
     const sim = await createGameSimulation(def, { repository: repo, saveId: "s1" });
     sim.addPlayer("s1");

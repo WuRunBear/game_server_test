@@ -45,6 +45,8 @@ import type { SerializedEntity, WorldRecord } from "framework/repository";
  * - ExpiresAt / Interval：定时器运行时状态（绝对 tick 跨存档失效），
  *   恢复后由效果/触发配置重建
  * - Projectile：投射物运行时实体（owner eid 跨存档失效），寿命短暂不入档
+ * - Offline：断线保留标记（到期 tick 是会话断开时刻的运行时推导值）——读档
+ *   恢复的玩家实体复用走 orphan 队列，保留语义跨存档无意义
  */
 const RUNTIME_ONLY_COMPONENTS = new Set([
   "Velocity",
@@ -61,6 +63,7 @@ const RUNTIME_ONLY_COMPONENTS = new Set([
   "ExpiresAt",
   "Interval",
   "Projectile",
+  "Offline",
 ]);
 
 /** 序列化单实体：遍历组件注册表，按 SoA/AoS 读当前值。 */

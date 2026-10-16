@@ -19,12 +19,12 @@ import type { ComponentRegistry } from "framework/components/componentRegistry";
 import { Transform } from "framework/components/transform";
 import { NetworkId } from "framework/components/network";
 import { EntityMap } from "framework/components/entityMap";
-import { Player, NPC, Enemy, Item, Resource } from "framework/components/tags";
+import { Player, NPC, Enemy, Item, Resource, Container } from "framework/components/tags";
 import { Team } from "framework/components/combat";
 import { setEntityKind } from "framework/systems/gameplay/aiSystem";
 
 /** 标签名 → bitecs 组件对象（原型 tags 挂载时按名查表，未知名忽略）。 */
-const TAG_MAP: Record<string, unknown> = { Player, NPC, Enemy, Item, Resource };
+const TAG_MAP: Record<string, unknown> = { Player, NPC, Enemy, Item, Resource, Container };
 
 export interface SpawnOverrides {
   /** 生成坐标 x（缺省 0）。 */

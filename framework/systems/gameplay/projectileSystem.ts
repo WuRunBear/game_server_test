@@ -13,6 +13,7 @@
  */
 import { hasComponent, query, addComponent, addEntity } from "bitecs";
 import { Projectile, Transform, NetworkId, entityMapOf, EntityMap } from "components";
+import { isOfflineRetained } from "components/offline";
 import type { GameWorld, EntityId } from "world";
 import { destroyEntity } from "framework/entities/destroyEntity";
 import { walkableAt } from "map/geometry/query";
@@ -78,6 +79,8 @@ export function projectileSystem(world: GameWorld): GameWorld {
     for (const other of query(world, [Transform, NetworkId])) {
       if (other === eid || other === owner) continue;
       if (hasComponent(world, other, Projectile)) continue;
+      // 断线保留期实体不被投射物命中（不可见 = 不构成接触目标）
+      if (isOfflineRetained(world, other)) continue;
       // 分图隔离：仅与投射物同图实体判定接触（与 combat 同语义）
       if (entityMapOf(world, other) !== mapId) continue;
       const d = Math.hypot(Transform.x[other] - nx, Transform.y[other] - ny);

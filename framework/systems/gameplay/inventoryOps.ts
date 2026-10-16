@@ -6,10 +6,10 @@
  *
  * 字段名（kind/need/name 等）保持游戏无关。
  */
-import { hasComponent } from "bitecs";
+import { hasComponent, query } from "bitecs";
 import type { GameWorld } from "world";
 import { rngFrom } from "framework/simulation/rng";
-import { Inventory, ItemMeta, Needs, type InventoryEntry, type ItemStack } from "components";
+import { Inventory, ItemMeta, Needs, NetworkId, type InventoryEntry, type ItemStack } from "components";
 import { EntityMap, Item, Transform, entityMapOf } from "components";
 import { spawnEntity } from "framework/entities/spawn";
 import { applyEffectSpecs } from "framework/simulation/effects/effectRegistry";
@@ -161,6 +161,59 @@ export function dropSlot(world: GameWorld, ownerEid: number, slot: number): bool
 
 /** 丢弃/溢出物防瞬回延迟（ms）：掉落者就在旁边，给走开时间。 */
 export const DROP_PICKUP_AFTER_MS = 1000;
+
+/**
+ * 从容器实体取回槽位物品到操作者背包（死亡容器/储物容器共用原语）。
+ *
+ * 经命令通道调用（transfer + target = 容器 networkId；transferSlot 是
+ * 单背包内原子，跨容器转移由此原语承担）：目标须带 Inventory 且与操作者
+ * 同图；整并入则清源槽，部分并入则回写剩余（满包不吞，容器侧零变更）。
+ * 不做距离校验——与 consume/drop/transfer 同层级的命令原子，范围限制
+ * 属交互层关注（与 deconstruct 的 placeRange 校验不同源，避免耦合规则）。
+ *
+ * @param world 游戏世界
+ * @param playerEid 操作者实体
+ * @param containerNetworkId 容器实体的稳定网络标识
+ * @param slot 容器内的源槽索引
+ * @returns 是否有物品被取回
+ */
+export function lootContainerSlot(
+  world: GameWorld,
+  playerEid: number,
+  containerNetworkId: number,
+  slot: number,
+): boolean {
+  if (!Number.isInteger(containerNetworkId) || containerNetworkId <= 0) return false;
+  const playerInv = Inventory[playerEid];
+  if (!playerInv) return false;
+
+  // 按 networkId 查容器 eid（实体量小，线性查找即可，与 deconstruct 同模式）
+  let containerEid: number | undefined;
+  for (const eid of query(world, [NetworkId])) {
+    if (NetworkId.value[eid] === containerNetworkId) {
+      containerEid = eid;
+      break;
+    }
+  }
+  if (containerEid === undefined || containerEid === playerEid) return false;
+  const containerInv = Inventory[containerEid];
+  if (!containerInv) return false;
+
+  // 同图校验：跨图取回拒绝（归属异常时双方同回退默认图，比较仍成立）
+  if (entityMapOf(world, containerEid) !== entityMapOf(world, playerEid)) return false;
+
+  const stack = containerInv.slots[slot];
+  if (!stack) return false;
+
+  const leftover = addToInventory(playerInv, world.gameDef.itemsByKind, stack.kind, stack.count);
+  if (leftover >= stack.count) return false; // 满包：一点未入，容器侧零变更
+  if (leftover > 0) {
+    stack.count = leftover; // 部分并入：剩余留在容器
+  } else {
+    containerInv.slots[slot] = null; // 整槽取空
+  }
+  return true;
+}
 
 /** 生成一个地面 item 实体并写 ItemMeta（供 drop 与 loot 共用）。
  *

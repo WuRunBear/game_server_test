@@ -27,6 +27,11 @@
  * footprint 展开整矩形逐格检查（界内 + 可走 + 未占用）——多格放置物
  * 不再只查中心格。
  *
+ * 产出量决策可插拔（种群模型，populationModels.ts）：每槽先经 mode 名查
+ * 注册表得到本槽**目标数量**（内置 density/exact/template 恒返回 rule.max，
+ * node 返回族群节点记账和），引擎统一以 rule.max 封顶后补差
+ * （deficit = target − count，下限 0）——只增不删不变式对所有模式成立，
+ * 目标回落（节点记账下降）时本槽空转，绝不删除实体。
  * condition 每 evolve 调用对每条规则求值一次（经 spawnConditions 注册表，
  * 未注册条件名抛错——配置错误尽早暴露）；求值结果对本调用内全部 timeSlot
  * 生效，不做逐时段历史相位（I3 已声明的设计近似）。
@@ -37,7 +42,8 @@ import { createLogger } from "framework/utils/logger";
 import type { GameWorld } from "framework/world";
 import type { MapGeometry } from "map/geometry/types";
 import { pickPoint, placementCandidates } from "map/evolution/placement";
-import type { DensityRule, EntityRule, ExactRule, TemplateRule } from "map/evolution/schema";
+import { getPopulationModel, type PopulationModel } from "map/evolution/populationModels";
+import type { DensityRule, EntityRule, ExactRule, NodeRule, TemplateRule } from "map/evolution/schema";
 import { ruleIdentity } from "map/evolution/schema";
 
 /** 演化日志器（游戏无关 scope）。 */
@@ -64,6 +70,7 @@ export interface EvolutionDeps {
 
 /** 模式分派辅助函数的共享上下文（单次 evolve 调用内不变；mapKey 已绑定）。 */
 interface EvolutionContext {
+  world: GameWorld;
   geometry: MapGeometry;
   mapKey: string;
   ruleId: string;
@@ -76,6 +83,8 @@ interface EvolutionContext {
 interface RuleCursor {
   ctx: EvolutionContext;
   rule: EntityRule;
+  /** 种群模型（按 mode 名经注册表解析；产出量决策的可插拔点）。 */
+  model: PopulationModel;
   /** 区域内 kind 实体数；null = 尚未查询（惰性到首个槽）。 */
   count: number | null;
   /** 下一个待处理槽（绝对对齐）；Infinity = 已早退/耗尽。 */
@@ -93,12 +102,13 @@ function createDefaultSpawn(world: GameWorld): SpawnFn {
 }
 
 /**
- * density 补足：逐个确定性选点生成，直至补满 need 或候选耗尽。
+ * density/node 补足：逐个确定性选点生成，直至补满 need 或候选耗尽。
+ * （node 模式复用同一确定性选点落位，目标数量另经 node 种群模型给出。）
  *
  * 候选耗尽即放弃本槽剩余补足——同流同占用（未新增任何实体）下重试必同样
  * 失败，不会死循环。返回本槽新增的 rule.kind 实体数。
  */
-function spawnDensity(rule: DensityRule, need: number, ctx: EvolutionContext, slot: number): number {
+function spawnDensity(rule: DensityRule | NodeRule, need: number, ctx: EvolutionContext, slot: number): number {
   let spawned = 0;
   for (let i = 0; i < need; i++) {
     const point = pickPoint(ctx.geometry, rule.region, ctx.ruleId, slot, ctx.seed, rule.kind, ctx.canPlace);
@@ -204,8 +214,9 @@ export function evolve(
       continue;
     }
     cursors.push({
-      ctx: { geometry, mapKey, ruleId: ruleIdentity(rule), seed: deps.seed, spawn, canPlace },
+      ctx: { world, geometry, mapKey, ruleId: ruleIdentity(rule), seed: deps.seed, spawn, canPlace },
       rule,
+      model: getPopulationModel(rule.mode),
       count: null,
       nextSlot: Math.floor(fromTick / rule.every) * rule.every + rule.every,
     });
@@ -229,10 +240,30 @@ export function evolve(
         cursor.nextSlot = Infinity; // 早退不变式：该规则剩余 timeSlot 全部跳过
         continue;
       }
-      const need = cursor.rule.max - cursor.count;
+      // 产出量决策（可插拔种群模型）：本槽目标数量，引擎统一以 rule.max 封顶。
+      // 内置 density/exact/template 模型返回 max 本身——与历史 need = max−count
+      // 逐点一致；node 模型返回族群节点记账和。deficit ≤ 0 → 本槽空转
+      // （node 目标回落时绝不删实体——只增不删，死亡归 deathSystem）。
+      const target = Math.min(
+        cursor.model({
+          world,
+          geometry,
+          rule: cursor.rule,
+          count: cursor.count,
+          slot: minSlot,
+          seed: deps.seed,
+        }),
+        cursor.rule.max,
+      );
+      const need = target - cursor.count;
+      if (need <= 0) {
+        cursor.nextSlot += cursor.rule.every;
+        continue;
+      }
       let added: number;
       switch (cursor.rule.mode) {
         case "density":
+        case "node": // node 复用 density 式确定性选点落位（目标经种群模型给出）
           added = spawnDensity(cursor.rule, need, cursor.ctx, minSlot);
           break;
         case "exact":

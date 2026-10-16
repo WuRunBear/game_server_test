@@ -2,10 +2,15 @@
  * 实体演化规则 schema（framework/map/evolution/schema.ts）。
  *
  * EntityRule 是补差引擎（engine.ts）的输入数据：一条规则声明「在 map 图的
- * region 区域内，把 kind 实体按 every 周期补足到 max」。按 mode 判别联合：
+ * region 区域内，把 kind 实体按 every 周期补足到目标数量」。按 mode 判别联合：
  * - density：区域内确定性选点补足（见 placement.ts pickPoint）；
  * - exact：固定落点 at（传送门等配对静态项）；
- * - template：成组结构（{kind,dx,dy} 相对偏移，一栋建筑/一段墙），整组原子创建。
+ * - template：成组结构（{kind,dx,dy} 相对偏移，一栋建筑/一段墙），整组原子创建；
+ * - node：目标数量来自族群节点记账（该图该区域该 species 的 Population 节点
+ *   count 之和，引擎以 max 封顶后补差；落点用 density 式确定性选点）。
+ *
+ * mode 同时是种群模型（populationModels.ts）的注册名：引擎每槽经注册表取
+ * 目标数量决策，四种内置模式对应四个内置模型。
  *
  * 纯数据定义：map/region/kind 均为通用标识，含义由 game/ 配置约定，
  * 本模块不含任何游戏语义。
@@ -39,7 +44,10 @@ const EntityRuleBaseSchema = z.object({
    * 引擎跳过并 warn。
    */
   kind: z.string(),
-  /** 数量上限（区域内该 kind 实体数封顶；template 模式下为锚 kind 实体数上限）。 */
+  /**
+   * 数量上限（区域内该 kind 实体数封顶；template 模式下为锚 kind 实体数上限；
+   * node 模式下为节点记账目标之上的硬封顶）。
+   */
   max: z.number().int().min(0),
   /** 补足周期（tick 数）；timeSlot 取 every 的整数倍、绝对对齐（见 engine.ts）。 */
   every: z.number().int().min(1),
@@ -74,16 +82,28 @@ export const TemplateRuleSchema = EntityRuleBaseSchema.extend({
   template: z.array(TemplateEntrySchema).min(1),
 });
 
+/**
+ * node 规则：目标数量来自族群节点记账（该图该区域该 species 的 Population
+ * 节点 count 之和，引擎以 max 封顶后补差；只增不删，节点回落不删活体）。
+ * max 语义 = 实体数硬上限（封顶），every = 补差检查周期。
+ */
+export const NodeRuleSchema = EntityRuleBaseSchema.extend({
+  /** 规则模式判别字段。 */
+  mode: z.literal("node"),
+});
+
 /** 实体演化规则（按 mode 判别的联合）。 */
 export const EntityRuleSchema = z.discriminatedUnion("mode", [
   DensityRuleSchema,
   ExactRuleSchema,
   TemplateRuleSchema,
+  NodeRuleSchema,
 ]);
 
 export type DensityRule = z.infer<typeof DensityRuleSchema>;
 export type ExactRule = z.infer<typeof ExactRuleSchema>;
 export type TemplateRule = z.infer<typeof TemplateRuleSchema>;
+export type NodeRule = z.infer<typeof NodeRuleSchema>;
 export type EntityRule = z.infer<typeof EntityRuleSchema>;
 
 // ---------------------------------------------------------------------------
@@ -123,6 +143,7 @@ export const EntityRuleSourceSchema = z.discriminatedUnion("mode", [
   DensityRuleSchema,
   ExactRuleSchema,
   TemplateRuleSourceSchema,
+  NodeRuleSchema,
 ]);
 
 /**

@@ -59,12 +59,6 @@
           "every": 155520000
         },
         {
-          "kind": "spider",
-          "max": 6,
-          "every": 300,
-          "condition": "isNight"
-        },
-        {
           "kind": "wolf",
           "density": 0.0006,
           "every": 300

@@ -118,6 +118,7 @@ export {
   getEnvironmentRule, NEUTRAL_ENVIRONMENT,
   type EnvironmentView, type PhaseView, type TileContext, type GroundDerivationFn,
 } from "framework/simulation/worldClock";
+export { registerPopulationModel, getPopulationModel, listPopulationModels, registerBuiltinPopulationModels, type PopulationModel, type PopulationModelContext } from "framework/map/evolution/populationModels";
 export { placeEntity } from "framework/systems/gameplay/placeableSystem";
 export { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";
 export { startDialogue, advanceDialogue, applyDialogueEffect, END_DIALOGUE } from "framework/systems/gameplay/dialogueSystem";
@@ -130,7 +131,7 @@ export { GameDefinitionSchema, WorldTileSchema, WorldSchema, type GameDefinition
 export { normalizeTileUnits } from "framework/config/tileUnits";
 export { ItemKindSchema, type ItemKindSpec, type ConsumeEffect, type ItemEffectSpec, type EquipEffect, type PlaceEffect } from "framework/config/schema/ItemKindSchema";
 export { registerRuleSchema, getRuleSchema, hasRuleSchema, registerBuiltinRuleSchemas } from "framework/config/schema/ruleSchemas";
-export { CombatRuleSchema, NeedsRuleSchema, CraftingRuleSchema, DayNightRuleSchema, EnvironmentRuleSchema, ServerRuleSchema, EnvironmentModifierSchema, EnvironmentPhaseSchema, PhaseWeatherOptionSchema, type CombatRule, type NeedsRule, type CraftingRule, type CraftingRecipe, type DayNightRule, type EnvironmentRule, type EnvironmentPhase, type EnvironmentModifier, type PhaseWeatherOption, type ServerRule } from "framework/config/schema/RuleSchema";
+export { CombatRuleSchema, NeedsRuleSchema, CraftingRuleSchema, DayNightRuleSchema, EnvironmentRuleSchema, ServerRuleSchema, RespawnRuleSchema, EnvironmentModifierSchema, EnvironmentPhaseSchema, PhaseWeatherOptionSchema, type CombatRule, type NeedsRule, type CraftingRule, type CraftingRecipe, type DayNightRule, type EnvironmentRule, type EnvironmentPhase, type EnvironmentModifier, type PhaseWeatherOption, type ServerRule, type RespawnRule } from "framework/config/schema/RuleSchema";
 
 export {
   registerSystem,

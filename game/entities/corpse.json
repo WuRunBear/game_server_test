@@ -1,0 +1,8 @@
+{
+  "kind": "corpse",
+  "tags": ["Container"],
+  "components": {
+    "Size": { "w": 16, "h": 16 },
+    "Inventory": { "capacity": 16 }
+  }
+}

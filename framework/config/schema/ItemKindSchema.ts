@@ -70,6 +70,12 @@ export const ItemKindSchema = z.object({
   equip: EquipEffectSchema.optional(),
   /** 可放置声明（目标 archetype）；缺省表示不可放置。 */
   place: PlaceEffectSchema.optional(),
+  /**
+   * 死亡保留标志：true = 持有者死亡时该物品留在身上（不转入死亡容器）。
+   * 缺省 false = 随背包整体转入死亡容器。仅对持有者（玩家）死亡路径生效，
+   * 非玩家死亡走 LootTable，与此标志无关。
+   */
+  keepOnDeath: z.boolean().optional(),
 });
 
 /** 食用/消耗效果的类型推断。 */

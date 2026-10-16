@@ -1,5 +1,6 @@
 import { query } from "bitecs";
 import { Health, Needs } from "components";
+import { isOfflineRetained } from "components/offline";
 import type { GameWorld } from "world";
 
 interface NeedsRule {
@@ -20,6 +21,8 @@ export function needDecaySystem(world: GameWorld): GameWorld {
   if (dtSec <= 0) return world;
 
   for (const eid of query(world, [Health])) {
+    // 断线保留期实体需求冻结（不衰减不掉血——离线玩家不应被饿死）
+    if (isOfflineRetained(world, eid)) continue;
     // 需求只作用于活物（需 Health），避免给无血量实体套 AoS
     const needs = Needs[eid];
     if (!needs || needs.length === 0) continue;

@@ -9,7 +9,7 @@
  * 外部代码应该通过 SimulationPort 接口使用仿真，不应直接依赖 GameSimulation。
  */
 export type {
-  PlayerInput, PlayerJoinResult, TickSnapshot, TickResult, DebugSnapshotOptions,
+  PlayerInput, PlayerJoinResult, PlayerJoinOptions, TickSnapshot, TickResult, DebugSnapshotOptions,
 } from "./types";
 
 export type { SimulationPort } from "./SimulationPort";
