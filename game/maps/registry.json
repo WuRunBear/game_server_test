@@ -211,6 +211,59 @@
           "params": {}
         }
       ]
+    },
+    "highlands": {
+      "kind": "pipeline",
+      "seed": 424242,
+      "initialAgeTicks": 0,
+      "pipeline": [
+        {
+          "generator": "noise-terrain",
+          "params": {
+            "width": 96,
+            "height": 96,
+            "tileWidth": 16,
+            "tileHeight": 16,
+            "bandLevel": 1,
+            "groundPalette": {
+              "2": 1
+            },
+            "nonWalkableSemantics": []
+          }
+        },
+        {
+          "generator": "height-channel",
+          "params": {
+            "cell": 10
+          }
+        },
+        {
+          "generator": "quantize-terrain",
+          "params": {
+            "thresholds": [
+              0.3,
+              0.55,
+              0.8
+            ],
+            "maxLevels": 4,
+            "slopeSemantics": 7,
+            "cliffSemantics": 8
+          }
+        },
+        {
+          "generator": "climate-regions",
+          "params": {
+            "names": [
+              "plateau"
+            ],
+            "style": "noise"
+          }
+        },
+        {
+          "generator": "region-stats",
+          "params": {}
+        }
+      ]
     }
   }
 }

@@ -2,9 +2,10 @@
  * 生成层出口结构校验（framework/map/generate/validate.ts）。
  *
  * 对 GeometryDraft / MapGeometry 做**纯结构**校验（无语义上下文）：
- * - 硬错误（抛错）：网格非空、tiles/walkable/regionOfTile 长度与
- *   width × height 一致、regions 非空、regionOfTile 索引落在 regions
- *   数量范围内（即每格区域索引可解析）；
+ * - 硬错误（抛错）：网格非空、tiles/walkable/level/regionOfTile 长度与
+ *   width × height 一致（level 缓冲允许缺省为 0 长——未量化管道冻结时
+ *   归一化补全，见 buildMapGeometry）、regions 非空、regionOfTile 索引
+ *   落在 regions 数量范围内（即每格区域索引可解析）；
  * - 软告警（logger.warn）：已声明但零覆盖的区域——结构合法但可疑，
  *   不阻断；
  * - 软告警（logger.warn）：可通行连通性——对 walkable=1 格做 4-邻接
@@ -12,6 +13,13 @@
  *   多个连通域且最大域占比低于阈值（可配置，缺省
  *   DEFAULT_MIN_MAIN_DOMAIN_SHARE）时告警，不阻断。连通性是纯结构
  *   属性、不依赖游戏语义，符合「软告警不阻断」定位。
+ * - 硬错误（抛错）：**多层地形可达性**（仅对 level 非平坦的图生效，
+ *   flat 图自动跳过——量化积木的产出天然满足，违反即几何被手改/错配）：
+ *   ① 相邻层差约束——4-邻接 |Δlevel| ≥ 2 的相邻格对必须至少一侧不可
+ *   通行（cliff 语义的结构等价物：本层无语义上下文，以通行位代理判定；
+ *   两侧都可走意味着跨 2 层的台阶，movement 层无法解释）；② slope 链
+ *   连通——多层地形上可通行区必须单一连通域（slope 带是唯一的跨层通道，
+ *   孤立可走域意味着「上山道被悬崖切断」，演化刷在其上的实体不可达）。
  *
  * 「地面语义 → 通行位图」一致性**不在此校验**：本层没有语义上下文，
  * 该一致性由各积木自行保证并以积木单测覆盖。
@@ -40,6 +48,21 @@ export interface ConnectivityCheckOptions {
 
 /** 校验输入：生成期草稿或冻结后的几何（结构字段同形）。 */
 export type GeometryValidationInput = GeometryDraft | MapGeometry;
+
+/**
+ * level 缓冲是否非平坦（存在至少两个不同的层号）。
+ *
+ * 多层可达性校验只对非平坦 level 生效——flat 图（未量化/单层）没有跨层
+ * 语义，走既有的软告警连通性即可。
+ */
+function isNonFlatLevel(level: Int8Array): boolean {
+  if (level.length === 0) return false;
+  const first = level[0];
+  for (let i = 1; i < level.length; i++) {
+    if (level[i] !== first) return true;
+  }
+  return false;
+}
 
 /**
  * 对可通行位图做 4-邻接 BFS 连通域标记（只读，不改输入）。
@@ -108,7 +131,7 @@ export function validateMapGeometry(
 
   // 草稿把 grid 摊平为四个标量，冻结几何为嵌套 grid——统一取值
   const { width, height } = "grid" in input ? input.grid : input;
-  const { tiles, walkable, regions, regionOfTile } = input;
+  const { tiles, walkable, level, regions, regionOfTile } = input;
   const total = width * height;
 
   // 网格非空
@@ -116,12 +139,16 @@ export function validateMapGeometry(
     errors.push(`grid is empty (width=${width}, height=${height})`);
   }
 
-  // 缓冲长度与 width × height 一致
+  // 缓冲长度与 width × height 一致（level 允许 0 长 = 未量化草稿，
+  // 冻结归一化补全；非 0 长则必须等长）
   if (tiles.length !== total) {
     errors.push(`tiles length ${tiles.length} != width*height ${total}`);
   }
   if (walkable.length !== total) {
     errors.push(`walkable length ${walkable.length} != width*height ${total}`);
+  }
+  if (level.length > 0 && level.length !== total) {
+    errors.push(`level length ${level.length} != width*height ${total}`);
   }
   if (regionOfTile.length !== total) {
     errors.push(`regionOfTile length ${regionOfTile.length} != width*height ${total}`);
@@ -142,6 +169,57 @@ export function validateMapGeometry(
           `regionOfTile[${i}]=${regionIndex} out of range (regions count ${regions.size})`,
         );
         break;
+      }
+    }
+  }
+
+  // 多层地形可达性（硬错误；仅对 level 等长且非平坦的图生效，flat 图跳过）
+  if (level.length === total && total > 0 && isNonFlatLevel(level)) {
+    // ① 相邻层差约束：|Δlevel| ≥ 2 的相邻格对必须至少一侧不可通行
+    //    （cliff 语义的结构等价物——本层无语义上下文，以通行位代理）。
+    //    收集至多 3 例后停止扫描（错误消息可定位即可）。
+    const cliffViolations: string[] = [];
+    for (let y = 0; y < height && cliffViolations.length < 3; y++) {
+      for (let x = 0; x < width && cliffViolations.length < 3; x++) {
+        const index = y * width + x;
+        const own = level[index];
+        // 只检查右邻与下邻（每对无序格对判一次）
+        for (const neighbor of [
+          x + 1 < width ? index + 1 : -1,
+          y + 1 < height ? index + width : -1,
+        ]) {
+          if (neighbor < 0) continue;
+          const delta = Math.abs(level[neighbor] - own);
+          if (delta >= 2 && walkable[index] === 1 && walkable[neighbor] === 1) {
+            const nx = neighbor % width;
+            const ny = Math.floor(neighbor / width);
+            cliffViolations.push(
+              `walkable step of ${delta} between (${x},${y}) and (${nx},${ny}) has no impassable (cliff) side`,
+            );
+            if (cliffViolations.length >= 3) break;
+          }
+        }
+      }
+    }
+    if (cliffViolations.length > 0) {
+      errors.push(...cliffViolations);
+    }
+
+    // ② slope 链连通：多层地形上可通行区必须单一连通域（slope 带是唯一
+    //    跨层通道——孤立可走域即「上山道被悬崖切断」，不可达）
+    if (cliffViolations.length === 0) {
+      let walkableCount = 0;
+      for (let i = 0; i < walkable.length; i++) {
+        if (walkable[i] === 1) walkableCount++;
+      }
+      if (walkableCount > 0) {
+        const [domains, largest] = walkableDomains(walkable, width, height);
+        if (domains > 1) {
+          const share = ((largest / walkableCount) * 100).toFixed(1);
+          errors.push(
+            `multi-level terrain splits walkable area into ${domains} domains (largest covers ${share}%) — slope chain between plateaus is cut`,
+          );
+        }
       }
     }
   }
