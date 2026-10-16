@@ -199,4 +199,9 @@ export function quantizeTerrain(ctx: GenerationContext): void {
       }
     }
   }
+
+  // 层边界语义随几何落盘：跨层移动与按层碰撞的运行时按此识别 slope/cliff
+  // 格（v2 地图切片 5 消费；指纹无需纳入——语义 id 变化必然改写 tiles，
+  // 内容指纹经 tiles 传递变化）。
+  draft.levelSemantics = { slope: params.slopeSemantics, cliff: params.cliffSemantics };
 }

@@ -56,6 +56,60 @@ export function walkableAt(geometry: MapGeometry, x: number, y: number): boolean
 }
 
 /**
+ * 查询 (x, y) 格在指定层号的通行性（按层视角，v2 地图切片 5）。
+ *
+ * 规则（前置修正 8 的有向语义，地形侧）：
+ * - walkable=1 → 可通行（与层无关）；
+ * - walkable=0 且该格是 cliff 语义格、且格层号 ≤ 查询层号 → **可自上而下
+ *   单向越过**（跳下：站在高层的实体可以越过/落经低于自己的崖格；低层
+ *   视角下同一格仍不可走，禁止低→高攀爬）；
+ * - 其余 walkable=0 → 不可通行（原有 nonWalkable 语义在任何层都阻挡）。
+ *
+ * 无 levelSemantics 的图（未量化 flat 图）与 walkableAt 完全同判——现有
+ * 图零回归。建造层（楼板/墙实体）的通行性在楼层建造切片并线（前置修正 3
+ * 的完整 walkableAtLevel = 地形 OR 建造）。
+ *
+ * @param geometry 地图几何数据
+ * @param x tile 列坐标
+ * @param y tile 行坐标
+ * @param level 查询视角的层号（实体所在层）
+ * @returns 该格在该层视角下可通行时 true；越界时 false
+ */
+export function walkableAtLevel(geometry: MapGeometry, x: number, y: number, level: number): boolean {
+  const index = tileIndexOf(geometry, x, y);
+  if (index < 0) return false;
+  if (geometry.walkable[index] === 1) return true;
+  const semantics = geometry.levelSemantics;
+  if (!semantics) return false;
+  if (geometry.tiles[index] !== semantics.cliff) return false;
+  return (geometry.level[index] ?? 0) <= level;
+}
+
+/**
+ * 取地图几何出现过的全部离散层号（升序，带 WeakMap 缓存）。
+ *
+ * 供按层碰撞运行时枚举「每层一个碰撞世界」的层清单；MapGeometry 约定
+ * 不可变（level 数组运行期只经写回入口改写并重算 version——届时调用方
+ * 需自行重建几何对象使缓存失效），缓存与位图恒一致。
+ *
+ * @param geometry 地图几何数据
+ * @returns 升序层号数组（flat 图为 [0]）
+ */
+export function distinctLevels(geometry: MapGeometry): number[] {
+  let levels = distinctLevelsCache.get(geometry);
+  if (!levels) {
+    const seen = new Set<number>();
+    for (let i = 0; i < geometry.level.length; i++) seen.add(geometry.level[i]);
+    levels = seen.size === 0 ? [0] : [...seen].sort((a, b) => a - b);
+    distinctLevelsCache.set(geometry, levels);
+  }
+  return levels;
+}
+
+/** distinctLevels 的按几何弱引用缓存（本模块不向 geometry 写入任何数据）。 */
+const distinctLevelsCache = new WeakMap<MapGeometry, number[]>();
+
+/**
  * 查询 (x, y) 格所属区域。
  *
  * regionOfTile 存的是 regions 插入顺序的索引，据此直查区域名数组

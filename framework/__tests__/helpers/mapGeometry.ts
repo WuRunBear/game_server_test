@@ -16,6 +16,12 @@ export interface TestGeometryOptions {
   tileHeight?: number;
   /** 返回 true 的格为阻挡（walkable=0）；缺省全可走。 */
   blocked?: (tx: number, ty: number) => boolean;
+  /** 每格地面语义 id；缺省全 0。 */
+  tiles?: (tx: number, ty: number) => number;
+  /** 每格离散层号；缺省全 0（flat）。 */
+  levels?: (tx: number, ty: number) => number;
+  /** 层边界语义 id 对（slope/cliff 格由 tiles 回调声明时一并给出）。 */
+  levelSemantics?: { slope: number; cliff: number };
   /** 区域名列表（插入序即 regionOfTile 索引序）；缺省 ["default"]。 */
   regions?: string[];
   /** 每格区域索引；缺省全 0（指向第一个区域）。 */
@@ -37,7 +43,9 @@ export function makeTestGeometry(options: TestGeometryOptions = {}): MapGeometry
   for (let ty = 0; ty < height; ty++) {
     for (let tx = 0; tx < width; tx++) {
       const index = ty * width + tx;
+      tiles[index] = options.tiles?.(tx, ty) ?? 0;
       walkable[index] = options.blocked?.(tx, ty) ? 0 : 1;
+      level[index] = options.levels?.(tx, ty) ?? 0;
       regionOfTile[index] = options.regionOfTile?.(tx, ty) ?? 0;
     }
   }
@@ -48,6 +56,7 @@ export function makeTestGeometry(options: TestGeometryOptions = {}): MapGeometry
     tiles,
     walkable,
     level,
+    ...(options.levelSemantics ? { levelSemantics: { ...options.levelSemantics } } : {}),
     regions: new Map(regionNames.map((name) => [name, { name, meta: {} }])),
     regionOfTile,
     version: "",

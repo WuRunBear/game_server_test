@@ -1,17 +1,20 @@
 /**
- * 兴趣集合计算——按玩家所属地图 + 视野半径裁剪每个玩家的可见实体。
+ * 兴趣集合计算——按玩家所属地图 + 层号 + 视野半径裁剪每个玩家的可见实体。
  *
  * 纯数据函数：读 ECS 玩家位置 + 快照实体位置，输出 sessionId → 可见 networkId 列表。
  * - 玩家自身恒可见（客户端必须始终能追踪自己的控制实体）
- * - 其他实体仅在「快照 mapId === 玩家图」时才可能可见（分图分区语义）
+ * - 其他实体仅在「快照 mapId === 玩家图」且「快照 level === 玩家层」时才可能
+ *   可见（分图分区 + 同层全给语义；跨层露天可见性属后续 LOS 切片，level
+ *   维度已随快照留出）
  * - 无 Transform 数据的实体不可见（现实中不存在，防御分支）
  *
  * 传输层（GameRoom）拿到 interest 后做 per-client 裁剪同步；
- * 未配置视野半径时按同图全量返回（半径裁剪关闭，兼容旧协议的全量广播语义）。
+ * 未配置视野半径时按同图同层全量返回（半径裁剪关闭，兼容旧协议的全量广播语义）。
  */
 import { NetworkId } from "framework/components/network";
 import { Transform } from "framework/components/transform";
 import { entityMapOf } from "framework/components/entityMap";
+import { entityLevelOf } from "framework/components/entityLevel";
 import type { GameWorld } from "framework/world";
 import type { EntityId } from "framework/world";
 import type { TickSnapshot } from "./types";
@@ -38,8 +41,9 @@ export function computeInterest(
     // 以玩家的 ECS Transform 位置为视野中心
     const px = Transform.x[eid];
     const py = Transform.y[eid];
-    // 玩家所属图：本玩家以 ECS 实体归属为准（authoritative）
+    // 玩家所属图/层：本玩家以 ECS 实体归属为准（authoritative）
     const myMap = entityMapOf(world, eid);
+    const myLevel = entityLevelOf(eid);
     const ownNetworkId = NetworkId.value[eid];
     const visible: number[] = [];
 
@@ -51,6 +55,9 @@ export function computeInterest(
       }
       // 同图过滤：快照 mapId 即同步给客户端的真相——只按玩家所在图收窄范围
       if (snap.mapId !== myMap) continue;
+      // 同层过滤（同层全给）：异层实体不可见——跨层可见性（露天限半径/LOS）
+      // 属后续切片，先按层维度收窄
+      if (snap.level !== myLevel) continue;
       // 其他实体位置取自快照的 Transform.x/y（与客户端收到的一致，且避免再读 ECS）
       const ex = snap.values["Transform.x"];
       const ey = snap.values["Transform.y"];

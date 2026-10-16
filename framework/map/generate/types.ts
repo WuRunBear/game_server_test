@@ -10,7 +10,7 @@
  * 纯几何生产层：不 import bitecs/ECS/任何 world 类型，不产出实体。
  */
 
-import type { RegionMeta } from "map/geometry/types";
+import type { LevelSemantics, RegionMeta } from "map/geometry/types";
 import type { Rng } from "map/generate/rng";
 
 /**
@@ -45,6 +45,11 @@ export interface GeometryDraft {
   walkable: Uint8Array;
   /** 每格离散层号（行主序展平，Int8 有符号；未量化时长度 0，冻结归一化为全 0）。 */
   level: Int8Array;
+  /**
+   * 层边界语义 id 对（可选）：量化类积木派生 slope/cliff 带时写入，冻结时
+   * 原样带入 MapGeometry（flat 图缺省，缺省即无跨层语义）。
+   */
+  levelSemantics?: LevelSemantics;
   /** 区域名 → 区域元信息（插入顺序即 regionOfTile 的索引序）。 */
   regions: Map<string, RegionMeta>;
   /** 每格所属区域的索引（行主序展平，指向 regions 的插入顺序）。 */

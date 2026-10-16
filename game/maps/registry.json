@@ -264,6 +264,108 @@
           "params": {}
         }
       ]
+    },
+    "island-v2": {
+      "kind": "pipeline",
+      "seed": 20261016,
+      "initialAgeTicks": 0,
+      "pipeline": [
+        {
+          "generator": "noise-terrain",
+          "params": {
+            "width": 96,
+            "height": 96,
+            "tileWidth": 16,
+            "tileHeight": 16,
+            "bandLevel": 0.4,
+            "groundPalette": {
+              "2": 0.4,
+              "3": 0.7,
+              "6": 1
+            },
+            "nonWalkableSemantics": []
+          }
+        },
+        {
+          "generator": "height-channel",
+          "params": {
+            "cell": 48
+          }
+        },
+        {
+          "generator": "noise-channel",
+          "params": {
+            "slot": "noise-channel.temperature",
+            "cell": 9
+          }
+        },
+        {
+          "generator": "noise-channel",
+          "params": {
+            "slot": "noise-channel.moisture",
+            "cell": 6,
+            "seedOffset": 512
+          }
+        },
+        {
+          "generator": "river",
+          "params": {
+            "flowThreshold": 80,
+            "waterSemantics": 1,
+            "lakeLevel": 0.14
+          }
+        },
+        {
+          "generator": "quantize-terrain",
+          "params": {
+            "thresholds": [
+              0.3,
+              0.55,
+              0.8
+            ],
+            "maxLevels": 4,
+            "slopeSemantics": 7,
+            "cliffSemantics": 8
+          }
+        },
+        {
+          "generator": "whittaker-regions",
+          "params": {
+            "temperatureSlot": "noise-channel.temperature",
+            "moistureSlot": "noise-channel.moisture",
+            "rowThresholds": [
+              0.35,
+              0.65
+            ],
+            "colThresholds": [
+              0.4,
+              0.7
+            ],
+            "table": [
+              [
+                "tundra",
+                "taiga",
+                "boreal"
+              ],
+              [
+                "steppe",
+                "grassland",
+                "forest"
+              ],
+              [
+                "desert",
+                "savanna",
+                "jungle"
+              ]
+            ],
+            "minArea": 300
+          }
+        },
+        {
+          "generator": "region-stats",
+          "params": {}
+        }
+      ]
     }
   }
 }

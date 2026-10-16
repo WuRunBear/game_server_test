@@ -4,6 +4,7 @@
  */
 import { query, hasComponent, addComponent, removeComponent } from "bitecs";
 import { NetworkId, Velocity, Inventory, Intent, Health, entityMapOf, SpawnPoint, Player } from "components";
+import { entityLevelOf } from "framework/components/entityLevel";
 import { Offline, isOfflineRetained } from "components/offline";
 import { spawnEntity } from "framework/entities/spawn";
 import { destroyEntity } from "framework/entities/destroyEntity";
@@ -797,7 +798,12 @@ export class GameSimulation implements SimulationPort {
       const ensure = (id: number, eid: number): EntitySnapshot => {
         let snap = entities.get(id);
         if (!snap) {
-          snap = { values: {}, strings: {}, mapId: entityMapOf(this.world, eid) };
+          snap = {
+            values: {},
+            strings: {},
+            mapId: entityMapOf(this.world, eid),
+            level: entityLevelOf(eid),
+          };
           entities.set(id, snap);
         }
         return snap;

@@ -39,6 +39,22 @@ export interface RegionMeta {
 }
 
 /**
+ * 层边界语义 id 对（framework 侧只存数字 id，含义命名映射在 game 配置）。
+ *
+ * 由量化类积木（quantize-terrain）在派生 slope/cliff 边界带时写入几何，
+ * 供跨层移动与按层碰撞的运行时消费：
+ * - slope：±1 层过渡格（可走，双向）；
+ * - cliff：|Δlevel| ≥ 2 的边界带格（不可走；唯一例外是「自上而下单向可越」
+ *   的跳下语义，见 walkableAtLevel）。
+ */
+export interface LevelSemantics {
+  /** slope 语义 id（相邻层差 1 的边界带，可走）。 */
+  slope: number;
+  /** cliff 语义 id（相邻层差 ≥2 的边界带，不可走、可自上而下单向越过）。 */
+  cliff: number;
+}
+
+/**
  * 地图几何数据：新地图系统的地理数据层。
  *
  * 约定：
@@ -65,6 +81,11 @@ export interface MapGeometry {
   walkable: Uint8Array;
   /** 每格离散层号（行主序展平，Int8 有符号，负层留给地下；flat 地形全 0）。 */
   level: Int8Array;
+  /**
+   * 层边界语义 id 对（可选——量化类积木派生 slope/cliff 带时写入；未量化
+   * 的 flat 图缺省，缺省即无跨层语义：±1 过渡不可达、cliff 跳下不生效）。
+   */
+  levelSemantics?: LevelSemantics;
   /** 区域名 → 区域元信息（插入顺序即 regionOfTile 的索引序）。 */
   regions: Map<string, RegionMeta>;
   /** 每格所属区域的索引（行主序展平，指向 regions 的插入顺序）。 */

@@ -3,7 +3,7 @@
  *
  * 覆盖计划 todo 3 注册接线验收：
  * - registerBuiltinMapGenerators 注册全部内置积木 id（has 全真）；
- * - 注册表恰好含这十一条（all 长度 = 11 且 id 集合一致）；
+ * - 注册表恰好含这十五条（all 长度 = 15 且 id 集合一致）；
  * - 端到端：注册表 + buildMapGeometry 跑 noise-terrain → climate-regions
  *   管道产出合法 MapGeometry（证明注册的是真实积木而非占位）；
  * - 新积木端到端：slot-rooms 首积木 + region-stats 精修 + smooth-terrain
@@ -29,6 +29,10 @@ const BLOCK_IDS = [
   "quantize-terrain",
   "slot-rooms",
   "stamp-template",
+  "noise-channel",
+  "whittaker-regions",
+  "river",
+  "ca-cave",
 ] as const;
 
 describe("registerBuiltinMapGenerators", () => {
@@ -40,11 +44,11 @@ describe("registerBuiltinMapGenerators", () => {
     }
   });
 
-  it("注册表恰好含这十一条（all 长度 = 11 且 id 集合一致）", () => {
+  it("注册表恰好含这十五条（all 长度 = 15 且 id 集合一致）", () => {
     const registry = createGeneratorRegistry();
     registerBuiltinMapGenerators(registry);
     const entries = registry.all();
-    expect(entries).toHaveLength(11);
+    expect(entries).toHaveLength(15);
     expect(entries.map((entry) => entry.id).sort()).toEqual([...BLOCK_IDS].sort());
   });
 

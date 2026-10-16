@@ -8,7 +8,7 @@
  * 纯函数：serialize 输出全新对象（不共享可变引用），serialize→deserialize
  * 往返与原值深相等（含 regions Map 与区域插入顺序）。
  */
-import type { MapGeometry, MapGeometryGrid, RegionMeta } from "map/geometry/types";
+import type { LevelSemantics, MapGeometry, MapGeometryGrid, RegionMeta } from "map/geometry/types";
 
 /**
  * MapGeometry 的 JSON 可序列化快照形态。
@@ -28,6 +28,8 @@ export interface SerializedMapGeometry {
   walkable: number[];
   /** 每格离散层号（number[] 形态，Int8 有符号）。 */
   level: number[];
+  /** 层边界语义 id 对（未量化 flat 图缺省）。 */
+  levelSemantics?: LevelSemantics;
   /** 区域名 → 区域元信息（普通对象形态）。 */
   regions: Record<string, RegionMeta>;
   /** 每格所属区域索引（number[] 形态）。 */
@@ -49,6 +51,9 @@ export function serializeGeometry(geometry: MapGeometry): SerializedMapGeometry 
     tiles: Array.from(geometry.tiles),
     walkable: Array.from(geometry.walkable),
     level: Array.from(geometry.level),
+    // 层边界语义（可选）：量化图必须随地理快照同盘，否则读档后 slope/cliff
+    // 语义丢失、跨层移动与按层碰撞无声退化。序列化输出全新对象。
+    ...(geometry.levelSemantics ? { levelSemantics: { ...geometry.levelSemantics } } : {}),
     regions: Object.fromEntries(geometry.regions),
     regionOfTile: Array.from(geometry.regionOfTile),
     version: geometry.version,
@@ -78,6 +83,9 @@ export function deserializeGeometry(snapshot: SerializedMapGeometry): MapGeometr
     tiles: Uint8Array.from(snapshot.tiles),
     walkable: Uint8Array.from(snapshot.walkable),
     level: Int8Array.from(snapshot.level),
+    ...(snapshot.levelSemantics
+      ? { levelSemantics: { ...snapshot.levelSemantics } }
+      : {}),
     regions: new Map(Object.entries(snapshot.regions)),
     regionOfTile: Uint16Array.from(snapshot.regionOfTile),
     version: snapshot.version,

@@ -5,6 +5,7 @@ import type { GameWorld } from "framework/world";
 
 import { physicsSystem } from "framework/systems/core/physicsSystem";
 import { movementSystem } from "framework/systems/core/movementSystem";
+import { entityLevelSystem } from "framework/systems/core/entityLevelSystem";
 import { collisionSystem } from "framework/systems/core/collisionSystem";
 import { aiSystem } from "framework/systems/gameplay/aiSystem";
 import { perceptionSystem } from "framework/systems/gameplay/perceptionSystem";
@@ -67,9 +68,19 @@ export function registerBuiltinSystems(
     after: ["physics"],
   });
 
+  // 实体层号：按位置推导实体所在离散层并写回 EntityLevel（格中心越过滞回，
+  // slope ±1 / cliff 单向；碰撞按层分区的路由依据）
+  systemRegistry.register({
+    id: "entity-level",
+    description: "实体层号：按位置与所在图地形推导实体离散层号（格中心越过滞回；slope ±1 双向、cliff 高→低单向）。",
+    factory: (_world: GameWorld) => entityLevelSystem,
+    after: ["movement"],
+    before: ["collision"],
+  });
+
   systemRegistry.register({
     id: "collision",
-    description: "碰撞分离：基于 SAT 分离地图阻挡与实体重叠，修正位置并清零受阻轴速度。",
+    description: "碰撞分离：基于 SAT 分离地图阻挡与实体重叠，修正位置并清零受阻轴速度（按图×层分区）。",
     factory: (_world: GameWorld) => collisionSystem,
     after: ["movement"],
   });

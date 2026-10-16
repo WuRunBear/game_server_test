@@ -819,6 +819,7 @@ export function createDefaultGameDefinition(): LoadedGameDefinition {
       { id: "ai" },
       { id: "physics" },
       { id: "movement" },
+      { id: "entity-level" },
       { id: "collision" },
       { id: "combat" },
       { id: "inventory" },

@@ -71,6 +71,8 @@ export function buildMapGeometry(config: MapGenerationConfig, registry: Generato
     level: draft.level.length === total ? draft.level : new Int8Array(total),
     regions: draft.regions,
     regionOfTile: draft.regionOfTile,
+    // 层边界语义（可选）：量化积木写入时原样移交；flat 图保持缺省
+    ...(draft.levelSemantics ? { levelSemantics: draft.levelSemantics } : {}),
     version: "",
   };
   geometry.version = computeGeometryVersion(geometry);

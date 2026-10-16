@@ -136,6 +136,12 @@ export interface EntitySnapshot {
    * 传输层按玩家各自的地图过滤 per-client 可见实体（todo 11/13）。
    */
   mapId: string;
+  /**
+   * 实体所在离散层号（entityLevelOf：无条目回退 0）。
+   * 兴趣裁剪按「同图 + 同层」收窄（v1 同层全给；跨层露天可见性留给 LOS
+   * 切片，level 维度已留出）。
+   */
+  level: number;
 }
 
 /**
@@ -218,4 +224,6 @@ export interface DebugSnapshotOptions {
   includeMapBodies?: boolean;
   /** 指定地图 id（缺省为世界默认图，见 getCollisionDebugSnapshot）。 */
   mapId?: string;
+  /** 指定层号（按层碰撞分区，缺省 0 层；v2 地图切片 5）。 */
+  level?: number;
 }
