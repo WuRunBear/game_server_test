@@ -17,6 +17,7 @@ import { registerBuiltinPopulationModels } from "map/evolution/populationModels"
 import { registerBuiltinRuleSchemas } from "framework/config/schema/ruleSchemas";
 import { registerBuiltinSpawnConditions } from "framework/systems/gameplay/spawnConditions";
 import { registerBuiltinEffects } from "framework/simulation/effects/builtinEffects";
+import { registerDisasterEffects } from "framework/simulation/effects/disasterEffects";
 import { registerBuiltinTriggers } from "framework/simulation/triggers/triggerRegistry";
 
 /** 注册表聚合容器（组件/系统/动作/原型/生成积木）。 */
@@ -58,6 +59,7 @@ export function bootstrapFramework(): FrameworkRegistries {
   registerBuiltinRuleSchemas();
   registerBuiltinSpawnConditions();
   registerBuiltinEffects();
+  registerDisasterEffects();
   registerBuiltinTriggers();
   // 种群模型（演化引擎产出量决策）：模块加载时已自注册，此处显式声明接线点
   // （幂等守卫吸收重复调用），与其它内置注册并列可查。

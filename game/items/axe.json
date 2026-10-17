@@ -1,5 +1,6 @@
 {
   "kind": "axe",
   "maxStack": 1,
+  "value": 5,
   "equip": { "slot": "weapon", "attackBonus": 5 }
 }

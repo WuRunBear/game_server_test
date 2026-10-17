@@ -45,6 +45,9 @@ export function effectiveMapOf(world: GameWorld, eid: number): string {
  * 在像素锚点 (px, py)（占位矩形中心）尝试生成一枚 archetype 实体：
  * 锚点 tile 可走（walkableAt）+ 占位矩形不压同图实体/地图阻挡 → spawnEntity
  * （AoS 初始化钩子照常运行）。任一合法性不满足返回 false（零副作用）。
+ *
+ * @param spawnedEids 可选收集器：成功生成时把新实体 eid 追加进去
+ *   （袭击导演收集波成员做结构目标指派用；缺省不收集，既有调用方无感）。
  */
 export function trySpawnAtPixel(
   world: GameWorld,
@@ -53,6 +56,7 @@ export function trySpawnAtPixel(
   archetype: ArchetypeSpec,
   px: number,
   py: number,
+  spawnedEids?: number[],
 ): boolean {
   const { tileWidth, tileHeight } = geometry.grid;
   if (!walkableAt(geometry, Math.floor(px / tileWidth), Math.floor(py / tileHeight))) {
@@ -61,7 +65,8 @@ export function trySpawnAtPixel(
   const { w, h } = footprintOf(archetype);
   if (overlapsAnyEntity(world, mapId, px, py, w, h)) return false;
   if (overlapsMapBlocked(world, mapId, px, py, w, h)) return false;
-  spawnEntity(world, archetype, world.components_registry, { x: px, y: py, mapId });
+  const eid = spawnEntity(world, archetype, world.components_registry, { x: px, y: py, mapId });
+  if (spawnedEids) spawnedEids.push(eid);
   return true;
 }
 

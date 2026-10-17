@@ -134,7 +134,10 @@ export { GameDefinitionSchema, WorldTileSchema, WorldSchema, type GameDefinition
 export { normalizeTileUnits } from "framework/config/tileUnits";
 export { ItemKindSchema, type ItemKindSpec, type ConsumeEffect, type ItemEffectSpec, type EquipEffect, type PlaceEffect } from "framework/config/schema/ItemKindSchema";
 export { registerRuleSchema, getRuleSchema, hasRuleSchema, registerBuiltinRuleSchemas } from "framework/config/schema/ruleSchemas";
-export { CombatRuleSchema, NeedsRuleSchema, CraftingRuleSchema, DayNightRuleSchema, EnvironmentRuleSchema, ServerRuleSchema, RespawnRuleSchema, EnvironmentModifierSchema, EnvironmentPhaseSchema, PhaseWeatherOptionSchema, type CombatRule, type NeedsRule, type CraftingRule, type CraftingRecipe, type DayNightRule, type EnvironmentRule, type EnvironmentPhase, type EnvironmentModifier, type PhaseWeatherOption, type ServerRule, type RespawnRule } from "framework/config/schema/RuleSchema";
+export { CombatRuleSchema, NeedsRuleSchema, CraftingRuleSchema, DayNightRuleSchema, EnvironmentRuleSchema, ServerRuleSchema, RespawnRuleSchema, RaidRuleSchema, DisasterRuleSchema, WildfireRuleSchema, StormRuleSchema, EnvironmentModifierSchema, EnvironmentPhaseSchema, PhaseWeatherOptionSchema, type CombatRule, type NeedsRule, type CraftingRule, type CraftingRecipe, type DayNightRule, type EnvironmentRule, type EnvironmentPhase, type EnvironmentModifier, type PhaseWeatherOption, type ServerRule, type RespawnRule, type RaidRule, type DisasterRule, type WildfireRule, type StormRule } from "framework/config/schema/RuleSchema";
+export { createDisasterSystem, disasterSystem } from "framework/systems/gameplay/disasterSystem";
+export { craftRecipe, stepCraftingJobs, cancelCrafting, craftingProgressOf, validateCraftingRules, stationsInRange, craftingStationRange, type PendingCraft } from "framework/systems/gameplay/craftingSystem";
+export { stepFuelBurn, refuelStation, validateFuelRules, resolveFuelConfig, type FuelConfig } from "framework/systems/gameplay/fuelSystem";
 
 export {
   registerSystem,

@@ -76,6 +76,11 @@ export const ItemKindSchema = z.object({
    * 非玩家死亡走 LootTable，与此标志无关。
    */
   keepOnDeath: z.boolean().optional(),
+  /**
+   * 单件基准价值（正整数）：交易定价的缺省基础——对话买卖效果（buy/sell）
+   * 未显式声明 price 时取此值。缺省 = 未定价（该物品不可作为缺省价交易）。
+   */
+  value: z.number().int().positive().optional(),
 });
 
 /** 食用/消耗效果的类型推断。 */

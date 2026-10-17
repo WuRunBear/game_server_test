@@ -114,9 +114,36 @@ function loadRulesFile(baseDir: string, rulesPattern?: string): Record<string, u
     const name = basename(file).replace(/\.json$/, "");
     // 已注册 schema 的规则文件名走 zod 校验；未注册的保持 raw 透传（向后兼容）
     const schema = getRuleSchema(name);
-    allRules[name] = schema ? schema.parse(raw) : raw;
+    allRules[name] = schema ? mergeUnknownKeys(schema.parse(raw), raw) : raw;
   }
   return allRules;
+}
+
+/**
+ * schema.parse 后深度回填 raw 中被 zod 剥离的未知键（parsed 键优先，含默认值）。
+ *
+ * 规则 schema 的既定约定是「.passthrough()——允许额外字段透传，避免严格校验
+ * 导致配置演进时破坏兼容」，但 passthrough 只作用于声明层级：嵌套对象（如
+ * 配方条目）里的扩展字段会被静默剥离。此合并让「配置演进先于 schema 形式化」
+ * 的透传字段（如 crafting 配方的 unlock/durationTicks）无损到达运行时，
+ * 待 schema 形式化后自然转为声明字段，届时本合并对其为恒等操作。
+ */
+function mergeUnknownKeys(parsed: unknown, raw: unknown): unknown {
+  if (Array.isArray(parsed)) {
+    const rawList = Array.isArray(raw) ? raw : [];
+    return parsed.map((item, i) => mergeUnknownKeys(item, rawList[i]));
+  }
+  if (
+    typeof parsed === "object" && parsed !== null &&
+    typeof raw === "object" && raw !== null && !Array.isArray(raw)
+  ) {
+    const merged: Record<string, unknown> = { ...(raw as Record<string, unknown>), ...(parsed as Record<string, unknown>) };
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      merged[key] = mergeUnknownKeys(value, (raw as Record<string, unknown>)[key]);
+    }
+    return merged;
+  }
+  return parsed;
 }
 
 /** 加载物品类型文件（每个文件一个 ItemKindSchema）；kind 全局唯一，重复抛错。 */

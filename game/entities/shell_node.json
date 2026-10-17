@@ -8,7 +8,7 @@
       "max": 3,
       "amountPerHit": 1,
       "regenMs": 60000,
-      "yieldsKind": "berry"
+      "yieldsKind": "shell"
     }
   }
 }

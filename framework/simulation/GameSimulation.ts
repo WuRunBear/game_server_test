@@ -19,7 +19,8 @@ import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import type { EntityId, GameWorld } from "world";
 import { consumeSlot, dropSlot, transferSlot, lootContainerSlot } from "framework/systems/gameplay/inventoryOps";
 import { equipSlot } from "framework/systems/gameplay/equipmentSystem";
-import { craftRecipe } from "framework/systems/gameplay/craftingSystem";
+import { craftRecipe, stepCraftingJobs, cancelCrafting, validateCraftingRules } from "framework/systems/gameplay/craftingSystem";
+import { stepFuelBurn, refuelStation, validateFuelRules } from "framework/systems/gameplay/fuelSystem";
 import { placeEntity } from "framework/systems/gameplay/placeableSystem";
 import { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";
 import { advanceDialogue } from "framework/systems/gameplay/dialogueSystem";
@@ -216,6 +217,11 @@ export class GameSimulation implements SimulationPort {
       Math.floor(serverRules?.offlineRetentionTicks ?? tickRate * DEFAULT_OFFLINE_RETENTION_SEC),
     );
 
+    // 切片 C/E：合成规则（解锁条件/时长）与燃料段配置构造期 fail-fast 校验——
+    // 未知条件名/非法参数/非法燃料配置在此即抛，不带病进 tick 循环。
+    validateCraftingRules(this.world);
+    validateFuelRules(this.world);
+
     // 离线补差：restore 完成后按墙钟一次性折算离线跨度，逐激活图一次
     // evolve 推到演化边界（与开机初始演化/每 tick 增量共用同一 evolve，D6）。
     if (initialRecord) {
@@ -226,9 +232,13 @@ export class GameSimulation implements SimulationPort {
     // 注入位置见 GameInstance.beforeSystems——位于 tick 自增与系统拓扑序之间。
     // 命令事件冲刷在同一钩子先行：submitCommand 产生的 on-command 事件在
     // 帧首事件总线清空**之后**入队，供同 tick 的 trigger 阶段消费。
+    // 同钩子挂切片 C/E 的每 tick 推进：光源燃料燃烧（未配置 fuel 段空转）
+    // 与延时制作结算（无任务早退）——均先于系统拓扑序。
     this.instance.beforeSystems = () => {
       this.flushPendingCommandEvents();
       this.evolveActiveMaps();
+      stepFuelBurn(this.world);
+      stepCraftingJobs(this.world);
     };
   }
 
@@ -597,6 +607,12 @@ export class GameSimulation implements SimulationPort {
         return this.finishCommand(eid, command.type, equipSlot(this.world, eid, command.slot ?? -1));
       case "craft":
         return this.finishCommand(eid, command.type, craftRecipe(this.world, eid, command.recipe ?? ""));
+      case "craft-cancel":
+        // 取消进行中的延时制作（退料原子：放不下则拒绝取消）
+        return this.finishCommand(eid, command.type, cancelCrafting(this.world, eid, command.recipe ?? ""));
+      case "refuel":
+        // 加燃料：附近燃料型站点 + 背包燃料物品（fuel.items 配置声明序）
+        return this.finishCommand(eid, command.type, refuelStation(this.world, eid, command.target));
       case "place":
         return this.finishCommand(eid, command.type, placeEntity(this.world, eid, command.slot ?? -1, command.x ?? 0, command.y ?? 0));
       case "deconstruct":

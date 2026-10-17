@@ -8,9 +8,16 @@
     { "id": "campfire_kit", "inputs": [{ "kind": "wood", "count": 3 }, { "kind": "stone", "count": 2 }], "outputs": [{ "kind": "campfire_kit", "count": 1 }] },
     { "id": "wall_kit", "inputs": [{ "kind": "wood", "count": 2 }, { "kind": "stone", "count": 1 }], "outputs": [{ "kind": "wall_kit", "count": 1 }] },
     { "id": "floor_kit", "inputs": [{ "kind": "wood", "count": 1 }], "outputs": [{ "kind": "floor_kit", "count": 1 }] },
-    { "id": "door_kit", "inputs": [{ "kind": "wood", "count": 2 }, { "kind": "stone", "count": 1 }], "outputs": [{ "kind": "door_kit", "count": 1 }] },
     { "id": "fence_kit", "inputs": [{ "kind": "wood", "count": 2 }], "outputs": [{ "kind": "fence_kit", "count": 1 }] },
-    { "id": "furniture_kit", "inputs": [{ "kind": "wood", "count": 2 }, { "kind": "stone", "count": 2 }], "outputs": [{ "kind": "furniture_kit", "count": 1 }] }
+
+    { "id": "plank", "inputs": [{ "kind": "wood", "count": 2 }], "outputs": [{ "kind": "plank", "count": 1 }] },
+    { "id": "door_kit", "stationType": 1, "durationTicks": 30, "inputs": [{ "kind": "plank", "count": 2 }], "outputs": [{ "kind": "door_kit", "count": 1 }] },
+    { "id": "furniture_kit", "stationType": 1, "durationTicks": 20, "inputs": [{ "kind": "plank", "count": 2 }, { "kind": "stone", "count": 1 }], "outputs": [{ "kind": "furniture_kit", "count": 1 }] },
+    { "id": "shell_spear", "unlock": { "condition": "inPhase:storm" }, "stationType": 1, "durationTicks": 40, "inputs": [{ "kind": "plank", "count": 1 }, { "kind": "shell", "count": 3 }], "outputs": [{ "kind": "shell_spear", "count": 1 }] }
   ],
-  "stationRange": 64
+  "stationRange": 64,
+  "fuel": {
+    "burnMsPerTick": 100,
+    "items": { "wood": 30000 }
+  }
 }

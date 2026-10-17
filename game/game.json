@@ -13,6 +13,7 @@
   "systems": [
     { "id": "dayNight" },
     { "id": "environment" },
+    { "id": "disaster" },
     { "id": "modifier" },
     { "id": "perception" },
     { "id": "ai" },

@@ -8,6 +8,7 @@ import {
   ServerRuleSchema,
   RaidRuleSchema,
   RespawnRuleSchema,
+  DisasterRuleSchema,
 } from "framework/config/schema/RuleSchema";
 import { PlayerRuleSchema } from "framework/config/schema/PlayerRuleSchema";
 
@@ -54,4 +55,5 @@ export function registerBuiltinRuleSchemas(): void {
   registerRuleSchema("player", PlayerRuleSchema);
   registerRuleSchema("raid", RaidRuleSchema);
   registerRuleSchema("respawn", RespawnRuleSchema);
+  registerRuleSchema("disasters", DisasterRuleSchema);
 }

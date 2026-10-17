@@ -23,6 +23,7 @@ import { portalSystem } from "framework/systems/gameplay/portalSystem";
 import { createQuestSystem } from "framework/systems/gameplay/questSystem";
 import { createNestSystem } from "framework/systems/gameplay/nestSystem";
 import { raidSystem } from "framework/systems/gameplay/raidSystem";
+import { createDisasterSystem } from "framework/systems/gameplay/disasterSystem";
 
 import { setDefaultActionRegistry } from "framework/ai/btFactory";
 import { registerBuiltinActions } from "framework/ai/registerBuiltinActions";
@@ -234,6 +235,14 @@ export function registerBuiltinSystems(
     description: "周期袭击：按 raid 规则周期在玩家周围生成敌对波。",
     factory: (_world: GameWorld) => raidSystem,
     after: ["combat"],
+  });
+
+  // 天气灾害：rules/disasters.json 驱动，灾害天气窗口内周期触发野火（写回焦土）与风暴伤害
+  systemRegistry.register({
+    id: "disaster",
+    description: "天气灾害：按 disasters 规则在灾害天气下周期触发野火（点燃可燃实体/地面并写回焦土）与风暴伤害（露天实体周期掉血）。",
+    factory: (_world: GameWorld, config?: Record<string, unknown>) => createDisasterSystem(config),
+    after: ["environment"],
   });
 
   // 族群节点：按增长率确定性演进节点数量（离线快进在 GameSimulation.runOfflineCatchUp）；

@@ -1,5 +1,7 @@
 {
   "intervalTicks": 48000,
+  "warnTicks": 100,
   "waveSize": 3,
-  "kinds": ["spider", "wolf", "tentacle"]
+  "kinds": ["spider", "wolf", "tentacle"],
+  "attackStructures": true
 }

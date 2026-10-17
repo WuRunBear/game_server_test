@@ -4,6 +4,7 @@ import { createMetrics, type Metrics } from "framework/metrics";
 import { createLogger, type Logger } from "framework/utils/logger";
 import { createEventBus, type EventBus } from "framework/simulation/events/eventBus";
 import type { OfferSession } from "framework/economy/offer";
+import type { PendingCraft } from "framework/systems/gameplay/craftingSystem";
 import type { MapGeometry } from "framework/map/geometry/types";
 import type { GameEvent } from "framework/events/gameEvents";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
@@ -96,6 +97,11 @@ export type GameWorld = ReturnType<typeof createWorld> & {
   offerSessions: Map<number, OfferSession>;
   /** 下一个可用的报价会话 id。 */
   nextOfferId: number;
+  /**
+   * 进行中的延时制作表（ownerEid → 任务列表；运行时状态，不入档，重启即弃，
+   * 与 offerSessions 同语义）。由 craftingSystem 的 stepCraftingJobs 每 tick 推进。
+   */
+  craftingJobs: Map<number, PendingCraft[]>;
 };
 
 /**
@@ -139,6 +145,7 @@ export function createGameWorld(fixedDtMs: number): GameWorld {
     eventBus: createEventBus(),
     offerSessions: new Map(),
     nextOfferId: 1,
+    craftingJobs: new Map(),
   }) as GameWorld;
 
   return world;

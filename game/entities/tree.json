@@ -9,6 +9,27 @@
       "amountPerHit": 1,
       "regenMs": 120000,
       "yieldsKind": "wood"
+    },
+    "StateMachine": {
+      "initial": "alive",
+      "states": {
+        "alive": {
+          "transitions": [{ "on": "ignite", "to": "burning" }]
+        },
+        "burning": {
+          "transitions": [
+            {
+              "afterTicks": 300,
+              "to": "burnt",
+              "effects": [
+                { "name": "scorch-ground", "params": { "semantic": 9 } },
+                { "name": "despawn" }
+              ]
+            }
+          ]
+        },
+        "burnt": {}
+      }
     }
   }
 }

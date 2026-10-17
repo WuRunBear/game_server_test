@@ -56,6 +56,8 @@ function isPlayerCommand(message: unknown): message is PlayerCommand {
       obj.type === "drop" ||
       obj.type === "transfer" ||
       obj.type === "craft" ||
+      obj.type === "craft-cancel" ||
+      obj.type === "refuel" ||
       obj.type === "equip" ||
       obj.type === "place" ||
       obj.type === "deconstruct" ||

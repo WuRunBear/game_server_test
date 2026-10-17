@@ -96,6 +96,7 @@ const BUILTIN_TRIGGER_NAMES = [
   "on-death",
   "on-region-enter",
   "on-region-clear",
+  "on-raid-warning",
 ] as const;
 
 /** 注册全部内建触发器求值器（bootstrap 时调用一次；重复注册抛错）。 */

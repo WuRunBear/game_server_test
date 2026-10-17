@@ -30,6 +30,30 @@ export const DialogueEffectSchema = z.union([
     /** 好感增减数值。 */
     delta: z.number(),
   }),
+  z.object({
+    /** 效果类型：向商店购买（玩家付 currency × 总价，收 kind × count——原子交换）。 */
+    type: z.literal("buy"),
+    /** 商品 item kind（引用 items 目录）。 */
+    kind: z.string(),
+    /** 购买数量（正整数）。 */
+    count: z.number().int().positive(),
+    /** 货币 item kind（一般等价物）。 */
+    currency: z.string(),
+    /** 单价（正整数）；缺省取商品 item 定义的价值（value）字段。 */
+    price: z.number().int().positive().optional(),
+  }),
+  z.object({
+    /** 效果类型：向商店出售（玩家付 kind × count，收 currency × 总价——原子交换）。 */
+    type: z.literal("sell"),
+    /** 商品 item kind（引用 items 目录）。 */
+    kind: z.string(),
+    /** 出售数量（正整数）。 */
+    count: z.number().int().positive(),
+    /** 货币 item kind（一般等价物）。 */
+    currency: z.string(),
+    /** 单价（正整数）；缺省取商品 item 定义的价值（value）字段。 */
+    price: z.number().int().positive().optional(),
+  }),
 ]);
 
 /** 对话选项：展示文本 + 跳转目标 + 可选效果。 */

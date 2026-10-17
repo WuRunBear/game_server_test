@@ -8,6 +8,7 @@
           "text": "你好，旅行者。",
           "options": [
             { "label": "你好，我想帮忙。", "to": "tasks" },
+            { "label": "我想做点买卖。", "to": "shop" },
             { "label": "再见。", "to": "__end__" }
           ]
         },
@@ -18,6 +19,16 @@
             { "label": "交任务：带来斧头", "effect": { "type": "quest_submit", "questId": "collect_axe" }, "to": "tasks" },
             { "label": "接任务：猎杀恶兽 ×2", "effect": { "type": "quest_accept", "questId": "hunt_task" }, "to": "tasks" },
             { "label": "交任务：猎杀恶兽", "effect": { "type": "quest_submit", "questId": "hunt_task" }, "to": "tasks" },
+            { "label": "再见。", "to": "__end__" }
+          ]
+        },
+        "shop": {
+          "text": "看看货吧，贝壳说话。",
+          "options": [
+            { "label": "买：贝壳长矛 ×1（15 贝壳）", "effect": { "type": "buy", "kind": "shell_spear", "count": 1, "currency": "shell", "price": 15 }, "to": "shop" },
+            { "label": "买：斧头 ×1（5 贝壳）", "effect": { "type": "buy", "kind": "axe", "count": 1, "currency": "shell" }, "to": "shop" },
+            { "label": "卖：木头 ×5（各 1 贝壳）", "effect": { "type": "sell", "kind": "wood", "count": 5, "currency": "shell", "price": 1 }, "to": "shop" },
+            { "label": "卖：浆果 ×5（各 1 贝壳）", "effect": { "type": "sell", "kind": "berry", "count": 5, "currency": "shell" }, "to": "shop" },
             { "label": "再见。", "to": "__end__" }
           ]
         }

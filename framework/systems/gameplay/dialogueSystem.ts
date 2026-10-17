@@ -6,7 +6,9 @@
  * - `advanceDialogue`：玩家 `dialogue` 命令选选项——先执行选项效果（失败不推进，
  *   停留在当前节点可重试），再跳转目标节点或结束对话
  * - 效果类型（配置引用通用机制）：quest_accept（接受任务）/ quest_submit
- *   （提交任务，好感对象=对话 NPC kind）/ relation_delta（好感增减）
+ *   （提交任务，好感对象=对话 NPC kind）/ relation_delta（好感增减）/
+ *   buy（向商店购买）/ sell（向商店出售——复用 economy settle 单方条款
+ *   的原子现货交换；定价缺省走 item 的 value 字段）
  *
  * 游戏无关——对话树/效果经 game/dialogues/*.json 配置引用。
  */
@@ -18,6 +20,7 @@ import { isGameplayReachable } from "framework/utils/gameplayDistance";
 import type { EntityId, GameWorld } from "world";
 import { acceptQuest, submitQuest } from "framework/systems/gameplay/questSystem";
 import { addRelation } from "framework/systems/gameplay/relation";
+import { settle, type SettleTerms, type TransferAmount } from "framework/economy/settle";
 import type { DialogueTreeJson, DialogueNodeJson, DialogueEffectJson } from "framework/config/schema/DialogueSchema";
 
 /** 对话结束标记：to 为缺省或该值时结束对话。 */
@@ -93,9 +96,45 @@ export function applyDialogueEffect(
     case "relation_delta":
       addRelation(world, playerEid, effect.npcKind, effect.delta);
       return true;
+    case "buy":
+    case "sell":
+      return tradeAtShop(world, playerEid, effect.type, effect.kind, effect.count, effect.currency, effect.price);
     default:
       return false;
   }
+}
+
+/**
+ * 商店买卖原子：玩家与商店的一次性等价交换（服务端权威，原子结算）。
+ *
+ * 最小通路：复用 economy 模块的 settle——**单方条款**即「对世界的现货交换」：
+ * settle 对涉及容器做快照 → 校验 give 足额 → 扣减 → 插入 take，任一步失败
+ * 整体回滚（零副作用）。商店侧无实体容器（无限货架/钱箱语义），货币与货物
+ * 均在玩家背包容器内对冲，原子性由 settle 快照回滚保证。
+ *
+ * 定价：单价 = 效果显式 price，缺省取商品 item 定义的 value 字段；两者皆无
+ * → 未定价，效果失败（对话停留在当前节点）。
+ */
+function tradeAtShop(
+  world: GameWorld,
+  playerEid: EntityId,
+  direction: "buy" | "sell",
+  kind: string,
+  count: number,
+  currency: string,
+  price?: number,
+): boolean {
+  const unitPrice = price ?? world.gameDef.itemsByKind?.get(kind)?.value;
+  if (unitPrice === undefined || !(unitPrice > 0)) return false; // 未定价：拒
+  const total = unitPrice * count;
+
+  const goods: TransferAmount = { container: "inventory", kind, count };
+  const money: TransferAmount = { container: "inventory", kind: currency, count: total };
+  const terms: SettleTerms =
+    direction === "buy"
+      ? [{ party: playerEid, give: [money], take: [goods] }] // 付货币收货
+      : [{ party: playerEid, give: [goods], take: [money] }]; // 付货收货币
+  return settle(world, terms);
 }
 
 /**

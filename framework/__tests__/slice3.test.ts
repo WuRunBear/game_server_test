@@ -565,7 +565,8 @@ describe("Slice 3 集成：合成→装备→采集翻倍 / 合成矛→攻击�
   it("真实 game 配置：crafting 规则可加载且与 item 表一致（validateIntegrity 校验通过）", () => {
     const def = loadGameDefinition({ gameJsonPath: "game/game.json" });
     const crafting = def.resolvedRules["crafting"] as { recipes: CraftingRecipe[] };
-    expect(crafting.recipes.length).toBe(11);
+    // 切片 C/E 起配方含多层加工链与季节配方（plank / door_kit / furniture_kit / shell_spear 等）
+    expect(crafting.recipes.length).toBeGreaterThanOrEqual(11);
     const kinds = new Set(def.resolvedItems.map((i) => i.kind));
     for (const recipe of crafting.recipes) {
       for (const io of [...recipe.inputs, ...recipe.outputs]) {

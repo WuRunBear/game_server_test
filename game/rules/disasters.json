@@ -1,0 +1,16 @@
+{
+  "weatherId": "storm",
+  "intervalTicks": 150,
+  "wildfire": {
+    "flammableGrounds": [3, 4, 5],
+    "scorchGround": 9,
+    "attempts": 4,
+    "radiusTiles": 8,
+    "flammableKinds": ["tree", "campfire"],
+    "igniteSignal": "ignite"
+  },
+  "storm": {
+    "damageIntervalTicks": 100,
+    "damage": 1
+  }
+}

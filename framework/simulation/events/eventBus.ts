@@ -37,6 +37,8 @@ export interface TypedEventPayloads {
   "on-region-enter": { eid: number; region: string };
   /** 离开区域（region 接线预留）。 */
   "on-region-clear": { eid: number; region: string };
+  /** 袭击预警（raidSystem 袭击导演入队；预警期内每 tick 对在线玩家各发一条，remainingTicks 为距刷波的剩余 tick 数）。 */
+  "on-raid-warning": { eid: number; remainingTicks: number };
 }
 
 /** 类型化事件名（TypedEventPayloads 的键）。 */

@@ -196,7 +196,7 @@ export const ServerRuleSchema = z.object({
 export type ServerRule = z.infer<typeof ServerRuleSchema>;
 
 /**
- * 周期袭击全局规则（game/rules/raid.json）：作用于 raidSystem。
+ * 周期袭击全局规则（game/rules/raid.json）：作用于 raidSystem（袭击导演）。
  * 各字段语义游戏无关（"袭击"是通用机制词——谁袭击谁、什么物种由 game/ 配置）。
  */
 export const RaidRuleSchema = z.object({
@@ -210,12 +210,89 @@ export const RaidRuleSchema = z.object({
   radiusTiles: z.number().int().positive().optional(),
   /** 整波刷怪条件名（spawnConditions 注册表引用，如 isNight）；未知名求值时抛错。 */
   condition: z.string().optional(),
+  /**
+   * 导演门槛条件名（spawnConditions 注册表引用，支持带参 `基名:参数`）：
+   * 门控槽求值不满足则**跳过该轮**（不进预警、不刷波）——语义定位是"进度/门槛"
+   * 门控（Valheim 事件门槛），与环境窗口门控 condition 互为补充；未知名求值时抛错。
+   */
+  requireCondition: z.string().optional(),
+  /**
+   * 预警期时长（tick）：> 0 时门控命中先进预警窗口（每 tick 对在线玩家发
+   * on-raid-warning 事件），倒计时结束才刷波；0/缺省 = 即刷（旧行为）。
+   * 无在线玩家时倒计时冻结（进度保留，不推进不重置）。
+   */
+  warnTicks: z.number().int().min(0).optional(),
+  /**
+   * 结构防御对抗开关：true 时发波同时为波成员指派玩家基地附近的建造物目标
+   * （最近的有 Health 的 Structure 实体，搜索半径 structureRadiusTiles），
+   * 成员在射程内持续攻击之（打坏由 deathSystem 统一销毁）；缺省 false。
+   */
+  attackStructures: z.boolean().optional(),
+  /** 结构目标搜索半径（tile，围绕玩家；缺省 = radiusTiles）。 */
+  structureRadiusTiles: z.number().int().positive().optional(),
   /** 可选规则模块引用（registerRuleModule 扩展点）：模块 (world, playerEid, ctx) 返回波成员描述并完全接管缺省波构建器；未知名求值时抛错。 */
   waveRef: z.string().optional(),
 }).passthrough();
 
 /** 周期袭击规则的类型推断（即 game/rules/raid.json）。 */
 export type RaidRule = z.infer<typeof RaidRuleSchema>;
+
+/**
+ * 野火子规则（DisasterRuleSchema.wildfire）：灾害天气下点燃可燃格与可燃实体。
+ * 字段语义通用（wildfire/scorch/ignite 是灾害机制词）；具体语义 id 由 game/ 配置约定。
+ */
+export const WildfireRuleSchema = z.object({
+  /** 可燃地面语义 id 集合（点燃候选格的地面语义须在其中）。 */
+  flammableGrounds: z.array(z.number().int().min(0).max(255)).min(1),
+  /** 焦土地面语义 id（空可燃格起火立即写回；可燃实体烧尽由其状态机效果写回）。 */
+  scorchGround: z.number().int().min(0).max(255),
+  /** 每个在线玩家每次触发的点燃尝试数（确定性 rng 候选点；缺省 4）。 */
+  attempts: z.number().int().min(1).optional(),
+  /** 点燃搜索半径（tile，围绕在线玩家；缺省 6）。 */
+  radiusTiles: z.number().int().positive().optional(),
+  /** 可燃实体 kind 集合（点燃点命中即点燃/损毁；缺省不点燃实体、只烧地面）。 */
+  flammableKinds: z.array(z.string()).optional(),
+  /** 点燃可燃实体时发出的状态机信号名（缺省 "ignite"；原型自配对应 on 迁移）。 */
+  igniteSignal: z.string().optional(),
+}).passthrough();
+
+/** 野火子规则的类型推断。 */
+export type WildfireRule = z.infer<typeof WildfireRuleSchema>;
+
+/**
+ * 风暴子规则（DisasterRuleSchema.storm）：灾害天气下露天实体周期伤害。
+ */
+export const StormRuleSchema = z.object({
+  /** 伤害触发周期（tick，绝对对齐槽；缺省 = 灾害 intervalTicks）。 */
+  damageIntervalTicks: z.number().int().min(1).optional(),
+  /** 每次对露天实体造成的伤害量（直扣 Health；自然灾害不走防御减免）。 */
+  damage: z.number().positive(),
+}).passthrough();
+
+/** 风暴子规则的类型推断。 */
+export type StormRule = z.infer<typeof StormRuleSchema>;
+
+/**
+ * 天气灾害全局规则（game/rules/disasters.json）：作用于 disasterSystem。
+ *
+ * 当 environmentAt(world).weatherId === weatherId 时进入灾害窗口，按
+ * intervalTicks 对齐槽周期触发配置的灾害效果（野火/风暴）。灾害触发点用
+ * 确定性 rng 纯派生（同 seed 同 tick 恒同结果）；离线补差不重放 tick 系统，
+ * 灾害自然不参与补差（与写回入口切片同口径）。
+ */
+export const DisasterRuleSchema = z.object({
+  /** 触发灾害窗口的天气 id（environment 规则的天气候选 id 字符串）。 */
+  weatherId: z.string().min(1),
+  /** 灾害效果触发周期（tick，绝对对齐槽；缺省 600）。 */
+  intervalTicks: z.number().int().min(1).optional(),
+  /** 野火子规则；缺省不触发野火。 */
+  wildfire: WildfireRuleSchema.optional(),
+  /** 风暴子规则；缺省不触发风暴伤害。 */
+  storm: StormRuleSchema.optional(),
+}).passthrough();
+
+/** 天气灾害规则的类型推断（即 game/rules/disasters.json）。 */
+export type DisasterRule = z.infer<typeof DisasterRuleSchema>;
 
 /**
  * 死亡容器配置（respawn 规则的 deathContainer 段）。

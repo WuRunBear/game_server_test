@@ -73,7 +73,7 @@ export interface TradeParty {
  * craft/equip/place/deconstruct/dialogue/offer），不含游戏语义。
  */
 export interface PlayerCommand {
-  type: "consume" | "drop" | "transfer" | "craft" | "equip" | "place" | "deconstruct" | "dialogue" | "offer" | "offer-accept" | "offer-cancel";
+  type: "consume" | "drop" | "transfer" | "craft" | "craft-cancel" | "refuel" | "equip" | "place" | "deconstruct" | "dialogue" | "offer" | "offer-accept" | "offer-cancel";
   /** 目标槽索引（consume/drop/equip/place 用）；transfer 的源槽。 */
   slot?: number;
   /** transfer 目标槽。 */
@@ -84,7 +84,7 @@ export interface PlayerCommand {
   x?: number;
   /** 放置目标坐标（place 用，世界坐标）。 */
   y?: number;
-  /** 目标实体 networkId（deconstruct 拆除用；transfer + target 时为容器实体——从其槽位取回物品）。 */
+  /** 目标实体 networkId（deconstruct 拆除用；refuel 加燃料指定站点用；transfer + target 时为容器实体——从其槽位取回物品）。 */
   target?: number;
   /** 对话选项索引（dialogue 用，推进当前对话节点）。 */
   option?: number;
