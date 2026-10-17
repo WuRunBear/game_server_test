@@ -29,3 +29,25 @@ export function getRelation(world: GameWorld, playerEid: EntityId, npcKind: stri
   const relations: RelationState[] | undefined = Relation[playerEid];
   return relations?.find((r) => r.npcKind === npcKind)?.value ?? 0;
 }
+
+/** 写入玩家对 npcKind 的好感（不存在则创建条目；供带初始值的势力声望复用）。 */
+export function setRelation(
+  world: GameWorld,
+  playerEid: EntityId,
+  npcKind: string,
+  value: number,
+): void {
+  if (!npcKind) return;
+
+  let relations = Relation[playerEid];
+  if (!relations) {
+    relations = Relation[playerEid] = [];
+  }
+
+  const existing = relations.find((r) => r.npcKind === npcKind);
+  if (existing) {
+    existing.value = value;
+  } else {
+    relations.push({ npcKind, value });
+  }
+}

@@ -32,6 +32,15 @@ export interface ResourceNodeState {
    * 空/缺省 = 回退单产物 yieldsKind。
    */
   lootTable?: LootEntry[];
+  /**
+   * 每次成功采集向采集者提供的经验值（可选）；由 progression 系统按通用
+   * 成长规则结算。缺省 = 不产经验。
+   */
+  xpValue?: number;
+  /**
+   * 采集经验归属的技能 id（game/ 配置约定，框架不解释）；声明 xpValue 时可选。
+   */
+  xpSkill?: string;
 }
 
 /** AoS 存储：普通 JS 数组按 eid 索引（非 bitecs 组件，不能 addComponent/query）。 */
@@ -46,6 +55,8 @@ interface ResourceNodeConfig {
   directConsume?: boolean;
   requiredToolType?: string;
   lootTable?: LootEntry[];
+  xpValue?: number;
+  xpSkill?: string;
 }
 
 /** AoS 初始化钩子。 */
@@ -72,5 +83,7 @@ export function initResourceNode(
           chance: Number(e?.chance ?? 1),
         }))
       : undefined,
+    xpValue: typeof cfg.xpValue === "number" ? cfg.xpValue : undefined,
+    xpSkill: typeof cfg.xpSkill === "string" && cfg.xpSkill !== "" ? cfg.xpSkill : undefined,
   };
 }

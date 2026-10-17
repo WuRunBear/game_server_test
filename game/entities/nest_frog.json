@@ -6,5 +6,7 @@
     "Collider": { "shape": 1, "halfW": 10, "halfH": 10 },
     "Health": { "current": 40, "max": 40 },
     "Nest": { "spawnKind": "frog", "capacity": 2, "intervalTicks": 400 }
-  }
+  },
+  "xpValue": 15,
+  "xpSkill": "combat"
 }

@@ -1,0 +1,9 @@
+{
+  "kind": "shell_armor",
+  "maxStack": 1,
+  "value": 30,
+  "maxDurability": 80,
+  "wearPerUse": 1,
+  "equip": { "slot": "armor", "defenseBonus": 4 },
+  "resist": { "pierce": 0.3, "slash": 0.1 }
+}

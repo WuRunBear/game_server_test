@@ -64,6 +64,7 @@ import { StateMachine, initStateMachine } from "framework/simulation/stateMachin
 import { Population, initPopulation } from "framework/simulation/population/population";
 import { Player, Enemy, NPC, Item, Resource, Container } from "framework/components/tags";
 import { Kind } from "framework/components/kind";
+import { Progression, initProgression } from "framework/components/progression";
 
 /**
  * 注册全部内置组件及其 AoS 初始化钩子。
@@ -210,6 +211,10 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
           }),
         )
         .optional(),
+      /** 每次成功采集提供的经验值（可选；缺省不产经验）。 */
+      xpValue: z.number().positive().optional(),
+      /** 采集经验归属的技能 id（game/ 配置约定；声明 xpValue 时可选）。 */
+      xpSkill: z.string().optional(),
     }),
   });
   registry.register("LootTable", LootTable, {
@@ -474,6 +479,14 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("Container", Container, {
     description: "容器标签：标记实体为可存取的容器（背包/账本等承载物）。",
   });
+  // 成长（AoS，持久化——经验/等级/技能进度随实体入档）
+  registry.register("Progression", Progression, {
+    description: "成长进度：角色累计经验/等级与按 skillId 索引的技能经验/等级；由成长系统推进并按配置提供属性加成。",
+    configSchema: z.object({
+      /** 初始技能 id 列表（game/ 配置约定；每个技能以 0 经验、1 级建立）。 */
+      skills: z.array(z.string()).optional(),
+    }),
+  });
   // 种类标签（AoS）
   registry.register("Kind", Kind, {
     description: "种类标签：实体原型 kind 字符串，由生成链路在运行时写入。",
@@ -491,4 +504,5 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.registerAosInitializer("Triggers", initTriggers);
   registry.registerAosInitializer("StateMachine", initStateMachine);
   registry.registerAosInitializer("Population", initPopulation);
+  registry.registerAosInitializer("Progression", initProgression);
 }

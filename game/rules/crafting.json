@@ -15,6 +15,7 @@
     { "id": "door_kit", "stationType": 1, "durationTicks": 30, "inputs": [{ "kind": "plank", "count": 2 }], "outputs": [{ "kind": "door_kit", "count": 1 }] },
     { "id": "furniture_kit", "stationType": 1, "durationTicks": 20, "inputs": [{ "kind": "plank", "count": 2 }, { "kind": "stone", "count": 1 }], "outputs": [{ "kind": "furniture_kit", "count": 1 }] },
     { "id": "shell_spear", "unlock": { "condition": "inPhase:storm" }, "stationType": 1, "durationTicks": 40, "inputs": [{ "kind": "plank", "count": 1 }, { "kind": "shell", "count": 3 }], "outputs": [{ "kind": "shell_spear", "count": 1 }] },
+    { "id": "shell_armor", "stationType": 1, "durationTicks": 40, "inputs": [{ "kind": "shell", "count": 3 }, { "kind": "plank", "count": 1 }], "outputs": [{ "kind": "shell_armor", "count": 1 }] },
     { "id": "boss_cleaver", "unlock": { "condition": "progressAtLeast:boss_alpha:1" }, "durationTicks": 60, "inputs": [{ "kind": "boss_core", "count": 1 }, { "kind": "stone", "count": 5 }, { "kind": "plank", "count": 2 }], "outputs": [{ "kind": "boss_cleaver", "count": 1 }] }
   ],
   "stationRange": 64,

@@ -2,6 +2,20 @@
   "talkRange": 48,
   "trade": {
     "discountPerRelation": 0.02,
-    "minPrice": 1
+    "factionDiscountPerRep": 0.01,
+    "minPrice": 1,
+    "minFactor": 0.3,
+    "maxFactor": 3,
+    "phaseFactors": {
+      "mild": 1,
+      "dry": 1.2,
+      "wet": 0.9,
+      "storm": 1
+    },
+    "supplyDemand": {
+      "perUnit": 0.01,
+      "decayPerTick": 0.001,
+      "volumeKeyPrefix": "trade"
+    }
   }
 }

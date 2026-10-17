@@ -13,6 +13,7 @@ import type { GameWorld } from "framework/world";
 import { registerEffect, positionOfEntity, parseEffectSpec } from "framework/simulation/effects/effectRegistry";
 import { computeStandardDamage } from "framework/systems/gameplay/damageFormula";
 import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
+import { getSkillAdd, getSkillMultiplier } from "framework/systems/gameplay/progression";
 import { computeNumericStat, addModifier, STAT_DEFENSE } from "framework/simulation/modifiers/modifiers";
 import { setExpiresAt, setIntervalTimer } from "framework/simulation/timer/timer";
 import { emitEvent } from "framework/events/gameEvents";
@@ -55,8 +56,11 @@ export function registerBuiltinEffects(): void {
       if ((Health.current[target] ?? 0) <= 0) continue;
       const defense =
         (hasComponent(ctx.world, target, Defense) ? (Defense.value[target] ?? 0) : 0) +
-        getEquipModifiers(ctx.world, target).defenseBonus;
-      const effectiveDefense = computeNumericStat(ctx.world, target, STAT_DEFENSE, defense);
+        getEquipModifiers(ctx.world, target).defenseBonus +
+        getSkillAdd(ctx.world, target, STAT_DEFENSE);
+      const effectiveDefense =
+        computeNumericStat(ctx.world, target, STAT_DEFENSE, defense) *
+        getSkillMultiplier(ctx.world, target, STAT_DEFENSE);
       Health.current[target] = (Health.current[target] ?? 0) - computeStandardDamage(amount, effectiveDefense);
       applied = true;
       if ((Health.current[target] ?? 0) <= 0) {

@@ -6,6 +6,7 @@ import type { GameWorld } from "world";
 import { harvest, hasRequiredTool } from "framework/systems/gameplay/gatheringSystem";
 import { attackTarget } from "framework/systems/gameplay/combatSystem";
 import { startDialogue } from "framework/systems/gameplay/dialogueSystem";
+import { awardHarvestXp } from "framework/systems/gameplay/progression";
 
 interface SystemConfig {
   range?: number;
@@ -86,7 +87,10 @@ export function createInteractionSystem(config?: Record<string, unknown>) {
         }
 
         if (nearestEid >= 0) {
-          harvest(world, playerEid, nearestEid);
+          // 采集成功才结算经验（失败/门槛不满足不产经验）；经验数值来自节点配置
+          if (harvest(world, playerEid, nearestEid)) {
+            awardHarvestXp(world, playerEid, nearestEid);
+          }
         }
       } else if (intent === "attack") {
         let nearestEid = -1;

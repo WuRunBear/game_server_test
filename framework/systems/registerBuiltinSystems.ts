@@ -22,6 +22,7 @@ import { dayNightCycleSystem } from "framework/systems/gameplay/dayNightCycleSys
 import { environmentSystem } from "framework/systems/gameplay/environmentSystem";
 import { portalSystem } from "framework/systems/gameplay/portalSystem";
 import { createQuestSystem } from "framework/systems/gameplay/questSystem";
+import { createAchievementSystem } from "framework/systems/gameplay/achievementSystem";
 import { createNestSystem } from "framework/systems/gameplay/nestSystem";
 import { raidSystem } from "framework/systems/gameplay/raidSystem";
 import { createDisasterSystem } from "framework/systems/gameplay/disasterSystem";
@@ -34,6 +35,7 @@ import { modifierSystem } from "framework/simulation/modifiers/modifierSystem";
 import { stateMachineSystem } from "framework/simulation/stateMachine/stateMachineSystem";
 import { createPopulationSystem } from "framework/simulation/population/populationSystem";
 import { projectileSystem } from "framework/systems/gameplay/projectileSystem";
+import { progressionSystem, validateProgressionRules } from "framework/systems/gameplay/progression";
 
 export function registerBuiltinSystems(
   systemRegistry: SystemRegistry,
@@ -148,6 +150,19 @@ export function registerBuiltinSystems(
     after: ["interaction"],
   });
 
+  // 成长：经验结算（击杀事件 peek + 采集成功钩子）与技能加成读取。
+  // 工厂期预热校验规则与原型经验来源引用（非法配置在实例创建时 fail-fast）。
+  systemRegistry.register({
+    id: "progression",
+    description: "成长进度：结算击杀/采集经验并按等级曲线与技能表提供通用属性加成。",
+    factory: (world: GameWorld) => {
+      validateProgressionRules(world);
+      return progressionSystem;
+    },
+    after: ["interaction"],
+    before: ["quest"],
+  });
+
   systemRegistry.register({
     id: "needDecay",
     description: "需求衰减：按 dt 衰减实体需求值，需求归零后持续扣除生命。",
@@ -181,6 +196,20 @@ export function registerBuiltinSystems(
     description: "任务推进：检查进行中任务进度，并提供接受与提交任务原子。",
     factory: (_world: GameWorld) => createQuestSystem(),
     after: ["respawn"],
+  });
+
+  // 成就：按 achievements 规则节流检查解锁条件（world.progress 幂等标记）
+  systemRegistry.register({
+    id: "achievement",
+    description: "成就：按规则节流检查解锁条件，满足后写入世界进度（幂等）并发 on-achievement 事件。",
+    configSchema: z.object({
+      /** 检查间隔（tick）；缺省 20。 */
+      checkIntervalTicks: z.number().int().positive().default(20),
+    }),
+    factory: (_world: GameWorld, config?: Record<string, unknown>) =>
+      createAchievementSystem(config as { checkIntervalTicks?: number } | undefined),
+    after: ["quest"],
+    before: ["trigger"],
   });
 
   // 投射物：直线运动 + 墙阻挡 + 接触事件（命中闭环留配方切片）

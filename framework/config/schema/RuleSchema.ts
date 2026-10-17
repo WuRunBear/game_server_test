@@ -52,18 +52,67 @@ export const NeedsRuleSchema = z.object({
 export type NeedsRule = z.infer<typeof NeedsRuleSchema>;
 
 /**
- * 交易定价折扣子规则（DialogueRuleSchema.trade）：好感对买卖单价的调制。
+ * 供需调制子规则（DialogueTradeRuleSchema.supplyDemand）：近窗口交易量对单价的调制。
  *
- * 公式：`实际单价 = max(minPrice, round(基础价 × (1 - discountPerRelation × relation)))`。
- * relation 为玩家对当前对话 NPC kind 的好感值（getRelation），0 时价格不变；
- * 正值打折、负值涨价（系数对称）。全部参数游戏无关。
+ * 交易量记入 `world.progress`：`<prefix>:<kind>` = 有符号成交量（买入为正、卖出为负），
+ * `<prefix>:<kind>:lastTick` = 最近一次成交 tick。读取时按绝对 tick 差线性衰减
+ * （decayPerTick × 相隔 tick），因此长时间不交易会自然回落到基准价，
+ * 不会产生永久漂移。字段游戏无关。
  */
-export const DialogueTradeRuleSchema = z.object({
-  /** 每点好感对应的折扣率（0..1）；缺省 0 = 不按好感调价。 */
-  discountPerRelation: z.number().min(0).max(1).optional(),
-  /** 折后最低单价（≥1）；缺省 1。 */
-  minPrice: z.number().int().min(1).optional(),
+export const DialogueSupplyDemandRuleSchema = z.object({
+  /** 每单位有符号成交量对应的价格因子增量（如 0.01：买入 1 件 → 因子 1.01）。 */
+  perUnit: z.number(),
+  /** 每个 tick 衰减的成交量单位数；缺省 0 = 不衰减（不推荐）。 */
+  decayPerTick: z.number().nonnegative().optional(),
+  /** 账本键前缀（world.progress 中 `<prefix>:<kind>`）；缺省 "trade"。 */
+  volumeKeyPrefix: z.string().min(1).optional(),
 }).passthrough();
+
+/**
+ * 交易定价子规则（DialogueRuleSchema.trade）：基础价 → 季节/天气 → 供需 → 好感 /
+ * 势力声望 的完整调制链。
+ *
+ * 公式（顺序固定，便于诊断）：
+ * ```
+ * 基础价       = 显式 price ?? item.value
+ * 季节因子     = phaseFactors[当前 phaseId] × weatherFactors[当前 weatherId]（缺省 1）
+ * 供需因子     = clamp(1 + perUnit × 衰减后成交量, 0, ∞)
+ * 好感因子     = 1 - discountPerRelation × relation（正值打折、负值涨价）
+ * 势力因子     = 1 - factionDiscountPerRep × factionRep（同上）
+ * 合成因子     = season × supply × relation × faction，再钳到 [minFactor, maxFactor]
+ * 实际单价     = max(minPrice, round(基础价 × 合成因子))
+ * ```
+ * 全部参数游戏无关；相位/天气 id 与势力 id 均为配置字符串。
+ */
+export const DialogueTradeRuleSchema = z
+  .object({
+    /** 每点好感对应的折扣率（0..1）；缺省 0 = 不按好感调价。 */
+    discountPerRelation: z.number().min(0).max(1).optional(),
+    /** 每点势力声望对应的折扣率（0..1）；缺省 0 = 不按声望调价。 */
+    factionDiscountPerRep: z.number().min(0).max(1).optional(),
+    /** 折后最低单价（≥1）；缺省 1。 */
+    minPrice: z.number().int().min(1).optional(),
+    /** 合成价格因子的下限；缺省 0（不额外限制）。 */
+    minFactor: z.number().nonnegative().optional(),
+    /** 合成价格因子的上限（任务要求的 maxFactor）；缺省不设上限。 */
+    maxFactor: z.number().positive().optional(),
+    /** 按相位 id 的季节价格乘子（缺键 = 1）。 */
+    phaseFactors: z.record(z.string(), z.number().nonnegative()).optional(),
+    /** 按天气 id 的价格乘子（缺键 = 1；与相位乘子叠乘）。 */
+    weatherFactors: z.record(z.string(), z.number().nonnegative()).optional(),
+    /** 供需调制配置；缺省 = 不启用供需因子（也不写交易账本）。 */
+    supplyDemand: DialogueSupplyDemandRuleSchema.optional(),
+  })
+  .passthrough()
+  .superRefine((rule, ctx) => {
+    if (rule.minFactor !== undefined && rule.maxFactor !== undefined && rule.minFactor > rule.maxFactor) {
+      ctx.addIssue({
+        code: "custom",
+        message: `trade.minFactor (${rule.minFactor}) must be <= trade.maxFactor (${rule.maxFactor})`,
+        path: ["minFactor"],
+      });
+    }
+  });
 
 /**
  * 对话全局规则（game/rules/dialogue.json）：作用于 dialogueSystem。
@@ -78,8 +127,134 @@ export const DialogueRuleSchema = z.object({
 
 /** 交易折扣规则的类型推断。 */
 export type DialogueTradeRule = z.infer<typeof DialogueTradeRuleSchema>;
+/** 供需子规则的类型推断。 */
+export type DialogueSupplyDemandRule = z.infer<typeof DialogueSupplyDemandRuleSchema>;
 /** 对话规则的类型推断（即 game/rules/dialogue.json）。 */
 export type DialogueRule = z.infer<typeof DialogueRuleSchema>;
+
+/**
+ * 单个势力定义（game/rules/factions.json 的 factions[] 元素）。
+ *
+ * 势力是通用社交分组：`members` 列出属于该势力的 NPC kind（配置字符串），
+ * 交易/任务提交时按 NPC kind 反查势力并把声望记到玩家身上。
+ */
+export const FactionDefinitionSchema = z.object({
+  /** 势力 id（配置字符串；任务/成就/规则引用键）。 */
+  id: z.string().min(1),
+  /** 显示名（可选；框架只透传）。 */
+  name: z.string().optional(),
+  /** 玩家初始声望；缺省 0。 */
+  initialRep: z.number().optional(),
+  /** 属于该势力的 NPC kind 列表（archetype kind 字符串）。 */
+  members: z.array(z.string()).optional(),
+  /** 每成交一件商品获得的势力声望；缺省 0 = 交易不改变声望。 */
+  repPerTradeUnit: z.number().optional(),
+}).passthrough();
+
+/**
+ * 势力规则（game/rules/factions.json）：势力定义 + 成员映射。
+ * 声望账本载体复用 Relation（玩家 AoS 持久组件，键为 `faction:<id>`）。
+ */
+export const FactionRuleSchema = z
+  .object({
+    /** 势力定义列表。 */
+    factions: z.array(FactionDefinitionSchema),
+  })
+  .passthrough()
+  .superRefine((rule, ctx) => {
+    const seen = new Set<string>();
+    rule.factions.forEach((faction, index) => {
+      if (seen.has(faction.id)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `duplicate faction id "${faction.id}"`,
+          path: ["factions", index, "id"],
+        });
+      }
+      seen.add(faction.id);
+    });
+  });
+
+/** 单个势力定义的类型推断。 */
+export type FactionDefinition = z.infer<typeof FactionDefinitionSchema>;
+/** 势力规则的类型推断（即 game/rules/factions.json）。 */
+export type FactionRule = z.infer<typeof FactionRuleSchema>;
+
+/** 成就奖励（可选）：物品、世界进度增量、势力声望增量。 */
+export const AchievementRewardSchema = z.object({
+  /** 奖励物品（授予触发解锁的玩家；无玩家时跳过）。 */
+  items: z
+    .array(
+      z.object({
+        /** 物品 kind（item 目录引用）。 */
+        kind: z.string().min(1),
+        /** 数量。 */
+        count: z.number().int().positive(),
+      }),
+    )
+    .optional(),
+  /** 世界进度增量（写入 world.progress，全服共享）。 */
+  progress: z.record(z.string(), z.number()).optional(),
+  /** 势力声望增量（授予触发解锁的玩家；无玩家时跳过）。 */
+  factionRep: z
+    .array(
+      z.object({
+        /** 势力 id（factions 规则引用）。 */
+        factionId: z.string().min(1),
+        /** 声望增量。 */
+        delta: z.number(),
+      }),
+    )
+    .optional(),
+}).passthrough();
+
+/**
+ * 单个成就定义（game/rules/achievements.json 的 achievements[] 元素）。
+ *
+ * 条件复用 spawnConditions 注册表（支持 `progressAtLeast` / `factionRepAtLeast`
+ * 等带参条件）；满足后写入 `world.progress["achievement:<id>"] = 1`（幂等，
+ * 只发一次 on-achievement 事件）。
+ */
+export const AchievementDefinitionSchema = z.object({
+  /** 成就 id（配置字符串；进度键后缀）。 */
+  id: z.string().min(1),
+  /** 显示名（可选）。 */
+  name: z.string().optional(),
+  /** 描述（可选）。 */
+  description: z.string().optional(),
+  /** 解锁条件名（spawnConditions 注册表引用，支持带参 `基名:参数`）。 */
+  condition: z.string().min(1),
+  /** 可选奖励。 */
+  reward: AchievementRewardSchema.optional(),
+}).passthrough();
+
+/** 成就规则（game/rules/achievements.json）。 */
+export const AchievementRuleSchema = z
+  .object({
+    /** 成就定义列表。 */
+    achievements: z.array(AchievementDefinitionSchema),
+  })
+  .passthrough()
+  .superRefine((rule, ctx) => {
+    const seen = new Set<string>();
+    rule.achievements.forEach((achievement, index) => {
+      if (seen.has(achievement.id)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `duplicate achievement id "${achievement.id}"`,
+          path: ["achievements", index, "id"],
+        });
+      }
+      seen.add(achievement.id);
+    });
+  });
+
+/** 单个成就定义的类型推断。 */
+export type AchievementDefinition = z.infer<typeof AchievementDefinitionSchema>;
+/** 成就奖励的类型推断。 */
+export type AchievementReward = z.infer<typeof AchievementRewardSchema>;
+/** 成就规则的类型推断（即 game/rules/achievements.json）。 */
+export type AchievementRule = z.infer<typeof AchievementRuleSchema>;
 
 /** 合成配方输入/输出项：kind 引用 item 表 + 数量。 */
 const RecipeInputSchema = z.object({

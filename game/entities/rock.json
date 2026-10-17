@@ -8,6 +8,8 @@
       "max": 5,
       "amountPerHit": 1,
       "regenMs": 60000,
+      "xpValue": 4,
+      "xpSkill": "gathering",
       "yieldsKind": "stone"
     }
   }

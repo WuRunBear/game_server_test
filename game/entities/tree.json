@@ -8,6 +8,8 @@
       "max": 3,
       "amountPerHit": 1,
       "regenMs": 120000,
+      "xpValue": 3,
+      "xpSkill": "gathering",
       "yieldsKind": "wood",
       "requiredToolType": "axe",
       "lootTable": [

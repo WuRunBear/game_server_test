@@ -8,6 +8,8 @@
       "max": 3,
       "amountPerHit": 1,
       "regenMs": 90000,
+      "xpValue": 2,
+      "xpSkill": "gathering",
       "yieldsKind": "berry"
     }
   }

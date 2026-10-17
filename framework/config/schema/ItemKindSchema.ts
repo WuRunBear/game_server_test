@@ -110,6 +110,29 @@ export const ItemKindSchema = z.object({
    * wearPerUse 却没有 maxDurability 属配置缺陷，加载期报错。
    */
   wearPerUse: z.number().int().positive().optional(),
+  /**
+   * 暴击概率（0~1）：装备在 weapon 槽时，命中按确定性随机流判定暴击。
+   * 缺省/0 = 不暴击（历史行为零回归）。字符串/数值均为通用机制词，
+   * 具体暴击倍率与伤害类型由配置定义。
+   */
+  critChance: z.number().min(0).max(1).optional(),
+  /**
+   * 暴击伤害倍率（≥ 1）：暴击命中时在标准伤害（含防御减免）之上相乘。
+   * 声明 critChance 时缺省 1.5；未声明 critChance 时不生效。
+   */
+  critMultiplier: z.number().min(1).optional(),
+  /**
+   * 伤害类型字符串（通用机制词，取值由 game/ 配置定义）：攻击方 weapon 槽
+   * 物品的 damageType 与防御方 armor 槽物品的 resist 表按键相等匹配。
+   * 缺省 = 该武器不参与克制减伤（历史行为零回归）。
+   */
+  damageType: z.string().optional(),
+  /**
+   * 伤害类型抗性表（仅 armor 槽生效）：`{ "<damageType>": 0..1 }`。
+   * 命中时按攻击方 damageType 取对应抗性，钳制到 [0, 0.9] 后按
+   * `伤害 × (1 - 抗性)` 减伤；未列出的类型不减免。
+   */
+  resist: z.record(z.string(), z.number().min(0).max(1)).optional(),
 });
 
 /** 食用/消耗效果的类型推断。 */

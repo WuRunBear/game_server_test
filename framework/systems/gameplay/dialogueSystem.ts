@@ -24,6 +24,17 @@ import { addRelation, getRelation } from "framework/systems/gameplay/relation";
 import { settle, type SettleTerms, type TransferAmount } from "framework/economy/settle";
 import type { DialogueTreeJson, DialogueNodeJson, DialogueEffectJson } from "framework/config/schema/DialogueSchema";
 import type { DialogueRule } from "framework/config/schema/RuleSchema";
+import { environmentAt } from "framework/simulation/worldClock";
+import {
+  decayedTradeVolume,
+  recordTradeVolume,
+  tradeUnitPrice,
+} from "framework/systems/gameplay/pricing";
+import {
+  creditTradeFactionRep,
+  factionOfNpcKind,
+  getFactionRep,
+} from "framework/systems/gameplay/factions";
 
 /** 对话结束标记：to 为缺省或该值时结束对话。 */
 export const END_DIALOGUE = "__end__";
@@ -139,10 +150,12 @@ export function applyDialogueEffect(
  * 定价：基础单价 = 效果显式 price，缺省取商品 item 定义的 value 字段；两者皆无
  * → 未定价，效果失败（对话停留在当前节点）。
  *
- * 好感折扣：基础价再按 rules/dialogue.json 的 trade 段调制——
- * `实际单价 = max(minPrice, round(基础价 × (1 - discountPerRelation × relation)))`，
- * relation 为玩家对当前 NPC kind 的好感（getRelation）。未配置 trade 段/好感为 0
- * 时价格不变；负好感对称涨价。最低价恒 ≥1。
+ * 价格调制：基础价按 rules/dialogue.json 的 trade 段依次叠乘
+ * 季节/天气因子 → 供需因子 → 好感因子 → 势力声望因子（见 pricing.ts 的
+ * `tradeUnitPrice`），合成因子钳制后得到整数单价；未配置的因子恒为 1。
+ * 成交成功后把有符号成交量写入 world.progress（买入抬价、卖出压价，按 tick
+ * 衰减），并按势力配置累计交易声望。任一步失败零副作用（settle 原子回滚，
+ * 不写供需账本、不加声望）。
  */
 function tradeAtShop(
   world: GameWorld,
@@ -160,12 +173,20 @@ function tradeAtShop(
   const rules = world.gameDef.resolvedRules["dialogue"] as DialogueRule | undefined;
   const trade = rules?.trade;
   const relation = npcKind ? getRelation(world, playerEid, npcKind) : 0;
-  const unitPrice = discountedUnitPrice(
+  const faction = factionOfNpcKind(world, npcKind);
+  const factionRep = faction ? getFactionRep(world, playerEid, faction.id) : 0;
+  const environment = environmentAt(world);
+  const supplyDemand = trade?.supplyDemand;
+  const volume = decayedTradeVolume(world, kind, supplyDemand);
+  const unitPrice = tradeUnitPrice({
     basePrice,
     relation,
-    trade?.discountPerRelation ?? 0,
-    trade?.minPrice ?? 1,
-  );
+    factionRep,
+    phaseId: environment.phaseId,
+    weatherId: environment.weatherId,
+    volume,
+    trade,
+  });
   const total = unitPrice * count;
 
   const goods: TransferAmount = { container: "inventory", kind, count };
@@ -174,7 +195,13 @@ function tradeAtShop(
     direction === "buy"
       ? [{ party: playerEid, give: [money], take: [goods] }] // 付货币收货
       : [{ party: playerEid, give: [goods], take: [money] }]; // 付货收货币
-  return settle(world, terms);
+  const success = settle(world, terms);
+  if (!success) return false;
+
+  // 成交成功才记账：买入抬价（正量），卖出压价（负量）；交易累计势力声望
+  recordTradeVolume(world, kind, direction === "buy" ? count : -count, supplyDemand);
+  creditTradeFactionRep(world, playerEid, npcKind, count);
+  return true;
 }
 
 /**

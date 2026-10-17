@@ -15,5 +15,7 @@
       "count": 4,
       "spawnInstances": false
     }
-  }
+  },
+  "xpValue": 20,
+  "xpSkill": "combat"
 }

@@ -2,5 +2,8 @@
   "kind": "shell_spear",
   "maxStack": 1,
   "value": 15,
-  "equip": { "slot": "weapon", "attackBonus": 18 }
+  "equip": { "slot": "weapon", "attackBonus": 18 },
+  "critChance": 0.2,
+  "critMultiplier": 2,
+  "damageType": "pierce"
 }

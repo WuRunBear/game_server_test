@@ -29,6 +29,13 @@ export interface ArchetypeSpec extends RegistrationMetadata {
    * 未声明保持旧语义（entityLevelSystem 按地形确立）。
    */
   level?: number;
+  /**
+   * 击杀该原型实体时提供给击杀者的经验值（可选；progression 系统结算）。
+   * 缺省 = 不产经验。
+   */
+  xpValue?: number;
+  /** 击杀经验归属的技能 id（game/ 配置约定，框架不解释）。 */
+  xpSkill?: string;
 }
 
 export interface ArchetypeRegistry {

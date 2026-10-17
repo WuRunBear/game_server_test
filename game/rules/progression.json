@@ -1,0 +1,7 @@
+{
+  "curve": { "baseXp": 100, "growth": 1.5, "maxLevel": 20 },
+  "skills": {
+    "combat": { "stat": "attack", "perLevel": 2, "mode": "add" },
+    "gathering": { "stat": "gatherMult", "perLevel": 0.5, "mode": "mul" }
+  }
+}

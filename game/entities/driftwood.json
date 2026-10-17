@@ -8,6 +8,8 @@
       "max": 2,
       "amountPerHit": 1,
       "regenMs": 600000,
+      "xpValue": 2,
+      "xpSkill": "gathering",
       "yieldsKind": "wood",
       "lootTable": [
         { "kind": "wood", "qty": 1, "chance": 1 },

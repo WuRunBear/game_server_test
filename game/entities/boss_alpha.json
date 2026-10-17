@@ -23,5 +23,7 @@
     ]
   },
   "behavior": "boss-two-phase",
+  "xpValue": 200,
+  "xpSkill": "combat",
   "team": 2
 }

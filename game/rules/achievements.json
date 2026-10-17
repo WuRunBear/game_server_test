@@ -1,0 +1,20 @@
+{
+  "achievements": [
+    {
+      "id": "village_friend",
+      "name": "渔村的熟人",
+      "description": "与渔村势力声望达到 10。",
+      "condition": "factionRepAtLeast:village:10",
+      "reward": {
+        "items": [{ "kind": "shell", "count": 10 }],
+        "factionRep": [{ "factionId": "village", "delta": 5 }]
+      }
+    },
+    {
+      "id": "boss_slayer",
+      "name": "巨兽克星",
+      "description": "击败岛上的首领。",
+      "condition": "progressAtLeast:boss_alpha:1"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "factions": [
+    {
+      "id": "village",
+      "name": "渔村",
+      "initialRep": 0,
+      "members": ["villager"],
+      "repPerTradeUnit": 0.1
+    }
+  ]
+}

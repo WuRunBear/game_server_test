@@ -32,6 +32,15 @@ export const ArchetypeSchema = z.object({
    * 声明后实体生成即落该层号条目。未声明保持地形推导语义。
    */
   level: z.number().int().optional(),
+  /**
+   * 击杀该原型实体时提供给击杀者的经验值（可选；由 progression 系统结算）。
+   * 缺省 = 不产经验。
+   */
+  xpValue: z.number().positive().optional(),
+  /**
+   * 击杀经验归属的技能 id（game/ 配置约定；声明 xpValue 时可选）。
+   */
+  xpSkill: z.string().optional(),
 });
 
 /** 实体原型配置的类型推断（即 game/entities/*.json 数组元素类型）。 */

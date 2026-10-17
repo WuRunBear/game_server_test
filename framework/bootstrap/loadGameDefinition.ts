@@ -37,6 +37,7 @@ import {
 import type { PlayerRule } from "framework/config/schema/PlayerRuleSchema";
 import { getRuleSchema } from "framework/config/schema/ruleSchemas";
 import { hasSpawnCondition } from "framework/systems/gameplay/spawnConditions";
+import { validateProgressionConfig } from "framework/systems/gameplay/progression";
 import { compileStateMachine } from "framework/simulation/stateMachine/stateMachine";
 import { WILDERNESS } from "map/generate/blocks/climateRegions";
 import { WALLS_REGION } from "map/generate/blocks/slotRooms";
@@ -665,6 +666,10 @@ function validateIntegrity(data: LoadedGameDefinition): void {
         throw new Error(`Item "${item.kind}" places unknown archetype "${item.place!.archetype}"`);
       }
     }
+
+    // 成长规则与经验来源引用校验（rules/progression.json 尚未注册 RuleSchema，
+    // 参数形状由 progression 模块 fail-fast；schema 形式化后置）。
+    validateProgressionConfig(data.resolvedRules["progression"], data.resolvedEntities);
 
     // 对话树引用校验：DialogueSource 组件 treeId → 树存在；树效果 questId → 任务存在
     const dialogueIds = new Set(data.resolvedDialogues.map((t) => t.id));

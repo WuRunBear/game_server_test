@@ -12,5 +12,7 @@
     "LootTable": [{ "kind": "raw_meat", "qty": 1, "chance": 1.0 }]
   },
   "behavior": "wolf-night",
+  "xpValue": 35,
+  "xpSkill": "combat",
   "team": 2
 }

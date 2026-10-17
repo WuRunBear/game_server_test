@@ -8,6 +8,8 @@
       "max": 5,
       "amountPerHit": 1,
       "regenMs": 0,
+      "xpValue": 2,
+      "xpSkill": "gathering",
       "yieldsKind": "berry"
     },
     "StateMachine": {

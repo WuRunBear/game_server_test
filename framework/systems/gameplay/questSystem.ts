@@ -19,6 +19,7 @@ import type { GameWorld, EntityId } from "world";
 import { consumeEvents } from "framework/events/gameEvents";
 import { addToInventory } from "framework/systems/gameplay/inventoryOps";
 import { addRelation } from "framework/systems/gameplay/relation";
+import { creditFactionForNpcKind } from "framework/systems/gameplay/factions";
 import type { QuestDefinitionJson } from "framework/config/schema/QuestSchema";
 
 /** 背包中 kind 物品总数。 */
@@ -103,6 +104,8 @@ export function submitQuest(world: GameWorld, playerEid: EntityId, questId: stri
   }
   if (npcKind) {
     addRelation(world, playerEid, npcKind, def.submit.relationDelta);
+    // 同一 relationDelta 映射到 NPC 所属势力（factions 规则；未归属则忽略）
+    creditFactionForNpcKind(world, playerEid, npcKind, def.submit.relationDelta);
   }
   quest.state = QUEST_DONE;
   return true;

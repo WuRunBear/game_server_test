@@ -8,6 +8,8 @@
       "max": 10,
       "amountPerHit": 2,
       "regenMs": 0,
+      "xpValue": 6,
+      "xpSkill": "gathering",
       "yieldsKind": "stone",
       "requiredToolType": "pickaxe"
     },

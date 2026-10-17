@@ -3,5 +3,8 @@
   "maxStack": 1,
   "maxDurability": 50,
   "wearPerUse": 1,
-  "equip": { "slot": "weapon", "attackBonus": 15 }
+  "equip": { "slot": "weapon", "attackBonus": 15 },
+  "critChance": 0.15,
+  "critMultiplier": 2,
+  "damageType": "pierce"
 }

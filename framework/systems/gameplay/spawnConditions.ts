@@ -1,7 +1,11 @@
-import { PHASE_DAY, PHASE_NIGHT, type GameWorld } from "world";
+import { query } from "bitecs";
+
+import { PHASE_DAY, PHASE_NIGHT, type EntityId, type GameWorld } from "world";
+import { Player } from "components";
 import type { RegistrationMetadata } from "framework/registryMetadata";
 import { assertStrictConfigSchema } from "framework/registryMetadata";
 import { environmentAt } from "framework/simulation/worldClock";
+import { getFactionRep } from "framework/systems/gameplay/factions";
 
 /**
  * 刷怪条件模块注册表（名 → 判定函数）。
@@ -12,8 +16,12 @@ import { environmentAt } from "framework/simulation/worldClock";
  *
  * **带参条件**：条件名可写成 `基名:参数`（参数取值来自 game/ 配置），
  * 参数由带参条件工厂接收。基名与参数均保持通用、无游戏语义。
+ *
+ * **可选主体**：部分条件（如 `factionRepAtLeast`）描述的是「某个玩家」的状态。
+ * 这类条件接受可选的 `subject` eid；演化/袭击等世界级调用方不传主体时，
+ * 条件按「任一在线玩家满足」求值（无玩家时按不满足）。其余条件忽略该参数。
  */
-export type SpawnCondition = (world: GameWorld) => boolean;
+export type SpawnCondition = (world: GameWorld, subject?: EntityId) => boolean;
 
 /** 带参条件判定函数：第二参数为条件名分隔符后的字符串参数。 */
 export type ParameterizedSpawnCondition = (world: GameWorld, arg: string) => boolean;
@@ -139,5 +147,28 @@ export function registerBuiltinSpawnConditions(): void {
       );
     }
     return (world) => (world.progress[key] ?? 0) >= threshold;
+  });
+
+  // 势力声望门控（成就/任务/配方）：参数 `<factionId>:<n>`。有主体 eid 时读
+  // 该玩家的声望；世界级调用方不传主体时按「任一在线玩家满足」求值。
+  registerParameterizedSpawnCondition("factionRepAtLeast", (arg) => {
+    const sep = arg.indexOf(SPAWN_CONDITION_ARG_SEPARATOR);
+    const factionId = sep > 0 ? arg.slice(0, sep) : "";
+    const thresholdRaw = sep > 0 ? arg.slice(sep + 1) : "";
+    const threshold = Number(thresholdRaw);
+    if (!factionId || thresholdRaw === "" || !Number.isFinite(threshold)) {
+      throw new Error(
+        `Spawn condition "factionRepAtLeast:${arg}" requires parameter "<factionId>:<number>"`,
+      );
+    }
+    return (world, subject) => {
+      if (subject !== undefined) {
+        return getFactionRep(world, subject, factionId) >= threshold;
+      }
+      for (const playerEid of query(world, [Player])) {
+        if (getFactionRep(world, playerEid, factionId) >= threshold) return true;
+      }
+      return false;
+    };
   });
 }

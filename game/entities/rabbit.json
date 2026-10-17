@@ -9,5 +9,7 @@
     "Perception": { "visionRadius": 120, "hostilityRange": 60 }
   },
   "behavior": "rabbit-flee",
+  "xpValue": 10,
+  "xpSkill": "combat",
   "team": 2
 }

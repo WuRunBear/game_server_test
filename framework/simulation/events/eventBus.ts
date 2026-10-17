@@ -31,7 +31,7 @@ export interface TypedEventPayloads {
   /** 投射物接触实体（projectileSystem 入队；eid=投射物主人，target=被接触实体）。 */
   "on-contact": { eid: number; target: number; x: number; y: number };
   /** 攻击命中（combatSystem 入队；eid=攻击者，target=被命中实体，damage=实际伤害）。 */
-  "on-hit": { eid: number; attacker: number; target: number; damage: number };
+  "on-hit": { eid: number; attacker: number; target: number; damage: number; crit?: boolean; damageType?: string };
   /** 实体死亡（death 接线预留）。 */
   "on-death": { eid: number; kind: string };
   /** 装备物品耐久耗尽破碎（durability 磨损点入队；eid=持有者，slot=装备槽名）。 */
@@ -42,6 +42,13 @@ export interface TypedEventPayloads {
   "on-region-clear": { eid: number; region: string };
   /** 袭击预警（raidSystem 袭击导演入队；预警期内每 tick 对在线玩家各发一条，remainingTicks 为距刷波的剩余 tick 数）。 */
   "on-raid-warning": { eid: number; remainingTicks: number };
+  /**
+   * 成就解锁（achievementSystem 入队；eid=触发玩家，无玩家时为 0）。
+   *
+   * 未注册触发器求值器时 triggerSystem 自然丢弃——成就本身的服务端权威
+   * 状态以 world.progress["achievement:<id>"] 为准。
+   */
+  "on-achievement": { eid: number; id: string; name?: string };
 }
 
 /** 类型化事件名（TypedEventPayloads 的键）。 */

@@ -5,9 +5,16 @@ import { entityLevelOf } from "framework/components/entityLevel";
 import { isGameplayReachable } from "framework/utils/gameplayDistance";
 import type { GameWorld } from "world";
 import { getRuleModule } from "framework/api";
-import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
+import { getEquipModifiers, getWeaponCombatProfile, getArmorDamageResist } from "framework/systems/gameplay/equipmentSystem";
 import { wearEquippedItem } from "framework/systems/gameplay/durability";
-import { computeStandardDamage } from "framework/systems/gameplay/damageFormula";
+import {
+  computeStandardDamage,
+  isCriticalRoll,
+  applyCritAndResist,
+  CRIT_RNG_CHANNEL,
+} from "framework/systems/gameplay/damageFormula";
+import { getSkillAdd, getSkillMultiplier } from "framework/systems/gameplay/progression";
+import { rngFrom } from "framework/simulation/rng";
 import { computeNumericStat, STAT_ATTACK, STAT_DEFENSE } from "framework/simulation/modifiers/modifiers";
 import { emitEvent } from "framework/events/gameEvents";
 import { queueEvent } from "framework/simulation/events/eventBus";
@@ -110,12 +117,23 @@ export function attackTarget(world: GameWorld, attackerEid: number, targetEid: n
     return false;
   }
 
-  // 攻击力/防御力在基础值（组件 + 装备加成）上叠属性修饰符（apply-status 等）
-  const baseAttack = (Attack.value[attackerEid] ?? 10) + getEquipModifiers(world, attackerEid).attackBonus;
-  const attackerDamage = computeNumericStat(world, attackerEid, STAT_ATTACK, baseAttack);
+  // 攻击力/防御力在基础值（组件 + 装备加成 + 技能加法加成）上叠属性修饰符
+  // （apply-status 等），再乘技能乘法加成——叠加顺序固定且可观察：
+  // 组件基础 → 装备/技能加法 → 状态修饰符 → 技能乘法 → 暴击/克制。
+  const baseAttack =
+    (Attack.value[attackerEid] ?? 10) +
+    getEquipModifiers(world, attackerEid).attackBonus +
+    getSkillAdd(world, attackerEid, STAT_ATTACK);
+  const attackerDamage =
+    computeNumericStat(world, attackerEid, STAT_ATTACK, baseAttack) *
+    getSkillMultiplier(world, attackerEid, STAT_ATTACK);
   const baseDefense =
-    (Defense.value[targetEid] ?? 0) + getEquipModifiers(world, targetEid).defenseBonus;
-  const targetDefense = computeNumericStat(world, targetEid, STAT_DEFENSE, baseDefense);
+    (Defense.value[targetEid] ?? 0) +
+    getEquipModifiers(world, targetEid).defenseBonus +
+    getSkillAdd(world, targetEid, STAT_DEFENSE);
+  const targetDefense =
+    computeNumericStat(world, targetEid, STAT_DEFENSE, baseDefense) *
+    getSkillMultiplier(world, targetEid, STAT_DEFENSE);
 
   // 标准公式抽为纯函数（damageFormula），与 damage 效果共用同一数值路径
   let damage = computeStandardDamage(attackerDamage, targetDefense);
@@ -130,6 +148,20 @@ export function attackTarget(world: GameWorld, attackerEid: number, targetEid: n
     }
   }
 
+  // 暴击 / 伤害类型克制（均在公式之后结算）：
+  // - 暴击：按 (tick, attacker, target, "crit") 派生确定性随机流，结果可复现；
+  // - 克制：攻击方 weapon.damageType 匹配防御方 armor.resist 键，抗性钳制 [0,0.9]。
+  // 未配置（critChance 0 / 无 damageType / 无 resist）时 applyCritAndResist 恒等返回。
+  const weaponProfile = getWeaponCombatProfile(world, attackerEid);
+  const crit =
+    weaponProfile.critChance > 0 &&
+    isCriticalRoll(
+      rngFrom(world.time.tick, attackerEid, targetEid, CRIT_RNG_CHANNEL).next(),
+      weaponProfile.critChance,
+    );
+  const resist = getArmorDamageResist(world, targetEid, weaponProfile.damageType);
+  damage = applyCritAndResist(damage, crit, weaponProfile.critMultiplier, resist);
+
   Health.current[targetEid] = (Health.current[targetEid] ?? 0) - damage;
 
   // 耐久磨损（数值由 item kind 配置）：武器命中耗一次；护甲受击耗一次。
@@ -137,12 +169,15 @@ export function attackTarget(world: GameWorld, attackerEid: number, targetEid: n
   wearEquippedItem(world, attackerEid, "weapon");
   wearEquippedItem(world, targetEid, "armor");
 
-  // 命中事件（产生方接线）：通用载荷只放 攻击者/被命中者/实际伤害
+  // 命中事件（产生方接线）：通用载荷放 攻击者/被命中者/实际伤害；
+  // crit/damageType 仅在真实发生时附加（无配置时载荷与历史逐字段一致）。
   queueEvent(world, "on-hit", {
     eid: attackerEid,
     attacker: attackerEid,
     target: targetEid,
     damage,
+    ...(crit ? { crit: true } : {}),
+    ...(weaponProfile.damageType ? { damageType: weaponProfile.damageType } : {}),
   });
 
   // 致命一击：发射击杀事件（同帧 questSystem 等系统消费；需求耗尽等非攻击致死无事件）

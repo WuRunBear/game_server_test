@@ -43,10 +43,12 @@
     { "id": "stateMachine" },
     { "id": "interaction", "config": { "range": 24 } },
     { "id": "equipment" },
+    { "id": "progression" },
     { "id": "death" },
     { "id": "respawn" },
     { "id": "portal" },
     { "id": "quest" },
+    { "id": "achievement", "config": { "checkIntervalTicks": 20 } },
     { "id": "timer" },
     { "id": "trigger" }
   ],

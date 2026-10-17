@@ -12,5 +12,7 @@
     "LootTable": [{ "kind": "raw_meat", "qty": 1, "chance": 1.0 }]
   },
   "behavior": "boar-hostile",
+  "xpValue": 25,
+  "xpSkill": "combat",
   "team": 2
 }

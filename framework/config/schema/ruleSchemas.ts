@@ -10,6 +10,8 @@ import {
   RaidRuleSchema,
   RespawnRuleSchema,
   DisasterRuleSchema,
+  FactionRuleSchema,
+  AchievementRuleSchema,
 } from "framework/config/schema/RuleSchema";
 import { PlayerRuleSchema } from "framework/config/schema/PlayerRuleSchema";
 
@@ -58,4 +60,6 @@ export function registerBuiltinRuleSchemas(): void {
   registerRuleSchema("raid", RaidRuleSchema);
   registerRuleSchema("respawn", RespawnRuleSchema);
   registerRuleSchema("disasters", DisasterRuleSchema);
+  registerRuleSchema("factions", FactionRuleSchema);
+  registerRuleSchema("achievements", AchievementRuleSchema);
 }

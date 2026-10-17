@@ -23,6 +23,11 @@ import type { GameWorld } from "framework/world";
 export const STAT_MOVE_SPEED = "moveSpeed";
 export const STAT_ATTACK = "attack";
 export const STAT_DEFENSE = "defense";
+/**
+ * 采集产出倍率（缺省 1）：gathering 经 getEquipModifiers 读取的基础倍率上
+ * 再叠技能加成；状态类修饰符也可按同名 stat 施加。
+ */
+export const STAT_GATHER_MULT = "gatherMult";
 
 /** 单条修饰符条目：乘法/加法/布尔修正 + 来源 + 失效 tick。 */
 export interface ModifierEntry {
