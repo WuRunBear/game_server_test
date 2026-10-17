@@ -14,6 +14,7 @@
  * 游戏无关——事件名与载荷结构由 TypedEventPayloads 声明（interface merging 可扩展）。
  */
 import type { GameWorld } from "framework/world";
+import { Triggers, type TriggerEntry } from "framework/simulation/triggers/triggers";
 
 /**
  * 类型化事件载荷表：事件名 → 载荷结构。
@@ -53,6 +54,14 @@ export interface QueuedEvent {
   name: string;
   /** 事件载荷。 */
   payload: unknown;
+  /**
+   * 入队时 owner（载荷字段 `eid`）的声明式触发器快照。
+   *
+   * 事件在固定阶段消费，而实体可能在本 tick 更早的系统里已被销毁
+   * （on-death：deathSystem 先入队再 destroyEntity，triggerSystem 在系统链
+   * 末段才消费）——入队时快照保证声明式触发器仍可求值。无触发器时缺省。
+   */
+  triggers?: TriggerEntry[];
 }
 
 /** 事件处理器签名：载荷 + world（处理器可据此入队新事件）。 */
@@ -80,7 +89,11 @@ export function queueEvent<N extends TypedEventName>(
   name: N,
   payload: TypedEventPayload<N>,
 ): void {
-  world.eventBus.queue.push({ name, payload });
+  // 入队时快照 owner 的声明式触发器：事件消费阶段实体可能已被销毁
+  // （on-death 的典型时序），快照保证 Triggers 声明仍可求值。
+  const eid = (payload as { eid?: unknown }).eid;
+  const triggers = typeof eid === "number" ? Triggers[eid] : undefined;
+  world.eventBus.queue.push({ name, payload, ...(triggers ? { triggers } : {}) });
 }
 
 /**

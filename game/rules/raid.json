@@ -3,5 +3,6 @@
   "warnTicks": 100,
   "waveSize": 3,
   "kinds": ["spider", "wolf", "tentacle"],
-  "attackStructures": true
+  "attackStructures": true,
+  "requireCondition": "progressAtLeast:boss_alpha:1"
 }

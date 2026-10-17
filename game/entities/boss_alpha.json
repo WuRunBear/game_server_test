@@ -1,0 +1,27 @@
+{
+  "kind": "boss_alpha",
+  "tags": ["NPC", "Enemy"],
+  "components": {
+    "Size": { "w": 32, "h": 28 },
+    "Velocity": {},
+    "Collider": { "shape": 1, "halfW": 16, "halfH": 14 },
+    "Health": { "current": 320, "max": 320 },
+    "Attack": { "value": 22, "range": 40 },
+    "Cooldown": {},
+    "Perception": { "visionRadius": 240, "hostilityRange": 180 },
+    "LootTable": [
+      { "kind": "boss_core", "qty": 1, "chance": 1.0 },
+      { "kind": "stone", "qty": 5, "chance": 1.0 }
+    ],
+    "Triggers": [
+      {
+        "trigger": "on-death",
+        "effects": [
+          { "name": "add-progress", "params": { "key": "boss_alpha", "value": 1 } }
+        ]
+      }
+    ]
+  },
+  "behavior": "boss-two-phase",
+  "team": 2
+}

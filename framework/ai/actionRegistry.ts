@@ -24,6 +24,28 @@ export interface ActionEntry extends RegistrationMetadata {
 }
 
 /**
+ * 带参节点名分隔符（`基名:参数`）。
+ *
+ * 注册表按**基名**注册一次工厂；行为树配置以 `基名:参数` 引用时，参数以
+ * `args.arg` 追加进工厂参数（配置声明的 args 字段原样保留）。与
+ * spawnConditions 的带参条件同一约定，参数含义由节点工厂解释。
+ */
+export const ACTION_ARG_SEPARATOR = ":";
+
+/** 带参节点名解析出的绑定工厂（基名未注册或非带参形态返回 undefined）。 */
+function bindParameterized(
+  actions: Map<string, ActionEntry>,
+  name: string,
+): ActionFactory | undefined {
+  const sep = name.indexOf(ACTION_ARG_SEPARATOR);
+  if (sep <= 0) return undefined;
+  const base = actions.get(name.slice(0, sep));
+  if (!base) return undefined;
+  const arg = name.slice(sep + 1);
+  return (args?: Record<string, unknown>) => base.factory({ ...(args ?? {}), arg });
+}
+
+/**
  * 行为树节点注册表接口：以"节点名"为键的工厂查找表。
  * 约定：重名 register 与未注册 get 均由实现抛错，避免配置歧义。
  */
@@ -53,14 +75,16 @@ export function createActionRegistry(): ActionRegistry {
 
     get(name) {
       const entry = actions.get(name);
-      if (!entry) {
+      if (entry) return entry.factory;
+      const bound = bindParameterized(actions, name);
+      if (!bound) {
         throw new Error(`Action "${name}" is not registered`);
       }
-      return entry.factory;
+      return bound;
     },
 
     has(name) {
-      return actions.has(name);
+      return actions.has(name) || bindParameterized(actions, name) !== undefined;
     },
 
     all() {

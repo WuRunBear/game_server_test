@@ -1,0 +1,42 @@
+{
+  "id": "boss-two-phase",
+  "definition": {
+    "type": "root",
+    "child": {
+      "type": "selector",
+      "children": [
+        {
+          "type": "sequence",
+          "while": { "call": "HealthBelow:0.5" },
+          "children": [
+            {
+              "type": "action",
+              "call": "ApplyStatus",
+              "args": { "stat": "moveSpeed", "mul": 0.6, "source": "boss_enrage" }
+            },
+            { "type": "condition", "call": "IsTargetInVision" },
+            { "type": "action", "call": "Chase", "args": { "speedTiles": 0.5 } },
+            { "type": "condition", "call": "InAttackRange" },
+            { "type": "action", "call": "Attack" }
+          ]
+        },
+        {
+          "type": "sequence",
+          "until": { "call": "HealthBelow:0.5" },
+          "children": [
+            { "type": "condition", "call": "IsTargetInVision" },
+            { "type": "action", "call": "Chase", "args": { "speedTiles": 0.5 } },
+            { "type": "condition", "call": "InAttackRange" },
+            { "type": "action", "call": "Attack" }
+          ]
+        },
+        {
+          "type": "action",
+          "call": "Wander",
+          "args": { "speedTiles": 0.3 },
+          "until": { "call": "HealthBelow:0.5" }
+        }
+      ]
+    }
+  }
+}

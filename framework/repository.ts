@@ -56,6 +56,13 @@ export interface WorldRecord {
    * evolve 流必须与存档世界一致）。缺省视为旧格式存档（回退配置 seed）。
    */
   mapSeeds?: Record<string, number>;
+  /**
+   * 世界进度账本（key → 数值；键与语义由 game/ 配置约定，框架不解释）。
+   *
+   * 与实体/地图同盘：世界级全服共享进度（如击破进度）随存档恢复。
+   * 旧档缺少该字段时按空账本恢复（项目立场：旧存档直接废弃，不迁移）。
+   */
+  progress?: Record<string, number>;
   /** 存活实体清单。 */
   entities: SerializedEntity[];
 }

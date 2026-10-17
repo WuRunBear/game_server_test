@@ -4,7 +4,8 @@
  * 每 tick 整体取出类型化事件队列（drainEvents，清空式消费），对每个事件：
  * 1. 按事件名查 triggerRegistry 求值器（未注册的事件自然丢弃）；
  * 2. 载荷须携带 owner eid（约定字段 `eid`），缺省跳过；
- * 3. 读取该实体的 Triggers 组件，命中同名触发器条目 → 求值器执行效果列表。
+ * 3. 读取该实体的 Triggers（优先用事件入队时快照——实体可能已在同 tick
+ *    更早的系统里销毁，如 on-death），命中同名触发器条目 → 求值器执行效果列表。
  *
  * 系统位置：注册在 timer 之后（同 tick 内定时器事件可被同 tick 消费）。
  * 游戏无关——事件名/效果列表全为配置声明。
@@ -25,7 +26,9 @@ export function triggerSystem(world: GameWorld): GameWorld {
     // 载荷约定：字段 eid = 触发源实体（挂载 Triggers 的实体）
     const payload = evt.payload as { eid?: unknown; target?: unknown } | null;
     if (!payload || typeof payload.eid !== "number") continue;
-    const triggers = Triggers[payload.eid];
+    // 优先用入队时快照（事件队列由固定阶段消费，实体可能在同 tick 已销毁，
+    // 如 on-death）；无快照时回退实时读取当前声明（兼容手工推送的事件）。
+    const triggers = evt.triggers ?? Triggers[payload.eid];
     if (!triggers || triggers.length === 0) continue;
 
     const target = typeof payload.target === "number" ? (payload.target as number) : payload.eid;

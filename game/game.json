@@ -16,7 +16,18 @@
     { "id": "disaster" },
     { "id": "modifier" },
     { "id": "perception" },
-    { "id": "ai" },
+    {
+      "id": "ai",
+      "config": {
+        "pathfinding": {
+          "enabled": true,
+          "repathTicks": 20,
+          "maxNodes": 16384,
+          "waypointToleranceTiles": 0.35,
+          "fleeGoalDistanceTiles": 8
+        }
+      }
+    },
     { "id": "physics" },
     { "id": "movement" },
     { "id": "entity-level" },

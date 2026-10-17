@@ -138,6 +138,8 @@ export { CombatRuleSchema, NeedsRuleSchema, CraftingRuleSchema, DayNightRuleSche
 export { createDisasterSystem, disasterSystem } from "framework/systems/gameplay/disasterSystem";
 export { craftRecipe, stepCraftingJobs, cancelCrafting, craftingProgressOf, validateCraftingRules, stationsInRange, craftingStationRange, type PendingCraft } from "framework/systems/gameplay/craftingSystem";
 export { stepFuelBurn, refuelStation, validateFuelRules, resolveFuelConfig, type FuelConfig } from "framework/systems/gameplay/fuelSystem";
+export { findPath, findPathWithStats, lineOfSightClear, DEFAULT_MAX_NODES, type PathTile, type AStarResult, type PathfindingBlockers } from "framework/ai/pathfinding/astar";
+export { createDefaultPathfindingConfig, DEFAULT_PATHFINDING_CONFIG, parsePathfindingConfigValue, resolvePathfindingConfig, type PathfindingConfig } from "framework/ai/pathfinding/config";
 
 export {
   registerSystem,

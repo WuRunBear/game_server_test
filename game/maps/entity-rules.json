@@ -395,6 +395,18 @@
           "dy": 3
         }
       ]
+    },
+    {
+      "map": "island",
+      "region": "rocky",
+      "kind": "boss_alpha",
+      "max": 1,
+      "every": 155520000,
+      "mode": "exact",
+      "at": {
+        "x": 70,
+        "y": 100
+      }
     }
   ]
 }

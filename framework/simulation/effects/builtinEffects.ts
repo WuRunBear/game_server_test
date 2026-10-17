@@ -1,6 +1,7 @@
 /**
  * 内置效果装配：注册框架自带的通用效果执行器（damage/heal/spawn-projectile/
- * apply-status/set-timer/restore-resource/impulse/ledger/spawn-entity）。
+ * apply-status/set-timer/restore-resource/impulse/ledger/add-progress/
+ * spawn-entity）。
  *
  * 由 bootstrapFramework 调用一次（注册表查重，重复注册抛错）。
  * 全部效果为通用机制词（damage/heal/status/impulse/ledger/spawn/resource 等），
@@ -236,6 +237,22 @@ export function registerBuiltinEffects(): void {
       }
     }
     return ok;
+  });
+
+  /**
+   * add-progress：向世界进度账本累加一个通用进度键（params.key 必填、
+   * params.value 缺省 1，负值即扣减）。
+   *
+   * 进度是 world 级全服共享状态（入存档，见 worldSerializer），与实体无关：
+   * 效果不读 targets，来源实体只用于事件归因。键与数值语义由 game/ 配置
+   * 约定（如 on-death 触发器写入击破进度），框架不解释。
+   */
+  registerEffect("add-progress", (ctx) => {
+    const key = strParam(ctx.params, "key");
+    const value = numParam(ctx.params, "value", 1);
+    if (!key || !Number.isFinite(value) || value === 0) return false;
+    ctx.world.progress[key] = (ctx.world.progress[key] ?? 0) + value;
+    return true;
   });
 
   /**

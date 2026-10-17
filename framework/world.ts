@@ -93,6 +93,14 @@ export type GameWorld = ReturnType<typeof createWorld> & {
   runtimeEvents: GameEvent[];
   /** 类型化事件总线（tick 内排队、固定阶段消费；见 simulation/events/eventBus.ts）。 */
   eventBus: EventBus;
+  /**
+   * 世界进度账本：进度键 → 数值（全服共享、跨存档保留）。
+   *
+   * 键与语义完全由 game/ 配置约定（如击杀触发器 add-progress 写入的键，
+   * 配方 unlock.condition / 袭击 requireCondition 经 progressAtLeast 读取），
+   * 框架只做通用数值累加与读取，不解释任何键。
+   */
+  progress: Record<string, number>;
   /** 交易报价会话表（offerId → 会话；运行时状态，不入档，重启即作废）。 */
   offerSessions: Map<number, OfferSession>;
   /** 下一个可用的报价会话 id。 */
@@ -139,6 +147,7 @@ export function createGameWorld(fixedDtMs: number): GameWorld {
     maps: {},
     activeMaps: new Set(),
     defaultMapId: "",
+    progress: {},
     systemRuntimes: new Map(),
     nextNetworkId: 1,
     runtimeEvents: [],

@@ -153,6 +153,7 @@ export function serializeWorld(world: GameWorld, id: string): WorldRecord {
     timeOfDay: { ...world.time.timeOfDay },
     maps,
     ...(mapSeeds ? { mapSeeds: { ...mapSeeds } } : {}),
+    progress: { ...world.progress },
     entities,
   };
 }
@@ -195,6 +196,7 @@ function applyEntityState(world: GameWorld, eid: number, saved: SerializedEntity
  *   （含 EntityMap 归属）→ 覆写 NetworkId → 固定 nextNetworkId；
  * - 全局时刻：world.time.tick = 存档 tick、timeOfDay = 存档值（离线补差
  *   由 GameSimulation 在本函数返回后接手，墙钟折算不入本模块）；
+ * - 世界进度账本：world.progress = 存档 progress（旧档缺字段按空账本恢复）；
  * - 激活集：全部快照图（record.maps 键）加入 world.activeMaps（常驻语义，
  *   空图也照常运行演化/碰撞）。world.maps 的回填归 bootMaps（开机分支
  *   唯一归属地），本函数不碰 world.maps——仅接入 boot 已回填的快照图，
@@ -213,6 +215,18 @@ export function restoreWorld(world: GameWorld, record: WorldRecord): number[] {
     world.time.timeOfDay = { ...record.timeOfDay };
   }
   world.nextNetworkId = record.nextNetworkId;
+
+  // 世界进度账本：缺省（旧档）按空账本恢复；只收有限数值，畸形条目丢弃。
+  const restoredProgress: Record<string, number> = {};
+  const savedProgress = record.progress;
+  if (savedProgress && typeof savedProgress === "object") {
+    for (const [key, value] of Object.entries(savedProgress)) {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        restoredProgress[key] = value;
+      }
+    }
+  }
+  world.progress = restoredProgress;
 
   const orphanPlayers: number[] = [];
   const savedEntities = Array.isArray(record.entities) ? record.entities : [];

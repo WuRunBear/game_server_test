@@ -12,10 +12,12 @@ import { createChaseAction } from "framework/ai/nodes/actions/chase";
 import { createFleeAction } from "framework/ai/nodes/actions/flee";
 import { createAttackAction } from "framework/ai/nodes/actions/attack";
 import { createSleepAction } from "framework/ai/nodes/actions/sleep";
+import { createApplyStatusAction } from "framework/ai/nodes/actions/applyStatus";
 import { createIsTargetInVisionCondition } from "framework/ai/nodes/conditions/isTargetInVision";
 import { createInAttackRangeCondition } from "framework/ai/nodes/conditions/inAttackRange";
 import { createIsNightCondition } from "framework/ai/nodes/conditions/isNight";
 import { createIsInLightCondition } from "framework/ai/nodes/conditions/isInLight";
+import { createHealthBelowCondition } from "framework/ai/nodes/conditions/healthBelow";
 
 export function registerBuiltinActions(registry: ActionRegistry): void {
   registry.register("Idle", createIdleAction);
@@ -24,8 +26,11 @@ export function registerBuiltinActions(registry: ActionRegistry): void {
   registry.register("Flee", createFleeAction);
   registry.register("Attack", createAttackAction);
   registry.register("Sleep", createSleepAction);
+  registry.register("ApplyStatus", createApplyStatusAction);
   registry.register("IsTargetInVision", createIsTargetInVisionCondition);
   registry.register("InAttackRange", createInAttackRangeCondition);
   registry.register("IsNight", createIsNightCondition);
   registry.register("IsInLight", createIsInLightCondition);
+  // 带参节点：配置以 `HealthBelow:<ratio>` 引用（参数经 ActionRegistry 解析）
+  registry.register("HealthBelow", createHealthBelowCondition);
 }

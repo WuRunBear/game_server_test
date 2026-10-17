@@ -125,4 +125,19 @@ export function registerBuiltinSpawnConditions(): void {
   registerParameterizedSpawnCondition("isWeather", (arg) => (world) =>
     environmentAt(world).weatherId === arg,
   );
+
+  // 世界进度门控（科技树/阶段解锁）：参数 `<key>:<n>`，key 由 game/ 配置约定，
+  // 缺键按 0 计。同一注册表同时服务配方 unlock.condition 与袭击 requireCondition。
+  registerParameterizedSpawnCondition("progressAtLeast", (arg) => {
+    const sep = arg.indexOf(SPAWN_CONDITION_ARG_SEPARATOR);
+    const key = sep > 0 ? arg.slice(0, sep) : "";
+    const thresholdRaw = sep > 0 ? arg.slice(sep + 1) : "";
+    const threshold = Number(thresholdRaw);
+    if (!key || thresholdRaw === "" || !Number.isFinite(threshold)) {
+      throw new Error(
+        `Spawn condition "progressAtLeast:${arg}" requires parameter "<key>:<number>"`,
+      );
+    }
+    return (world) => (world.progress[key] ?? 0) >= threshold;
+  });
 }
