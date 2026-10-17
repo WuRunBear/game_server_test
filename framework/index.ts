@@ -104,7 +104,7 @@ export { projectileSystem, spawnProjectile } from "framework/systems/gameplay/pr
 
 export { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
 export { createFileRepository } from "framework/persistence/fileRepository";
-export type { Repository, WorldRecord, SerializedEntity } from "framework/repository";
+export type { Repository, WorldRecord, SerializedEntity, SerializedCraftingJob } from "framework/repository";
 
 export { dayNightCycleSystem } from "framework/systems/gameplay/dayNightCycleSystem";
 export { environmentSystem } from "framework/systems/gameplay/environmentSystem";
@@ -141,12 +141,13 @@ export { ACHIEVEMENT_PROGRESS_PREFIX, DEFAULT_ACHIEVEMENT_CHECK_INTERVAL, achiev
 export { setRelation } from "framework/systems/gameplay/relation";
 export { Progression, initProgression, type ProgressionState, type SkillProgress } from "framework/components/progression";
 export { addXp, levelForXp, getSkillBonuses, getSkillAdd, getSkillMultiplier, awardHarvestXp, progressionSystem, getProgressionRules, parseProgressionRules, validateProgressionConfig, validateProgressionRules, DEFAULT_PROGRESSION_CURVE, type ProgressionCurve, type SkillBonusRule, type ProgressionRules, type SkillBonuses, type XpGainResult } from "framework/systems/gameplay/progression";
+export { Achievements, initAchievements, markAchievementUnlocked, type AchievementsState } from "framework/components/achievements";
 export { isCriticalRoll, applyCritAndResist, clampDamageResist, normalizeCritMultiplier, MAX_DAMAGE_RESIST, DEFAULT_CRIT_MULTIPLIER, CRIT_RNG_CHANNEL } from "framework/systems/gameplay/damageFormula";
 export { getWeaponCombatProfile, getArmorDamageResist, type WeaponCombatProfile } from "framework/systems/gameplay/equipmentSystem";
 export { STAT_GATHER_MULT } from "framework/simulation/modifiers/modifiers";
 export { createDisasterSystem, disasterSystem } from "framework/systems/gameplay/disasterSystem";
-export { craftRecipe, stepCraftingJobs, cancelCrafting, craftingProgressOf, validateCraftingRules, stationsInRange, craftingStationRange, type PendingCraft } from "framework/systems/gameplay/craftingSystem";
-export { stepFuelBurn, refuelStation, validateFuelRules, resolveFuelConfig, type FuelConfig } from "framework/systems/gameplay/fuelSystem";
+export { craftRecipe, stepCraftingJobs, cancelCrafting, craftingProgressOf, validateCraftingRules, stationsInRange, craftingStationRange, serializeCraftingJobs, restoreCraftingJobs, type PendingCraft } from "framework/systems/gameplay/craftingSystem";
+export { stepFuelBurn, refuelStation, validateFuelRules, resolveFuelConfig, fastForwardFuelBurn, type FuelConfig } from "framework/systems/gameplay/fuelSystem";
 export { findPath, findPathWithStats, lineOfSightClear, DEFAULT_MAX_NODES, type PathTile, type AStarResult, type PathfindingBlockers } from "framework/ai/pathfinding/astar";
 export { createDefaultPathfindingConfig, DEFAULT_PATHFINDING_CONFIG, parsePathfindingConfigValue, resolvePathfindingConfig, type PathfindingConfig } from "framework/ai/pathfinding/config";
 

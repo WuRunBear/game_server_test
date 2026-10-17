@@ -20,7 +20,7 @@ import type { EntityId, GameWorld } from "world";
 import { consumeSlot, dropSlot, transferSlot, lootContainerSlot } from "framework/systems/gameplay/inventoryOps";
 import { equipSlot } from "framework/systems/gameplay/equipmentSystem";
 import { craftRecipe, stepCraftingJobs, cancelCrafting, validateCraftingRules } from "framework/systems/gameplay/craftingSystem";
-import { stepFuelBurn, refuelStation, validateFuelRules } from "framework/systems/gameplay/fuelSystem";
+import { stepFuelBurn, refuelStation, validateFuelRules, fastForwardFuelBurn } from "framework/systems/gameplay/fuelSystem";
 import { placeEntity } from "framework/systems/gameplay/placeableSystem";
 import { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";
 import { advanceDialogue } from "framework/systems/gameplay/dialogueSystem";
@@ -287,8 +287,11 @@ export class GameSimulation implements SimulationPort {
    *    （超 DEFAULT_MAX_OFFLINE_TICKS 截断并告警）；
    * 2. 对全部激活图一次性 evolve(存档tick → 存档tick+离线ticks)——与开机
    *    初始演化、每 tick 增量共用同一 evolve（D6，唯一动作不变式）；
-   * 3. advanceTickTo 把 world.time.tick 推到演化边界——否则下一运行 tick
-   *    会重走离线跨度。
+   * 3. 燃料闭式快进：按离线 tick 数一次性扣减（与在线逐 tick 同语义，纯计算）；
+   * 4. advanceTickTo 把 world.time.tick 推到演化边界——否则下一运行 tick
+   *    会重走离线跨度；
+   * 5. 延时制作到点结算：世界时钟已到边界，stepCraftingJobs 与在线同款
+   *    （到期任务产出；满包/站点失效则挂起保留）。
    */
   private runOfflineCatchUp(record: WorldRecord): void {
     const offlineTicks = computeOfflineTicks(
@@ -307,7 +310,11 @@ export class GameSimulation implements SimulationPort {
     // 族群节点离线快进：槽步进（非逐 tick）把全部节点数量推到演化边界——
     // 与逐 tick 推进最终数量/上限/最后演进 tick 完全一致（核心断言）。
     fastForwardPopulations(this.world, fromTick + offlineTicks);
+    // 燃料离线闭式快进：离线期间燃料真实消耗（耗尽的光源/站点按既有规则失效）
+    fastForwardFuelBurn(this.world, offlineTicks);
     advanceTickTo(this.world, fromTick + offlineTicks);
+    // 延时制作到点结算：任务 finishTick 为绝对 tick，推进后与在线 tick 同款结算
+    stepCraftingJobs(this.world);
     this.world.logger.info("offline catch-up complete", {
       savedTick: fromTick,
       offlineTicks,

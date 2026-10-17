@@ -7,9 +7,10 @@
  *   同时以每个在线玩家为主体求值（任一满足即解锁）；
  * - 解锁后写入 `world.progress["achievement:<id>"] = 1`（随 world.progress 入档），
  *   因此幂等——同一成就只解锁一次、只发一次 on-achievement 事件、只记一次日志；
+ * - 解锁同时向全部玩家实体的 Achievements AoS 投影（netSync 经动态 values map
+ *   推送 `Achievements.<id>`——不新增 PlayerState 字段，无协议字段索引断代）；
  * - 解锁事件走类型化事件总线（事件名 "on-achievement"）；未注册触发器求值器时
  *   triggerSystem 自然忽略；
- * - 不同步客户端（不新增 netSync 字段 / 不改协议）——客户端展示后置。
  *
  * 检查按 tick 节流（systems[].config.checkIntervalTicks，缺省 20）。
  * 游戏无关：成就 id / 条件名 / 奖励内容全部来自配置字符串。
@@ -17,6 +18,11 @@
 import { query } from "bitecs";
 
 import { Inventory, Player } from "components";
+import {
+  ACHIEVEMENT_PROGRESS_PREFIX,
+  achievementProgressKey,
+  markAchievementUnlocked,
+} from "framework/components/achievements";
 import type { EntityId, GameWorld } from "world";
 import type {
   AchievementReward,
@@ -27,16 +33,11 @@ import { addToInventory } from "framework/systems/gameplay/inventoryOps";
 import { addFactionRep } from "framework/systems/gameplay/factions";
 import { queueEvent } from "framework/simulation/events/eventBus";
 
-/** 成就解锁进度键前缀（world.progress）。 */
-export const ACHIEVEMENT_PROGRESS_PREFIX = "achievement:";
+/** 成就解锁进度键前缀（world.progress）；定义随 Achievements 组件（供同步复用）。 */
+export { ACHIEVEMENT_PROGRESS_PREFIX, achievementProgressKey };
 
 /** 缺省检查间隔（tick）。 */
 export const DEFAULT_ACHIEVEMENT_CHECK_INTERVAL = 20;
-
-/** 成就进度键。 */
-export function achievementProgressKey(id: string): string {
-  return `${ACHIEVEMENT_PROGRESS_PREFIX}${id}`;
-}
 
 /** 成就是否已解锁（world.progress 幂等标记）。 */
 export function isAchievementUnlocked(world: GameWorld, id: string): boolean {
@@ -157,6 +158,8 @@ export function createAchievementSystem(config?: AchievementSystemConfig) {
 
       // 幂等解锁：先写进度标记，再发一次事件/日志/奖励
       world.progress[achievementProgressKey(def.id)] = 1;
+      // 玩家视图投影（netSync 消费；未配置 Achievements 组件的实体自动跳过）
+      markAchievementUnlocked(world, def.id);
       queueEvent(world, "on-achievement", {
         eid: triggerPlayer ?? 0,
         id: def.id,

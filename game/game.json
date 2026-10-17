@@ -78,7 +78,9 @@
       { "component": "Dialogue", "tags": ["Player"], "fields": ["npcId", "treeId", "nodeId", "options"] },
       { "component": "DialogueSource", "tags": ["NPC"], "fields": ["treeId"] },
       { "component": "Quest", "tags": ["Player"], "fields": ["questId", "state", "count"] },
-      { "component": "Relation", "tags": ["Player"], "fields": ["npcKind", "value"] }
+      { "component": "Relation", "tags": ["Player"], "fields": ["npcKind", "value"] },
+      { "component": "Progression", "tags": ["Player"], "fields": ["totalXp", "level", "skills"] },
+      { "component": "Achievements", "tags": ["Player"], "fields": ["unlocked"] }
     ]
   }
 }

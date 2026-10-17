@@ -21,8 +21,9 @@ import type { GameWorld } from "world";
  * 视为不可用。消费闭环由此打通。
  *
  * 游戏无关——kind/毫秒均为通用机制词，具体燃料物与数值由 game/ 配置约定。
- * 注：燃烧挂每 tick 在线推进（GameSimulation beforeSystems），离线补差不
- * 重放燃料消耗（燃料为存量状态，与演化引擎的实体生产通路正交）。
+ * 注：燃烧在线由 GameSimulation beforeSystems 逐 tick 推进；离线补差经
+ * `fastForwardFuelBurn` 闭式扣减（存量状态，无需重放 tick）——在线/离线
+ * 语义一致（离线期间燃料真实消耗）。
  */
 
 /** 收窄后的燃料配置（fuel 段缺省 = 机制关闭）。 */
@@ -90,6 +91,29 @@ export function stepFuelBurn(world: GameWorld): void {
     const current = LightSource.fuelRemainingMs[eid] ?? 0;
     if (current <= 0) continue;
     LightSource.fuelRemainingMs[eid] = Math.max(0, current - config.burnMsPerTick);
+  }
+}
+
+/**
+ * 离线燃料闭式快进：把燃烧一次性折算 elapsedTicks 个 tick 的量。
+ *
+ * 语义与在线逐 tick 燃烧完全一致（同一 burnMsPerTick、同一"≤0 视为熄灭"
+ * 钳制），仅把 N 次减法合并为 `fuelRemainingMs -= burnMsPerTick × N`
+ * （下限 0）——纯计算、确定性，不重放 tick。耗尽的光源/燃料型站点沿用
+ * 既有失效规则（fuelRemainingMs ≤ 0 → 光照与合成站点匹配自然失效）。
+ *
+ * 未配置 fuel 段（机制关闭）、elapsedTicks ≤ 0 时空转（零影响）。
+ */
+export function fastForwardFuelBurn(world: GameWorld, elapsedTicks: number): void {
+  if (!Number.isFinite(elapsedTicks) || elapsedTicks <= 0) return;
+  const config = resolveFuelConfig(world);
+  if (!config) return;
+
+  const burnMs = config.burnMsPerTick * elapsedTicks;
+  for (const eid of query(world, [LightSource])) {
+    const current = LightSource.fuelRemainingMs[eid] ?? 0;
+    if (current <= 0) continue;
+    LightSource.fuelRemainingMs[eid] = Math.max(0, current - burnMs);
   }
 }
 

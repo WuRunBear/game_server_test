@@ -1,5 +1,5 @@
 import { hasComponent, query } from "bitecs";
-import { CraftingStation, Inventory, LightSource, Transform } from "components";
+import { CraftingStation, Inventory, LightSource, NetworkId, Transform } from "components";
 import { entityLevelOf } from "framework/components/entityLevel";
 import { sameLevelDistance } from "framework/utils/gameplayDistance";
 import type { GameWorld } from "world";
@@ -9,6 +9,7 @@ import {
   getSpawnCondition,
   type SpawnCondition,
 } from "framework/systems/gameplay/spawnConditions";
+import type { SerializedCraftingJob } from "framework/repository";
 import type { CraftingRecipe, EnvironmentRule } from "framework/config/schema/RuleSchema";
 
 /**
@@ -29,6 +30,8 @@ import type { CraftingRecipe, EnvironmentRule } from "framework/config/schema/Ru
  * 产出挂入 world.craftingJobs，由 `stepCraftingJobs` 每 tick 推进——到点时重验
  * 站点（含燃料）与背包空间：不满足则**挂起重试**（不丢已耗材料、不丢产出），
  * 直到可产出或玩家经 `cancelCrafting` 取消（取消按配方回退 inputs，放不下则拒绝取消）。
+ * 任务表随 WorldRecord.craftingJobs 入档（合成者按 NetworkId 引用，绝对 finishTick）——
+ * 重启后继续推进，离线补差在世界时钟推到边界后按同一 stepCraftingJobs 结算。
  *
  * 配置收窄（fail-fast）：unlock/durationTicks 与燃料段落为规则文件的透传字段
  * （RuleSchema 的 crafting 段 .passthrough()），本模块在首次解析时逐项校验——
@@ -295,7 +298,7 @@ export function craftRecipe(world: GameWorld, ownerEid: number, recipeId: string
 /* 延时制作：任务表推进 / 取消 / 进度查询                                 */
 /* ------------------------------------------------------------------ */
 
-/** 进行中的延时制作任务（运行时状态，不入档）。 */
+/** 进行中的延时制作任务（运行时状态；随 WorldRecord.craftingJobs 入档）。 */
 export interface PendingCraft {
   /** 配方 id（crafting 规则引用）。 */
   recipeId: string;
@@ -309,6 +312,85 @@ function enqueueCraft(world: GameWorld, ownerEid: number, job: PendingCraft): vo
   const jobs = world.craftingJobs.get(ownerEid);
   if (jobs) jobs.push(job);
   else world.craftingJobs.set(ownerEid, [job]);
+}
+
+/* ------------------------------------------------------------------ */
+/* 存档接线：任务表 ↔ WorldRecord.craftingJobs                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 导出进行中的制作任务（WorldRecord.craftingJobs 形态）。
+ *
+ * eid 跨存档不保真 → 用合成者的稳定 NetworkId 引用。无 NetworkId 的实体
+ * （理论上不应存在）跳过——恢复时无法安全归属，不写脏引用。
+ */
+export function serializeCraftingJobs(world: GameWorld): SerializedCraftingJob[] {
+  const out: SerializedCraftingJob[] = [];
+  for (const [ownerEid, jobs] of world.craftingJobs) {
+    const ownerNetworkId = NetworkId.value[ownerEid];
+    if (typeof ownerNetworkId !== "number" || !Number.isFinite(ownerNetworkId) || ownerNetworkId <= 0) {
+      continue;
+    }
+    for (const job of jobs) {
+      out.push({
+        ownerNetworkId,
+        recipeId: job.recipeId,
+        finishTick: job.finishTick,
+        durationTicks: job.durationTicks,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * 按存档恢复制作任务表（restoreWorld 在实体恢复完成后调用）。
+ *
+ * - 旧档缺字段 / 非数组 → 空表（项目立场：旧存档直接废弃，不迁移）；
+ * - 合成者 NetworkId 在本次恢复实体中不存在 / 条目畸形 → 跳过并 warn；
+ * - 任务字段不做语义校验（recipeId 是否存在由 stepCraftingJobs 弃单告警，
+ *   绝对 finishTick 已随世界时钟恢复）。
+ *
+ * @param eidByNetworkId 本次恢复的 networkId → 新 eid 映射
+ */
+export function restoreCraftingJobs(
+  world: GameWorld,
+  saved: readonly SerializedCraftingJob[] | undefined,
+  eidByNetworkId: ReadonlyMap<number, number>,
+): void {
+  world.craftingJobs.clear();
+  if (!Array.isArray(saved)) return;
+
+  for (const entry of saved) {
+    if (
+      !entry ||
+      typeof entry !== "object" ||
+      typeof entry.ownerNetworkId !== "number" ||
+      typeof entry.recipeId !== "string" ||
+      typeof entry.finishTick !== "number" ||
+      typeof entry.durationTicks !== "number" ||
+      !Number.isFinite(entry.finishTick) ||
+      !Number.isFinite(entry.durationTicks)
+    ) {
+      world.logger.warn("存档制作任务畸形，跳过", { entry });
+      continue;
+    }
+
+    const ownerEid = eidByNetworkId.get(entry.ownerNetworkId);
+    if (ownerEid === undefined) {
+      world.logger.warn("存档制作任务的合成者不存在，跳过", {
+        ownerNetworkId: entry.ownerNetworkId,
+        recipeId: entry.recipeId,
+      });
+      continue;
+    }
+
+    enqueueCraft(world, ownerEid, {
+      recipeId: entry.recipeId,
+      finishTick: entry.finishTick,
+      durationTicks: entry.durationTicks,
+    });
+  }
 }
 
 /**

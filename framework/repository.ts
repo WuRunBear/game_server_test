@@ -23,6 +23,25 @@ export interface SerializedEntity {
   components: Record<string, unknown>;
 }
 
+/**
+ * 单条延时制作任务的存档形态。
+ *
+ * eid 跨存档不保真 → 合成者用稳定 NetworkId 引用（恢复时映射回新 eid）；
+ * finishTick 是绝对逻辑帧号（世界时钟单调递增，离线补差推进 tick 后自然
+ * 到期）。已消耗的 inputs 不在本结构里重复记录——它们已在开工时离开背包，
+ * 产出语义由 recipeId 指向的配置决定。
+ */
+export interface SerializedCraftingJob {
+  /** 合成者实体的 NetworkId（恢复时映射为 eid）。 */
+  ownerNetworkId: number;
+  /** 配方 id（crafting 规则引用）。 */
+  recipeId: string;
+  /** 预期完成 tick（绝对逻辑帧）。 */
+  finishTick: number;
+  /** 声明的制作时长（进度换算用）。 */
+  durationTicks: number;
+}
+
 /** 世界快照——一局游戏的可恢复完整状态。 */
 export interface WorldRecord {
   /** 存档标识。 */
@@ -63,6 +82,13 @@ export interface WorldRecord {
    * 旧档缺少该字段时按空账本恢复（项目立场：旧存档直接废弃，不迁移）。
    */
   progress?: Record<string, number>;
+  /**
+   * 进行中的延时制作任务（合成者 NetworkId + 配方/绝对完成 tick）。
+   *
+   * 与实体同盘：重启后任务继续推进（在线每 tick / 离线补差按 tick 边界
+   * 结算），已扣材料不会因重启丢失。缺省（旧档）按空表恢复。
+   */
+  craftingJobs?: SerializedCraftingJob[];
   /** 存活实体清单。 */
   entities: SerializedEntity[];
 }

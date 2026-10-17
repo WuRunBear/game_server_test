@@ -16,6 +16,7 @@
     "Inventory": { "capacity": 12 },
     "Equipment": { "weaponSlot": -1, "toolSlot": -1, "armorSlot": -1 },
     "Progression": { "skills": ["combat", "gathering"] },
+    "Achievements": {},
     "Triggers": [
       {
         "trigger": "on-timer",

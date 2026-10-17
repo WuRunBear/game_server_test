@@ -65,6 +65,7 @@ import { Population, initPopulation } from "framework/simulation/population/popu
 import { Player, Enemy, NPC, Item, Resource, Container } from "framework/components/tags";
 import { Kind } from "framework/components/kind";
 import { Progression, initProgression } from "framework/components/progression";
+import { Achievements, initAchievements } from "framework/components/achievements";
 
 /**
  * 注册全部内置组件及其 AoS 初始化钩子。
@@ -487,6 +488,10 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
       skills: z.array(z.string()).optional(),
     }),
   });
+  // 成就解锁集合（AoS，持久化——world.progress 成就键的按实体投影，供 netSync）
+  registry.register("Achievements", Achievements, {
+    description: "成就解锁集合：实体已解锁的成就 id 视图，由成就系统写入、随存档恢复，供客户端展示。",
+  });
   // 种类标签（AoS）
   registry.register("Kind", Kind, {
     description: "种类标签：实体原型 kind 字符串，由生成链路在运行时写入。",
@@ -505,4 +510,5 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.registerAosInitializer("StateMachine", initStateMachine);
   registry.registerAosInitializer("Population", initPopulation);
   registry.registerAosInitializer("Progression", initProgression);
+  registry.registerAosInitializer("Achievements", initAchievements);
 }

@@ -13,8 +13,9 @@
 import type { GameWorld } from "world";
 import {
   Needs, Inventory, ItemMeta, ResourceNode, Portal,
-  Dialogue, DialogueSource, Quest, Relation,
+  Dialogue, DialogueSource, Quest, Relation, Progression,
 } from "components";
+import { Achievements } from "components/achievements";
 import { Ledger } from "components/ledger";
 
 /**
@@ -183,6 +184,51 @@ registerAosSyncAdapter("Relation", (_world, eid, fields) => {
     for (const f of fields) {
       if (f === "npcKind") out.strings[`Relation.${i}.npcKind`] = r.npcKind;
       else if (f === "value") out.numbers[`Relation.${i}.value`] = r.value;
+    }
+  }
+  return out;
+});
+
+/** 内建适配器：Progression（累计经验/等级 + 技能表按 skillId 展平）。
+ *
+ * 展平键（服务端权威，客户端只读）：
+ * - `Progression.totalXp` / `Progression.level`：角色累计经验与派生等级；
+ * - `Progression.skill.<skillId>.xp` / `.level`：按配置技能 id 展开（id 由
+ *   game/ 配置约定，框架不解释其语义）。
+ *
+ * 技能 id 是字符串键，直接进动态 values/strings map——不扩大 PlayerState
+ * schema（无协议字段索引变更），客户端按前缀 `Progression.skill.` 分组。
+ */
+registerAosSyncAdapter("Progression", (_world, eid, fields) => {
+  const out = empty();
+  const progress = Progression[eid];
+  if (!progress) return out;
+  for (const f of fields) {
+    if (f === "totalXp") out.numbers["Progression.totalXp"] = progress.totalXp;
+    else if (f === "level") out.numbers["Progression.level"] = progress.level;
+    else if (f === "skills") {
+      for (const [skillId, skill] of Object.entries(progress.skills)) {
+        out.numbers[`Progression.skill.${skillId}.xp`] = skill.xp;
+        out.numbers[`Progression.skill.${skillId}.level`] = skill.level;
+      }
+    }
+  }
+  return out;
+});
+
+/** 内建适配器：Achievements（解锁集合按成就 id 展平为 1）。
+ *
+ * 键形态 `Achievements.<achievementId>`（数值 1）——与 Ledger 的动态 key
+ * 约定一致；客户端按前缀枚举已解锁成就。无 PlayerState schema 字段变更。
+ */
+registerAosSyncAdapter("Achievements", (_world, eid, fields) => {
+  const out = empty();
+  const state = Achievements[eid];
+  if (!state) return out;
+  for (const f of fields) {
+    if (f !== "unlocked") continue;
+    for (const [id, flag] of Object.entries(state.unlocked)) {
+      out.numbers[`Achievements.${id}`] = flag;
     }
   }
   return out;

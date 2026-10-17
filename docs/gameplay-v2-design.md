@@ -192,7 +192,7 @@ framework/ 逐词扫描零游戏名词命中；src/register.ts 为空占位。�
 
 ## 实施状态（2026-10-17）
 
-主体落地，验证基线：**84 文件 / 1045 用例全绿**，`pnpm build` 零类型错误，`pnpm tools validate` 通过。
+主体落地，验证基线：**85 文件 / 1055 用例全绿**，`pnpm build` 零类型错误，`pnpm tools validate` 通过。
 
 | 切片 | 提交 | 结果 |
 |---|---|---|
@@ -207,10 +207,19 @@ framework/ 逐词扫描零游戏名词命中；src/register.ts 为空占位。�
 
 已补齐（`4206a78` + fix-20）：**工具门槛**（ItemKind.toolType + ResourceNode.requiredToolType，路由跳过 + 权威拒绝）、**采集掉落表化**（lootTable 多产物、确定性掷骰）、**环境调制需求**（rules/needs.json environmentFactors，衰减乘子由 environmentAt 现算）、**好感折扣**（rules/dialogue.json trade，relation 定价）、**食物腐烂**（ItemKind.spoilTicks/spoilInto + ItemMeta/ItemStack 绝对 spoilAt，地面与背包/容器统一结算，读档与离线补差可续）、**漂流木保底**（beach 无工具门槛 wood 节点）。
 
-仍未落地：
+### 运行时边界收尾（fix-24，2026-10-17）
 
-1. 世界进度（`world.progress`）与 Progression/成就仍为服务端权威，未进 netSync（客户端展示后置）。
-2. 燃料离线不烧、延时制作任务重启即弃（运行时状态，与 offerSession 同级语义）。
+原两项运行时边界已闭合：
+
+1. **离线燃料快进**：`fastForwardFuelBurn(world, elapsedTicks)` 闭式扣减 `burnMsPerTick × offlineTicks`，耗尽即失效；挂载 `runOfflineCatchUp`（evolve → stateMachine → population → fuel → advanceTickTo → stepCraftingJobs）。
+2. **延时制作任务入档**：`WorldRecord.craftingJobs`（ownerNetworkId/recipeId/finishTick/durationTicks），恢复后继续、离线跨完成点结算、材料不双扣；`destroyEntity` 清理任务防 eid 复用串单。
+3. **Progression / Achievements 同步**：加入 `EntityState.values` 的动态 key 空间（`Progression.totalXp/level/skill.<id>.xp/.level`、`Achievements.<id>=1`）；PlayerState/RoomState 字段与索引未变（无索引断代），`client-schema` 手动副本已复核并有结构一致性测试。
+
+**已知近似**：离线燃料按总 tick 闭式扣减、任务在世界时钟推进后统一结算——若任务在离线区间中途到点、而站点燃料在其后才耗尽，离线会按末端状态判挂起（“不重放 tick”的既定取舍）。
+
+### 仍未落地
+
+- 无（P2 内容层与运行时边界均已完成）。
 
 ### 实施中发现并修复的框架缺陷
 

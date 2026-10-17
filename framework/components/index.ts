@@ -23,6 +23,7 @@ export { Cooldown, Duration } from "components/timer";
 // —— 计数账本 / 投射物 ——
 export { Ledger, initLedger, type LedgerRecord } from "components/ledger";
 export { Progression, initProgression, type ProgressionState, type SkillProgress } from "components/progression";
+export { Achievements, initAchievements, markAchievementUnlocked, ACHIEVEMENT_PROGRESS_PREFIX, achievementProgressKey, type AchievementsState } from "components/achievements";
 export { Projectile } from "components/projectile";
 export { Structure, STRUCTURE_ROLE_NONE, STRUCTURE_ROLE_FLOOR, STRUCTURE_ROLE_WALL, STRUCTURE_ROLE_CONNECTOR, CONNECTOR_DIR_UP, CONNECTOR_DIR_DOWN } from "components/structure";
 // —— 标签（bitecs 空组件） ——

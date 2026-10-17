@@ -106,8 +106,9 @@ export type GameWorld = ReturnType<typeof createWorld> & {
   /** 下一个可用的报价会话 id。 */
   nextOfferId: number;
   /**
-   * 进行中的延时制作表（ownerEid → 任务列表；运行时状态，不入档，重启即弃，
-   * 与 offerSessions 同语义）。由 craftingSystem 的 stepCraftingJobs 每 tick 推进。
+   * 进行中的延时制作表（ownerEid → 任务列表；随存档 WorldRecord.craftingJobs
+   * 入档，重启/离线补差后继续推进）。由 craftingSystem 的 stepCraftingJobs
+   * 每 tick 推进。
    */
   craftingJobs: Map<number, PendingCraft[]>;
 };

@@ -36,4 +36,8 @@ export function destroyEntity(world: GameWorld, eid: number): void {
       arr[eid] = undefined;
     }
   }
+
+  // 延时制作任务按 eid 归属：实体销毁即弃单（材料已耗，与主动取消退料不同），
+  // 防 eid 复用后旧任务把产出塞进新实体。
+  world.craftingJobs.delete(eid);
 }

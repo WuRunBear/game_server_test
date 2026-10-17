@@ -26,6 +26,7 @@ import { Kind } from "framework/components/kind";
 import { Player } from "framework/components/tags";
 import { spawnEntity } from "framework/entities/spawn";
 import { destroyEntity } from "framework/entities/destroyEntity";
+import { restoreCraftingJobs, serializeCraftingJobs } from "framework/systems/gameplay/craftingSystem";
 import { serializeGeometry, type SerializedMapGeometry } from "map/geometry/snapshot";
 import {
   computeTileModifications,
@@ -154,6 +155,7 @@ export function serializeWorld(world: GameWorld, id: string): WorldRecord {
     maps,
     ...(mapSeeds ? { mapSeeds: { ...mapSeeds } } : {}),
     progress: { ...world.progress },
+    craftingJobs: serializeCraftingJobs(world),
     entities,
   };
 }
@@ -197,6 +199,7 @@ function applyEntityState(world: GameWorld, eid: number, saved: SerializedEntity
  * - 全局时刻：world.time.tick = 存档 tick、timeOfDay = 存档值（离线补差
  *   由 GameSimulation 在本函数返回后接手，墙钟折算不入本模块）；
  * - 世界进度账本：world.progress = 存档 progress（旧档缺字段按空账本恢复）；
+ * - 延时制作任务：按合成者 NetworkId 映射回新 eid 恢复（旧档缺字段按空表）；
  * - 激活集：全部快照图（record.maps 键）加入 world.activeMaps（常驻语义，
  *   空图也照常运行演化/碰撞）。world.maps 的回填归 bootMaps（开机分支
  *   唯一归属地），本函数不碰 world.maps——仅接入 boot 已回填的快照图，
@@ -229,6 +232,7 @@ export function restoreWorld(world: GameWorld, record: WorldRecord): number[] {
   world.progress = restoredProgress;
 
   const orphanPlayers: number[] = [];
+  const eidByNetworkId = new Map<number, number>();
   const savedEntities = Array.isArray(record.entities) ? record.entities : [];
   for (const saved of savedEntities) {
     if (!saved || typeof saved !== "object") continue;
@@ -243,12 +247,17 @@ export function restoreWorld(world: GameWorld, record: WorldRecord): number[] {
     const eid = spawnEntity(world, archetype, world.components_registry);
     applyEntityState(world, eid, saved);
     NetworkId.value[eid] = saved.networkId;
+    eidByNetworkId.set(saved.networkId, eid);
     // 玩家判定按 Player tag（与具体 kind 名解耦）
     if (hasComponent(world, eid, Player)) {
       orphanPlayers.push(eid);
     }
   }
   world.nextNetworkId = record.nextNetworkId;
+
+  // 延时制作任务：实体恢复完成后按 networkId → eid 映射重建（旧档缺字段 =
+  // 空表；绝对 finishTick 已随世界时钟恢复，离线补差推进 tick 后自然到期）。
+  restoreCraftingJobs(world, record.craftingJobs, eidByNetworkId);
 
   // 全部快照图接入激活集（常驻语义：空图也活着）；仅接入已回填的键——
   // world.maps 的回填归 bootMaps，boot 丢弃的快照键（配置已删）不激活。
