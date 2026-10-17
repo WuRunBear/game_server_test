@@ -192,27 +192,26 @@ framework/ 逐词扫描零游戏名词命中；src/register.ts 为空占位。�
 
 ## 实施状态（2026-10-17）
 
-主体落地，验证基线：**78 文件 / 970 用例全绿**，`pnpm build` 零类型错误，`pnpm tools validate` 通过。
+主体落地，验证基线：**81 文件 / 1004 用例全绿**，`pnpm build` 零类型错误，`pnpm tools validate` 通过。
 
 | 切片 | 提交 | 结果 |
 |---|---|---|
 | A 激活休眠层 | `fe51fc5` | ✅ computeStat 接入 movement/combat、modifierSystem 过期清理、set-timer + timer/trigger 启用、状态效果闭环（生肉→减速+周期伤害） |
-| B 生存深度 | `10a877a` + `4206a78` | ✅ 死亡惩罚（尸体容器 + keepOnDeath + 超时 despawn）、断线保留（Offline 标记 + 全系统排除 + 重连复用 + 到期存档）、工具门槛与采集掉落表完成（`4206a78`）；食物腐烂进行中（fix-20）；耐久仍后置 |
+| B 生存深度 | `10a877a` + `4206a78` + fix-20 | ✅ 死亡惩罚（尸体容器 + keepOnDeath + 超时 despawn）、断线保留（Offline 标记 + 全系统排除 + 重连复用 + 到期存档）、工具门槛与采集掉落表完成（`4206a78`）、食物腐烂完成（fix-20：spoilTicks/spoilInto 绝对 tick，地面+背包）、漂流木保底；耐久仍后置 |
 | C 科技树与制作 | `0cb4cd9` | ✅ 配方解锁条件（复用 spawnConditions）、制作时长（挂起/取消退料）、站点燃料、木→板→家具加工链；解锁 schema 形式化后置（系统内 fail-fast 校验） |
 | D 威胁升级 | `0cb4cd9` + `51b1f2b` | ✅ 袭击导演（预警/门槛/无玩家暂停）、结构防御值、野火/风暴（真实消费写回）、A* 寻路（跨层/确定性/节流）、Boss 两阶段（HealthBelow + 子树守卫）、世界进度账本 |
-| E 经济商店 | `0cb4cd9` | ✅ 货币 shell + ItemKind.value、对话 buy/sell（economy settle 原子）、默认价；好感折扣未做 |
+| E 经济商店 | `0cb4cd9` + `4206a78` | ✅ 货币 shell + ItemKind.value、对话 buy/sell（economy settle 原子）、默认价；好感折扣完成（`4206a78`：relation 定价） |
 
 ### 未落地 / 后置（2026-10-17 更新）
 
-已补齐（`4206a78`）：**工具门槛**（ItemKind.toolType + ResourceNode.requiredToolType，路由跳过 + 权威拒绝）、**采集掉落表化**（lootTable 多产物、确定性掷骰）、**环境调制需求**（rules/needs.json environmentFactors，衰减乘子由 environmentAt 现算）、**好感折扣**（rules/dialogue.json trade，relation 定价）。
+已补齐（`4206a78` + fix-20）：**工具门槛**（ItemKind.toolType + ResourceNode.requiredToolType，路由跳过 + 权威拒绝）、**采集掉落表化**（lootTable 多产物、确定性掷骰）、**环境调制需求**（rules/needs.json environmentFactors，衰减乘子由 environmentAt 现算）、**好感折扣**（rules/dialogue.json trade，relation 定价）、**食物腐烂**（ItemKind.spoilTicks/spoilInto + ItemMeta/ItemStack 绝对 spoilAt，地面与背包/容器统一结算，读档与离线补差可续）、**漂流木保底**（beach 无工具门槛 wood 节点）。
 
 仍未落地：
 
 1. **物品耐久**：需 ItemStack 逐实例状态 + 同步协议改动，单独切片。
-2. **食物腐烂**：fix-20 实施中（spoilAt 绝对 tick + 背包/掉落物腐烂方案）。
-3. **经验/技能、价格波动、声望/势力、成就、暴击/克制**：按设计原意 P2 后置。
-4. 世界进度（`world.progress`）仅服务端权威，未进 netSync（客户端展示后置）。
-5. 燃料离线不烧、延时制作任务重启即弃（运行时状态，与 offerSession 同级语义）。
+2. **经验/技能、价格波动、声望/势力、成就、暴击/克制**：按设计原意 P2 后置。
+3. 世界进度（`world.progress`）仅服务端权威，未进 netSync（客户端展示后置）。
+4. 燃料离线不烧、延时制作任务重启即弃（运行时状态，与 offerSession 同级语义）。
 
 ### 实施中发现并修复的框架缺陷
 

@@ -630,7 +630,11 @@ function validateIntegrity(data: LoadedGameDefinition): void {
       }
     }
 
+    const allItemKinds = new Set(data.resolvedItems.map((i) => i.kind));
     for (const item of data.resolvedItems) {
+      if (item.spoilInto && !allItemKinds.has(item.spoilInto)) {
+        throw new Error(`Item "${item.kind}" spoils into unknown item kind "${item.spoilInto}"`);
+      }
       if (!item.place) continue;
       const archetypeExists = data.resolvedEntities.some((e) => e.kind === item.place!.archetype) ||
         archetypeRegistry.has(item.place!.archetype);

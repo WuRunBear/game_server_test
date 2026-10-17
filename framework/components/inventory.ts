@@ -13,6 +13,12 @@ export interface ItemStack {
   kind: string;
   /** 槽内数量。 */
   count: number;
+  /**
+   * 整堆最早腐烂到期 tick（世界逻辑 tick）：同 kind 堆叠合并时取最早值。
+   * 由 kind 的 spoilTicks 在入包时写入；缺省 = 不腐烂（或旧存档待系统补齐）。
+   * 服务端权威，不参与 Inventory 的 netSync 字段（客户端可据 kind 推断）。
+   */
+  spoilAt?: number;
 }
 
 export interface InventoryEntry {

@@ -1,5 +1,7 @@
 {
   "kind": "cooked_meat",
   "maxStack": 20,
+  "spoilTicks": 9600,
+  "spoilInto": "rotten",
   "consume": [{ "need": "hunger", "amount": 50 }]
 }

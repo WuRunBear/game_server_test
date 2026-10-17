@@ -17,8 +17,17 @@ import { applyEffectSpecs } from "framework/simulation/effects/effectRegistry";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { ItemKindSpec, ConsumeEffect } from "framework/config/schema/ItemKindSchema";
+import { mergeSpoilAt, spoilAtForTick } from "framework/systems/gameplay/spoilSystem";
 
 const DEFAULT_MAX_STACK = 1;
+
+/** addToInventory 的可选腐烂元数据（缺省不写 spoilAt，由系统按 kind 惰性补齐）。 */
+export interface AddToInventoryOptions {
+  /** 入包时刻（tick）：按 kind.spoilTicks 为新堆叠派生绝对到期 tick。 */
+  nowTick?: number;
+  /** 已知绝对到期 tick（如地面掉落物继承）：优先于 nowTick 派生。 */
+  spoilAt?: number;
+}
 
 /** 物品最大堆叠数：itemKinds 查不到该 kind（或未声明 maxStack）时按 1。 */
 function maxStackFor(itemKinds: Map<string, ItemKindSpec> | undefined, kind: string): number {
@@ -28,15 +37,21 @@ function maxStackFor(itemKinds: Map<string, ItemKindSpec> | undefined, kind: str
 /**
  * 把 count 个 kind 物品并入背包；可部分并入，返回未入背包的剩余量。
  * 规则：先合入同 kind 未满堆叠，再用空槽；满包则剩余返还。
+ *
+ * 腐烂到期 tick（可选，经 options 传入）：新堆叠按 kind.spoilTicks 写入
+ * `spoilAt`；合并进已有堆叠时取两者最早值（整堆按最早时刻腐烂）。
  */
 export function addToInventory(
   inv: InventoryEntry,
   itemKinds: Map<string, ItemKindSpec> | undefined,
   kind: string,
   count: number,
+  options?: AddToInventoryOptions,
 ): number {
   let remaining = count;
   const maxStack = maxStackFor(itemKinds, kind);
+  const spoilAt =
+    options?.spoilAt ?? (options?.nowTick !== undefined ? spoilAtForTick(itemKinds, kind, options.nowTick) : undefined);
 
   // 1) 合入同 kind 未满堆叠
   for (const slot of inv.slots) {
@@ -44,6 +59,7 @@ export function addToInventory(
     if (slot && slot.kind === kind && slot.count < maxStack) {
       const add = Math.min(remaining, maxStack - slot.count);
       slot.count += add;
+      slot.spoilAt = mergeSpoilAt(slot.spoilAt, spoilAt);
       remaining -= add;
     }
   }
@@ -52,7 +68,7 @@ export function addToInventory(
   for (let i = 0; i < inv.slots.length && remaining > 0; i++) {
     if (inv.slots[i] === null) {
       const add = Math.min(remaining, maxStack);
-      inv.slots[i] = { kind, count: add };
+      inv.slots[i] = spoilAt === undefined ? { kind, count: add } : { kind, count: add, spoilAt };
       remaining -= add;
     }
   }
@@ -94,6 +110,7 @@ export function transferSlot(
       return true;
     }
     dst.count += move;
+    dst.spoilAt = mergeSpoilAt(dst.spoilAt, src.spoilAt);
     src.count -= move;
     if (src.count <= 0) inv.slots[from] = null;
     return true;
@@ -206,7 +223,9 @@ export function lootContainerSlot(
   const stack = containerInv.slots[slot];
   if (!stack) return false;
 
-  const leftover = addToInventory(playerInv, world.gameDef.itemsByKind, stack.kind, stack.count);
+  const leftover = addToInventory(playerInv, world.gameDef.itemsByKind, stack.kind, stack.count, {
+    spoilAt: stack.spoilAt,
+  });
   if (leftover >= stack.count) return false; // 满包：一点未入，容器侧零变更
   if (leftover > 0) {
     stack.count = leftover; // 部分并入：剩余留在容器
@@ -250,7 +269,16 @@ export function spawnDroppedItem(
   if (sourceEid !== undefined) {
     EntityLevel[eid] = entityLevelOf(sourceEid);
   }
-  ItemMeta[eid] = { kind: stack.kind, count: stack.count, pickupAfterMs };
+  // 腐烂到期 tick：背包堆叠的已到期时刻优先（丢下不重置计时）；否则按 kind 从
+  // 当前 tick 起算。不腐烂物品不写字段（同步/存档载荷保持原形）。
+  const spoilAt =
+    stack.spoilAt ?? spoilAtForTick(world.gameDef.itemsByKind, stack.kind, world.time.tick);
+  ItemMeta[eid] = {
+    kind: stack.kind,
+    count: stack.count,
+    pickupAfterMs,
+    ...(spoilAt !== undefined ? { spoilAt } : {}),
+  };
   return eid;
 }
 

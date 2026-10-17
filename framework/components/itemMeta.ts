@@ -13,6 +13,12 @@ export interface ItemMetaEntry {
   count: number;
   /** 当前逻辑时间（tick × fixedDtMs）小于此值时不可自动拾取。 */
   pickupAfterMs: number;
+  /**
+   * 绝对腐烂到期 tick（世界逻辑 tick）：由 kind 的 spoilTicks 在生成掉落物时写入，
+   * 拾取/丢弃时随堆叠继承。缺省 = 该物品不腐烂（或旧存档待系统按 kind 补齐）。
+   * 服务端权威，不参与 netSync 载荷（客户端可据 kind 推断）。
+   */
+  spoilAt?: number;
 }
 
 /** AoS 存储：普通 JS 数组按 eid 索引（非 bitecs 组件，不能 addComponent/query）。 */

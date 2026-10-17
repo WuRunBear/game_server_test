@@ -138,7 +138,9 @@ export function harvest(world: GameWorld, actorEid: number, nodeEid: number): bo
 
     const inv = Inventory[actorEid];
     if (!inv) continue; // 采集者无背包 → 该产物无法入包
-    const leftover = addToInventory(inv, itemKinds, product.kind, product.count);
+    const leftover = addToInventory(inv, itemKinds, product.kind, product.count, {
+      nowTick: world.time.tick,
+    });
     const added = product.count - leftover;
     if (added <= 0) continue; // 满包：该产物一点未入
     applied += 1;

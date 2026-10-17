@@ -55,7 +55,10 @@ export function inventorySystem(world: GameWorld): GameWorld {
         continue;
       }
 
-      const leftover = addToInventory(inv, itemsByKind, meta.kind, meta.count);
+      const leftover = addToInventory(inv, itemsByKind, meta.kind, meta.count, {
+        nowTick: world.time.tick,
+        spoilAt: meta.spoilAt,
+      });
       if (leftover <= 0) {
         destroyEntity(world, itemEid);
       } else if (leftover < meta.count) {

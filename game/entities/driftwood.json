@@ -1,0 +1,18 @@
+{
+  "kind": "driftwood",
+  "tags": ["Resource"],
+  "components": {
+    "Size": { "w": 16, "h": 16 },
+    "ResourceNode": {
+      "remaining": 2,
+      "max": 2,
+      "amountPerHit": 1,
+      "regenMs": 600000,
+      "yieldsKind": "wood",
+      "lootTable": [
+        { "kind": "wood", "qty": 1, "chance": 1 },
+        { "kind": "twig", "qty": 1, "chance": 0.35 }
+      ]
+    }
+  }
+}

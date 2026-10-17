@@ -97,7 +97,9 @@ export function submitQuest(world: GameWorld, playerEid: EntityId, questId: stri
     consumeKind(inv, def.itemKind ?? "", def.goal);
   }
   for (const reward of def.submit.rewards) {
-    addToInventory(inv, world.gameDef.itemsByKind, reward.kind, reward.count);
+    addToInventory(inv, world.gameDef.itemsByKind, reward.kind, reward.count, {
+      nowTick: world.time.tick,
+    });
   }
   if (npcKind) {
     addRelation(world, playerEid, npcKind, def.submit.relationDelta);

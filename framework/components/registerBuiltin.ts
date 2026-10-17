@@ -147,14 +147,14 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   });
   // 物品/背包（AoS）
   registry.register("Inventory", Inventory, {
-    description: "背包：按容量建立槽位数组，槽位存 item kind 字符串与堆叠数。",
+    description: "背包：按容量建立槽位数组，槽位存 item kind 字符串、堆叠数与腐烂到期 tick。",
     configSchema: z.object({
       /** 槽位容量（槽位数）。 */
       capacity: z.number().int().positive().default(4),
     }),
   });
   registry.register("ItemMeta", ItemMeta, {
-    description: "地面物品元数据：记录 kind、堆叠数与最早可拾取时间；由掉落/拾取链路在运行时写入。",
+    description: "地面物品元数据：记录 kind、堆叠数、最早可拾取时间与腐烂到期 tick；由掉落/拾取/腐烂链路在运行时写入。",
   });
   // 需求/资源/掉落（AoS）
   registry.register("Needs", Needs, {

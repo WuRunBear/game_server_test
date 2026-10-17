@@ -1,6 +1,8 @@
 {
   "kind": "raw_meat",
   "maxStack": 20,
+  "spoilTicks": 2400,
+  "spoilInto": "rotten",
   "consume": [{ "need": "hunger", "amount": 30 }],
   "effects": [
     {

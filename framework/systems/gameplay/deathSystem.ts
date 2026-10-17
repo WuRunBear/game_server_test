@@ -84,7 +84,9 @@ function spawnDeathContainer(world: GameWorld, playerEid: EntityId, rules: Respa
     const stack = playerInv.slots[i];
     if (!stack) continue;
     if (keepOnDeathOf(world, stack.kind)) continue;
-    const leftover = addToInventory(containerInv, itemsByKind, stack.kind, stack.count);
+    const leftover = addToInventory(containerInv, itemsByKind, stack.kind, stack.count, {
+      spoilAt: stack.spoilAt,
+    });
     if (leftover <= 0) {
       playerInv.slots[i] = null;
     } else if (leftover < stack.count) {

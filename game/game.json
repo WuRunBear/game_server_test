@@ -38,6 +38,7 @@
     { "id": "population" },
     { "id": "needDecay" },
     { "id": "inventory" },
+    { "id": "spoil" },
     { "id": "gathering" },
     { "id": "stateMachine" },
     { "id": "interaction", "config": { "range": 24 } },

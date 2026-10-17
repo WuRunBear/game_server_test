@@ -1,0 +1,15 @@
+{
+  "kind": "rotten",
+  "maxStack": 20,
+  "consume": [{ "need": "hunger", "amount": 5 }],
+  "effects": [
+    {
+      "name": "apply-status",
+      "params": { "stat": "moveSpeed", "mul": -0.25, "durationTicks": 100, "source": "rotten" }
+    },
+    {
+      "name": "set-timer",
+      "params": { "mode": "interval", "periodTicks": 20, "delayTicks": 20, "ticks": 4 }
+    }
+  ]
+}

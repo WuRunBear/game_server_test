@@ -16,6 +16,7 @@ import { inventorySystem } from "framework/systems/gameplay/inventorySystem";
 import { createInteractionSystem } from "framework/systems/gameplay/interactionSystem";
 import { needDecaySystem } from "framework/systems/gameplay/needDecaySystem";
 import { gatheringSystem } from "framework/systems/gameplay/gatheringSystem";
+import { spoilSystem } from "framework/systems/gameplay/spoilSystem";
 import { equipmentSystem } from "framework/systems/gameplay/equipmentSystem";
 import { dayNightCycleSystem } from "framework/systems/gameplay/dayNightCycleSystem";
 import { environmentSystem } from "framework/systems/gameplay/environmentSystem";
@@ -118,6 +119,14 @@ export function registerBuiltinSystems(
     id: "gathering",
     description: "资源再生：枯竭资源节点按 regenMs 回满，并提供 harvest 采集原子。",
     factory: (_world: GameWorld) => gatheringSystem,
+    after: ["inventory"],
+  });
+
+  // 物品腐烂：按 item kind 的 spoilTicks/spoilInto 结算地面掉落物与背包堆叠
+  systemRegistry.register({
+    id: "spoil",
+    description: "物品腐烂：按 item kind 的 spoilTicks 到期把地面掉落物/背包堆叠转换为 spoilInto（缺省消失）。",
+    factory: (_world: GameWorld) => spoilSystem,
     after: ["inventory"],
   });
 

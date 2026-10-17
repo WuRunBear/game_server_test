@@ -87,6 +87,17 @@ export const ItemKindSchema = z.object({
    * 未显式声明 price 时取此值。缺省 = 未定价（该物品不可作为缺省价交易）。
    */
   value: z.number().int().positive().optional(),
+  /**
+   * 腐烂时长（tick）：物品生成（掉落物/入包）后经过该 tick 数即腐烂。
+   * 缺省或 0 = 永不腐烂。绝对到期时刻写入 ItemMeta.spoilAt / ItemStack.spoilAt，
+   * 因此读档与离线补差后可继续按真实时间腐烂。
+   */
+  spoilTicks: z.number().int().nonnegative().optional(),
+  /**
+   * 腐烂后转换成的 item kind：到期时保留堆叠数量、种类改为该 kind。
+   * 缺省 = 直接消失（不留残余）。
+   */
+  spoilInto: z.string().optional(),
 });
 
 /** 食用/消耗效果的类型推断。 */
