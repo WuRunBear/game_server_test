@@ -1,10 +1,11 @@
 # 玩法系统 v2 设计文档（荒岛求生）
 
-> 状态：讨论定稿（未实施）。本文是 2026-10 玩法侧设计讨论的结论汇总，与
+> 状态：讨论定稿；**主体已实施（2026-10-17，切片 A–E 落地，见文末「实施状态」）**。
+> 本文是 2026-10 玩法侧设计讨论的结论汇总，与
 > `docs/map-system-v2-design.md`（地图侧）配套，共同构成荒岛求生升级的设计基线。
 > 依据：① 荒岛求生系统调研（Don't Starve / Valheim / Project Zomboid / Green Hell /
 > Raft / Subnautica 等系统拆解）；② 框架玩法能力源码审计（21 系统/组件/配置全量核对）。
-> 切片落地前以现行源码为准。
+> 文末「实施状态」记录实际落地与偏差；后续切片以该节为准。
 
 ## 0. 一句话总纲
 
@@ -186,3 +187,33 @@ framework/ 逐词扫描零游戏名词命中；src/register.ts 为空占位。�
 - 调研锚点：DS Regrowth 四机制 / hound wave 预警-间隔-峰值曲线 / Valheim
   事件 46min20%/3 建筑门槛/无玩家暂停 / PZ moodle 分层 / Raft 倒地救援；
   生态结论"无主流游戏跑真食物链"（详见地图 v2 文档 §6）。
+
+---
+
+## 实施状态（2026-10-17）
+
+主体落地，验证基线：**78 文件 / 970 用例全绿**，`pnpm build` 零类型错误，`pnpm tools validate` 通过。
+
+| 切片 | 提交 | 结果 |
+|---|---|---|
+| A 激活休眠层 | `fe51fc5` | ✅ computeStat 接入 movement/combat、modifierSystem 过期清理、set-timer + timer/trigger 启用、状态效果闭环（生肉→减速+周期伤害） |
+| B 生存深度 | `10a877a` | 🟡 死亡惩罚（尸体容器 + keepOnDeath + 超时 despawn）与断线保留（Offline 标记 + 全系统排除 + 重连复用 + 到期存档）完成；工具门槛 / 采集掉落表 / 耐久未做 |
+| C 科技树与制作 | `0cb4cd9` | ✅ 配方解锁条件（复用 spawnConditions）、制作时长（挂起/取消退料）、站点燃料、木→板→家具加工链；解锁 schema 形式化后置（系统内 fail-fast 校验） |
+| D 威胁升级 | `0cb4cd9` + `51b1f2b` | ✅ 袭击导演（预警/门槛/无玩家暂停）、结构防御值、野火/风暴（真实消费写回）、A* 寻路（跨层/确定性/节流）、Boss 两阶段（HealthBelow + 子树守卫）、世界进度账本 |
+| E 经济商店 | `0cb4cd9` | ✅ 货币 shell + ItemKind.value、对话 buy/sell（economy settle 原子）、默认价；好感折扣未做 |
+
+### 未落地 / 后置（如实记录）
+
+1. **工具门槛**（requiredToolTag）未做：采集仍无工具要求，工具只放大产量。
+2. **采集掉落表化**未做：资源节点仍单产物（LootTable 只用于死亡）。
+3. **物品耐久**未做；**食物腐烂**未做（item 无 per-kind 原型承载 StateMachine，FSM 能力已具备，item 侧接入待做）。
+4. **环境调制需求**未接：WorldClock 已交付，needDecay 尚未消费 environment（温度/天气不影响衰减速率）。
+5. **好感折扣**未做：Relation 可读，定价处（tradeAtShop）已留消费点。
+6. **经验/技能、价格波动、声望/势力、成就、暴击/克制**：按设计原意 P2 后置。
+7. 世界进度（`world.progress`）仅服务端权威，未进 netSync（客户端展示后置）。
+8. 燃料离线不烧、延时制作任务重启即弃（运行时状态，与 offerSession 同级语义）。
+
+### 实施中发现并修复的框架缺陷
+
+- `deathSystem` 先入队 on-death 再 `destroyEntity`，而 `destroyEntity` 会清空 AoS `Triggers`，导致触发器链末端读不到声明式 on-death 触发器——改为入队时快照触发器，`triggerSystem` 优先用快照（`51b1f2b`）。
+- 模板游戏节奏变化（有意）：raid 默认 `requireCondition = progressAtLeast:boss_alpha:1`，首杀 Boss 前不刷袭击。
