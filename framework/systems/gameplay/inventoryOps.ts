@@ -21,17 +21,31 @@ import { mergeSpoilAt, spoilAtForTick } from "framework/systems/gameplay/spoilSy
 
 const DEFAULT_MAX_STACK = 1;
 
-/** addToInventory 的可选腐烂元数据（缺省不写 spoilAt，由系统按 kind 惰性补齐）。 */
+/** addToInventory 的可选逐实例元数据（缺省按 kind 惰性补齐）。 */
 export interface AddToInventoryOptions {
   /** 入包时刻（tick）：按 kind.spoilTicks 为新堆叠派生绝对到期 tick。 */
   nowTick?: number;
   /** 已知绝对到期 tick（如地面掉落物继承）：优先于 nowTick 派生。 */
   spoilAt?: number;
+  /**
+   * 已知当前耐久（如地面掉落物 / 容器转移继承）：优先于按 kind 初始化。
+   * 缺省时新堆叠按 kind.maxDurability 初始化；无耐久物品不写字段。
+   */
+  durability?: number;
 }
 
 /** 物品最大堆叠数：itemKinds 查不到该 kind（或未声明 maxStack）时按 1。 */
 function maxStackFor(itemKinds: Map<string, ItemKindSpec> | undefined, kind: string): number {
   return itemKinds?.get(kind)?.maxStack ?? DEFAULT_MAX_STACK;
+}
+
+/** 入包初始耐久：kind 未声明 maxDurability（或非正）→ undefined（不写字段）。 */
+function initialDurabilityFor(
+  itemKinds: Map<string, ItemKindSpec> | undefined,
+  kind: string,
+): number | undefined {
+  const max = itemKinds?.get(kind)?.maxDurability;
+  return max !== undefined && max > 0 ? max : undefined;
 }
 
 /**
@@ -52,6 +66,9 @@ export function addToInventory(
   const maxStack = maxStackFor(itemKinds, kind);
   const spoilAt =
     options?.spoilAt ?? (options?.nowTick !== undefined ? spoilAtForTick(itemKinds, kind, options.nowTick) : undefined);
+  // 耐久物品 maxStack = 1（加载期校验），因此不会走合并分支；此处仍按「新槽」
+  // 初始化，保证任何入包路径（采集/拾取/合成/交易/容器转移）都能拿到耐久。
+  const durability = options?.durability ?? initialDurabilityFor(itemKinds, kind);
 
   // 1) 合入同 kind 未满堆叠
   for (const slot of inv.slots) {
@@ -68,7 +85,12 @@ export function addToInventory(
   for (let i = 0; i < inv.slots.length && remaining > 0; i++) {
     if (inv.slots[i] === null) {
       const add = Math.min(remaining, maxStack);
-      inv.slots[i] = spoilAt === undefined ? { kind, count: add } : { kind, count: add, spoilAt };
+      inv.slots[i] = {
+        kind,
+        count: add,
+        ...(spoilAt !== undefined ? { spoilAt } : {}),
+        ...(durability !== undefined ? { durability } : {}),
+      };
       remaining -= add;
     }
   }
@@ -225,6 +247,7 @@ export function lootContainerSlot(
 
   const leftover = addToInventory(playerInv, world.gameDef.itemsByKind, stack.kind, stack.count, {
     spoilAt: stack.spoilAt,
+    durability: stack.durability,
   });
   if (leftover >= stack.count) return false; // 满包：一点未入，容器侧零变更
   if (leftover > 0) {
@@ -278,6 +301,8 @@ export function spawnDroppedItem(
     count: stack.count,
     pickupAfterMs,
     ...(spoilAt !== undefined ? { spoilAt } : {}),
+    // 耐久逐实例状态随掉落物继承（丢下再捡起不重置）；无耐久物品不写字段
+    ...(stack.durability !== undefined ? { durability: stack.durability } : {}),
   };
   return eid;
 }

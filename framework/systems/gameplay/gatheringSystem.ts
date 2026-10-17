@@ -12,6 +12,7 @@ import {
 import type { GameWorld } from "world";
 import { addToInventory, spawnDroppedItem, DROP_PICKUP_AFTER_MS } from "framework/systems/gameplay/inventoryOps";
 import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
+import { wearEquippedItem } from "framework/systems/gameplay/durability";
 import { rngFrom } from "framework/simulation/rng";
 import { applyEffectSpecs } from "framework/simulation/effects/effectRegistry";
 import {
@@ -166,6 +167,13 @@ export function harvest(world: GameWorld, actorEid: number, nodeEid: number): bo
   if (nodeState.remaining <= 0) {
     nodeState.remaining = 0;
     nodeState.depletedSinceMs = world.time.tick * world.time.fixedDtMs;
+  }
+
+  // 工具磨损：仅手持（tool 槽）且声明 maxDurability 的工具；采集动作成立即耗一次。
+  // directConsume 节点（直接饮用/食用）不经过工具产出，不计磨损。
+  // 破碎后装备引用立即归 -1，下一次采集会被工具门槛拒绝（hasRequiredTool）。
+  if (!nodeState.directConsume) {
+    wearEquippedItem(world, actorEid, "tool");
   }
 
   // 通用状态机联动（可选）：资源状态变化作为即时信号广播给该实体的状态机。

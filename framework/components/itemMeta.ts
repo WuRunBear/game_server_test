@@ -19,6 +19,12 @@ export interface ItemMetaEntry {
    * 服务端权威，不参与 netSync 载荷（客户端可据 kind 推断）。
    */
   spoilAt?: number;
+  /**
+   * 当前耐久（逐实例状态）：丢弃时从背包槽继承、拾取时回写背包槽，
+   * 避免「丢下再捡起」重置耐久。缺省 = 无耐久（或旧存档待按 kind 补齐）。
+   * 服务端权威，不参与 netSync 载荷（客户端可据 kind 推断上限）。
+   */
+  durability?: number;
 }
 
 /** AoS 存储：普通 JS 数组按 eid 索引（非 bitecs 组件，不能 addComponent/query）。 */

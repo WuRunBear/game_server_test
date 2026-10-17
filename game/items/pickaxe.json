@@ -2,6 +2,8 @@
   "kind": "pickaxe",
   "maxStack": 1,
   "value": 8,
+  "maxDurability": 40,
+  "wearPerUse": 1,
   "toolType": "pickaxe",
   "equip": { "slot": "tool", "gatherMult": 2 }
 }

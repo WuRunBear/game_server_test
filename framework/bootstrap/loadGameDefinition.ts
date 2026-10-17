@@ -146,6 +146,28 @@ function mergeUnknownKeys(parsed: unknown, raw: unknown): unknown {
   return parsed;
 }
 
+/**
+ * 物品耐久配置的加载期约束（fail-fast，带文件与 kind 定位）：
+ * - 有 `maxDurability` 的物品必须 `maxStack = 1`——耐久是逐实例状态，
+ *   可堆叠物品的整堆合并无法表达「哪一件剩多少」（架构取舍：不做逐件子堆叠）；
+ * - `wearPerUse` 只对声明了 `maxDurability` 的物品有意义，孤立声明属配置缺陷。
+ */
+function validateItemDurability(file: string, spec: ItemKindSpec): void {
+  if (spec.maxDurability !== undefined) {
+    const maxStack = spec.maxStack ?? 1;
+    if (maxStack !== 1) {
+      throw new Error(
+        `Item "${spec.kind}" in ${file} declares maxDurability but maxStack ${maxStack} — durable items must have maxStack 1 (per-instance durability cannot be merged across a stack)`,
+      );
+    }
+  }
+  if (spec.wearPerUse !== undefined && spec.maxDurability === undefined) {
+    throw new Error(
+      `Item "${spec.kind}" in ${file} declares wearPerUse without maxDurability — wear is meaningless for items that never break`,
+    );
+  }
+}
+
 /** 加载物品类型文件（每个文件一个 ItemKindSchema）；kind 全局唯一，重复抛错。 */
 function loadItemsFile(baseDir: string, itemsPattern?: string): ItemKindSpec[] {
   if (!itemsPattern) return [];
@@ -159,6 +181,7 @@ function loadItemsFile(baseDir: string, itemsPattern?: string): ItemKindSpec[] {
       throw new Error(`Duplicate item kind "${parsed.kind}" in ${file}`);
     }
     seen.add(parsed.kind);
+    validateItemDurability(file, parsed);
     results.push(parsed);
   }
   return results;

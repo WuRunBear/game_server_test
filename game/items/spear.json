@@ -1,5 +1,7 @@
 {
   "kind": "spear",
   "maxStack": 1,
+  "maxDurability": 50,
+  "wearPerUse": 1,
   "equip": { "slot": "weapon", "attackBonus": 15 }
 }

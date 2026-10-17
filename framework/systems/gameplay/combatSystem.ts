@@ -6,6 +6,7 @@ import { isGameplayReachable } from "framework/utils/gameplayDistance";
 import type { GameWorld } from "world";
 import { getRuleModule } from "framework/api";
 import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
+import { wearEquippedItem } from "framework/systems/gameplay/durability";
 import { computeStandardDamage } from "framework/systems/gameplay/damageFormula";
 import { computeNumericStat, STAT_ATTACK, STAT_DEFENSE } from "framework/simulation/modifiers/modifiers";
 import { emitEvent } from "framework/events/gameEvents";
@@ -130,6 +131,11 @@ export function attackTarget(world: GameWorld, attackerEid: number, targetEid: n
   }
 
   Health.current[targetEid] = (Health.current[targetEid] ?? 0) - damage;
+
+  // 耐久磨损（数值由 item kind 配置）：武器命中耗一次；护甲受击耗一次。
+  // 伤害已结算，破碎不影响本次命中；破碎清槽与装备引用由磨损点即时完成。
+  wearEquippedItem(world, attackerEid, "weapon");
+  wearEquippedItem(world, targetEid, "armor");
 
   // 命中事件（产生方接线）：通用载荷只放 攻击者/被命中者/实际伤害
   queueEvent(world, "on-hit", {

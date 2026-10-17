@@ -1,6 +1,8 @@
 {
   "kind": "stone_axe",
   "maxStack": 1,
+  "maxDurability": 150,
+  "wearPerUse": 1,
   "toolType": "axe",
   "equip": { "slot": "tool", "gatherMult": 2 }
 }

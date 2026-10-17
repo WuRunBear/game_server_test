@@ -34,6 +34,8 @@ export interface TypedEventPayloads {
   "on-hit": { eid: number; attacker: number; target: number; damage: number };
   /** 实体死亡（death 接线预留）。 */
   "on-death": { eid: number; kind: string };
+  /** 装备物品耐久耗尽破碎（durability 磨损点入队；eid=持有者，slot=装备槽名）。 */
+  "on-item-break": { eid: number; kind: string; slot: string };
   /** 进入区域（region 接线预留）。 */
   "on-region-enter": { eid: number; region: string };
   /** 离开区域（region 接线预留）。 */

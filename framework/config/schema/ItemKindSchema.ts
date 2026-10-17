@@ -98,6 +98,18 @@ export const ItemKindSchema = z.object({
    * 缺省 = 直接消失（不留残余）。
    */
   spoilInto: z.string().optional(),
+  /**
+   * 最大耐久（逐实例状态写 ItemStack.durability）：入包时初始化为该值。
+   * 缺省 = 无耐久（历史行为零回归）。加载期要求声明它的物品 maxStack = 1
+   * （否则同 kind 堆叠合并无法区分各件剩余耐久）。
+   */
+  maxDurability: z.number().int().positive().optional(),
+  /**
+   * 每次「使用」磨损的耐久点数（采集一次 / 攻击命中一次 / 护甲受击一次）。
+   * 数值纯配置，缺省 1。仅对声明 maxDurability 的物品有意义——声明了
+   * wearPerUse 却没有 maxDurability 属配置缺陷，加载期报错。
+   */
+  wearPerUse: z.number().int().positive().optional(),
 });
 
 /** 食用/消耗效果的类型推断。 */

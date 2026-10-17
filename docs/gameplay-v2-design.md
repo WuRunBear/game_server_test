@@ -192,12 +192,12 @@ framework/ 逐词扫描零游戏名词命中；src/register.ts 为空占位。�
 
 ## 实施状态（2026-10-17）
 
-主体落地，验证基线：**81 文件 / 1004 用例全绿**，`pnpm build` 零类型错误，`pnpm tools validate` 通过。
+主体落地，验证基线：**82 文件 / 1017 用例全绿**，`pnpm build` 零类型错误，`pnpm tools validate` 通过。
 
 | 切片 | 提交 | 结果 |
 |---|---|---|
 | A 激活休眠层 | `fe51fc5` | ✅ computeStat 接入 movement/combat、modifierSystem 过期清理、set-timer + timer/trigger 启用、状态效果闭环（生肉→减速+周期伤害） |
-| B 生存深度 | `10a877a` + `4206a78` + fix-20 | ✅ 死亡惩罚（尸体容器 + keepOnDeath + 超时 despawn）、断线保留（Offline 标记 + 全系统排除 + 重连复用 + 到期存档）、工具门槛与采集掉落表完成（`4206a78`）、食物腐烂完成（fix-20：spoilTicks/spoilInto 绝对 tick，地面+背包）、漂流木保底；耐久仍后置 |
+| B 生存深度 | `10a877a` + `4206a78` + fix-20 + fix-21 | ✅ 死亡惩罚（尸体容器 + keepOnDeath + 超时 despawn）、断线保留（Offline 标记 + 全系统排除 + 重连复用 + 到期存档）、工具门槛与采集掉落表完成（`4206a78`）、食物腐烂完成（fix-20）、漂流木保底、物品耐久完成（fix-21：ItemStack.durability + 采集/攻击/受击磨损 + 破碎清理 + on-item-break 事件） |
 | C 科技树与制作 | `0cb4cd9` | ✅ 配方解锁条件（复用 spawnConditions）、制作时长（挂起/取消退料）、站点燃料、木→板→家具加工链；解锁 schema 形式化后置（系统内 fail-fast 校验） |
 | D 威胁升级 | `0cb4cd9` + `51b1f2b` | ✅ 袭击导演（预警/门槛/无玩家暂停）、结构防御值、野火/风暴（真实消费写回）、A* 寻路（跨层/确定性/节流）、Boss 两阶段（HealthBelow + 子树守卫）、世界进度账本 |
 | E 经济商店 | `0cb4cd9` + `4206a78` | ✅ 货币 shell + ItemKind.value、对话 buy/sell（economy settle 原子）、默认价；好感折扣完成（`4206a78`：relation 定价） |
@@ -208,10 +208,9 @@ framework/ 逐词扫描零游戏名词命中；src/register.ts 为空占位。�
 
 仍未落地：
 
-1. **物品耐久**：需 ItemStack 逐实例状态 + 同步协议改动，单独切片。
-2. **经验/技能、价格波动、声望/势力、成就、暴击/克制**：按设计原意 P2 后置。
-3. 世界进度（`world.progress`）仅服务端权威，未进 netSync（客户端展示后置）。
-4. 燃料离线不烧、延时制作任务重启即弃（运行时状态，与 offerSession 同级语义）。
+1. **经验/技能、价格波动、声望/势力、成就、暴击/克制**：按设计原意 P2 后置。
+2. 世界进度（`world.progress`）仅服务端权威，未进 netSync（客户端展示后置）。
+3. 燃料离线不烧、延时制作任务重启即弃（运行时状态，与 offerSession 同级语义）。
 
 ### 实施中发现并修复的框架缺陷
 

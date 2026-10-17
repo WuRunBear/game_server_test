@@ -2,6 +2,8 @@
   "kind": "axe",
   "maxStack": 1,
   "value": 5,
+  "maxDurability": 60,
+  "wearPerUse": 1,
   "toolType": "axe",
   "equip": { "slot": "tool" }
 }
