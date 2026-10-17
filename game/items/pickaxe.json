@@ -1,0 +1,7 @@
+{
+  "kind": "pickaxe",
+  "maxStack": 1,
+  "value": 8,
+  "toolType": "pickaxe",
+  "equip": { "slot": "tool", "gatherMult": 2 }
+}

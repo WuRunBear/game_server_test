@@ -8,7 +8,8 @@
  * - 效果类型（配置引用通用机制）：quest_accept（接受任务）/ quest_submit
  *   （提交任务，好感对象=对话 NPC kind）/ relation_delta（好感增减）/
  *   buy（向商店购买）/ sell（向商店出售——复用 economy settle 单方条款
- *   的原子现货交换；定价缺省走 item 的 value 字段）
+ *   的原子现货交换；定价缺省走 item 的 value 字段，好感折扣见
+ *   rules/dialogue.json 的 trade 段）
  *
  * 游戏无关——对话树/效果经 game/dialogues/*.json 配置引用。
  */
@@ -19,9 +20,10 @@ import { entityLevelOf } from "framework/components/entityLevel";
 import { isGameplayReachable } from "framework/utils/gameplayDistance";
 import type { EntityId, GameWorld } from "world";
 import { acceptQuest, submitQuest } from "framework/systems/gameplay/questSystem";
-import { addRelation } from "framework/systems/gameplay/relation";
+import { addRelation, getRelation } from "framework/systems/gameplay/relation";
 import { settle, type SettleTerms, type TransferAmount } from "framework/economy/settle";
 import type { DialogueTreeJson, DialogueNodeJson, DialogueEffectJson } from "framework/config/schema/DialogueSchema";
+import type { DialogueRule } from "framework/config/schema/RuleSchema";
 
 /** 对话结束标记：to 为缺省或该值时结束对话。 */
 export const END_DIALOGUE = "__end__";
@@ -29,8 +31,21 @@ export const END_DIALOGUE = "__end__";
 /** 默认对话交互范围（talk 意图路由用）。 */
 const DEFAULT_TALK_RANGE = 48;
 
-interface DialogueRules {
-  talkRange?: number;
+/**
+ * 好感调制后的成交单价（纯函数）。
+ *
+ * `unit = max(minPrice, 1, round(basePrice × (1 - discountPerRelation × relation)))`。
+ * relation = 0 时原价；正好感打折、负好感涨价（同系数对称）。
+ * 结果始终为整数且 ≥1（最低价兜底）。
+ */
+export function discountedUnitPrice(
+  basePrice: number,
+  relation: number,
+  discountPerRelation = 0,
+  minPrice = 1,
+): number {
+  const scaled = basePrice * (1 - discountPerRelation * relation);
+  return Math.max(Math.max(1, minPrice), Math.round(scaled));
 }
 
 function dialogueTreeOf(world: GameWorld, treeId: string): DialogueTreeJson | undefined {
@@ -54,7 +69,7 @@ export function startDialogue(
 
   // 距离校验（talk 路由同规则源；缺省 48）——统一距离检查（前置修正 4）：
   // 同层欧氏距离，异层 NPC 不可对话
-  const rules = world.gameDef.resolvedRules["dialogue"] as DialogueRules | undefined;
+  const rules = world.gameDef.resolvedRules["dialogue"] as DialogueRule | undefined;
   const talkRange = rules?.talkRange ?? range ?? DEFAULT_TALK_RANGE;
   if (
     !isGameplayReachable(
@@ -98,7 +113,16 @@ export function applyDialogueEffect(
       return true;
     case "buy":
     case "sell":
-      return tradeAtShop(world, playerEid, effect.type, effect.kind, effect.count, effect.currency, effect.price);
+      return tradeAtShop(
+        world,
+        playerEid,
+        effect.type,
+        effect.kind,
+        effect.count,
+        effect.currency,
+        effect.price,
+        Kind[npcEid] ?? "",
+      );
     default:
       return false;
   }
@@ -112,8 +136,13 @@ export function applyDialogueEffect(
  * 整体回滚（零副作用）。商店侧无实体容器（无限货架/钱箱语义），货币与货物
  * 均在玩家背包容器内对冲，原子性由 settle 快照回滚保证。
  *
- * 定价：单价 = 效果显式 price，缺省取商品 item 定义的 value 字段；两者皆无
+ * 定价：基础单价 = 效果显式 price，缺省取商品 item 定义的 value 字段；两者皆无
  * → 未定价，效果失败（对话停留在当前节点）。
+ *
+ * 好感折扣：基础价再按 rules/dialogue.json 的 trade 段调制——
+ * `实际单价 = max(minPrice, round(基础价 × (1 - discountPerRelation × relation)))`，
+ * relation 为玩家对当前 NPC kind 的好感（getRelation）。未配置 trade 段/好感为 0
+ * 时价格不变；负好感对称涨价。最低价恒 ≥1。
  */
 function tradeAtShop(
   world: GameWorld,
@@ -122,10 +151,21 @@ function tradeAtShop(
   kind: string,
   count: number,
   currency: string,
-  price?: number,
+  price: number | undefined,
+  npcKind: string,
 ): boolean {
-  const unitPrice = price ?? world.gameDef.itemsByKind?.get(kind)?.value;
-  if (unitPrice === undefined || !(unitPrice > 0)) return false; // 未定价：拒
+  const basePrice = price ?? world.gameDef.itemsByKind?.get(kind)?.value;
+  if (basePrice === undefined || !(basePrice > 0)) return false; // 未定价：拒
+
+  const rules = world.gameDef.resolvedRules["dialogue"] as DialogueRule | undefined;
+  const trade = rules?.trade;
+  const relation = npcKind ? getRelation(world, playerEid, npcKind) : 0;
+  const unitPrice = discountedUnitPrice(
+    basePrice,
+    relation,
+    trade?.discountPerRelation ?? 0,
+    trade?.minPrice ?? 1,
+  );
   const total = unitPrice * count;
 
   const goods: TransferAmount = { container: "inventory", kind, count };

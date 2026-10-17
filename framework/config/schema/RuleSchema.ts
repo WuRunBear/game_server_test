@@ -28,18 +28,58 @@ export const CombatRuleSchema = z.object({
 export type CombatRule = z.infer<typeof CombatRuleSchema>;
 
 /**
- * Needs 全局规则：作用于 needDecaySystem 的衰减倍率。
+ * Needs 全局规则：作用于 needDecaySystem 的衰减倍率与环境调制。
  *
  * 每个 Need 自身的 decayPerSec/depletionDmg 仍在实体 archetype 的 Needs 数组里声明，
- * 规则文件只放跨实体的全局调节项（衰减倍率）。游戏无关。
+ * 规则文件只放跨实体的全局调节项（衰减倍率、按 Need 名的环境敏感性）。游戏无关。
  */
 export const NeedsRuleSchema = z.object({
   /** 全局需求衰减倍率（乘在实体自身 decayPerSec 之上）。 */
   decayScale: z.number().optional(),
+  /**
+   * 按 Need 名索引的环境敏感性：`{ "<needName>": { "<modifierKey>": coefficient } }`。
+   *
+   * modifierKey 对应 WorldClock `environmentAt(world).modifiers` 的键（如温度偏移、
+   * 生长速率——框架只当标量，不解释语义）。单 Need 的衰减乘子为
+   * `clamp(1 + Σ(coefficient × 当前修饰值), 0.1, 10)`；未列出的 Need 恒为 1。
+   */
+  environmentFactors: z
+    .record(z.string(), z.record(z.string(), z.number()))
+    .optional(),
 }).passthrough();
 
 /** Needs 规则的类型推断（即 game/rules/needs.json）。 */
 export type NeedsRule = z.infer<typeof NeedsRuleSchema>;
+
+/**
+ * 交易定价折扣子规则（DialogueRuleSchema.trade）：好感对买卖单价的调制。
+ *
+ * 公式：`实际单价 = max(minPrice, round(基础价 × (1 - discountPerRelation × relation)))`。
+ * relation 为玩家对当前对话 NPC kind 的好感值（getRelation），0 时价格不变；
+ * 正值打折、负值涨价（系数对称）。全部参数游戏无关。
+ */
+export const DialogueTradeRuleSchema = z.object({
+  /** 每点好感对应的折扣率（0..1）；缺省 0 = 不按好感调价。 */
+  discountPerRelation: z.number().min(0).max(1).optional(),
+  /** 折后最低单价（≥1）；缺省 1。 */
+  minPrice: z.number().int().min(1).optional(),
+}).passthrough();
+
+/**
+ * 对话全局规则（game/rules/dialogue.json）：作用于 dialogueSystem。
+ * 字段语义游戏无关（范围/通用交易定价调制）。
+ */
+export const DialogueRuleSchema = z.object({
+  /** 对话交互距离（像素）；缺省 48。 */
+  talkRange: z.number().positive().optional(),
+  /** 交易定价的好感折扣配置；缺省不调价。 */
+  trade: DialogueTradeRuleSchema.optional(),
+}).passthrough();
+
+/** 交易折扣规则的类型推断。 */
+export type DialogueTradeRule = z.infer<typeof DialogueTradeRuleSchema>;
+/** 对话规则的类型推断（即 game/rules/dialogue.json）。 */
+export type DialogueRule = z.infer<typeof DialogueRuleSchema>;
 
 /** 合成配方输入/输出项：kind 引用 item 表 + 数量。 */
 const RecipeInputSchema = z.object({

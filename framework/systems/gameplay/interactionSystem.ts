@@ -3,7 +3,7 @@ import { Player, NPC, Transform, Resource, Enemy, Health, Intent, entityMapOf } 
 import { entityLevelOf } from "framework/components/entityLevel";
 import { sameLevelDistance } from "framework/utils/gameplayDistance";
 import type { GameWorld } from "world";
-import { harvest } from "framework/systems/gameplay/gatheringSystem";
+import { harvest, hasRequiredTool } from "framework/systems/gameplay/gatheringSystem";
 import { attackTarget } from "framework/systems/gameplay/combatSystem";
 import { startDialogue } from "framework/systems/gameplay/dialogueSystem";
 
@@ -66,6 +66,9 @@ export function createInteractionSystem(config?: Record<string, unknown>) {
         let nearestDist = Infinity;
         for (const nodeEid of query(world, [Resource, Transform])) {
           if (effectiveMapOf(world, nodeEid) !== effectiveMapOf(world, playerEid)) continue;
+          // 工具门槛不满足的节点不参与最近目标选择：否则「最近节点采不了」会
+          // 让意图空转，挡住更远处本可采集的节点（采集仍是权威校验点）。
+          if (!hasRequiredTool(world, playerEid, nodeEid)) continue;
           // 统一距离检查（前置修正 4）：同层欧氏距离，异层不可交互
           const d = sameLevelDistance(
             px,

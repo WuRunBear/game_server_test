@@ -1,0 +1,7 @@
+{
+  "talkRange": 48,
+  "trade": {
+    "discountPerRelation": 0.02,
+    "minPrice": 1
+  }
+}

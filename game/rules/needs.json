@@ -1,3 +1,7 @@
 {
-  "decayScale": 1.0
+  "decayScale": 1.0,
+  "environmentFactors": {
+    "hunger": { "temperatureOffset": 0.05 },
+    "thirst": { "temperatureOffset": 0.08 }
+  }
 }

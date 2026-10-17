@@ -8,7 +8,13 @@
       "max": 3,
       "amountPerHit": 1,
       "regenMs": 120000,
-      "yieldsKind": "wood"
+      "yieldsKind": "wood",
+      "requiredToolType": "axe",
+      "lootTable": [
+        { "kind": "wood", "qty": 1, "chance": 1 },
+        { "kind": "twig", "qty": 1, "chance": 0.5 },
+        { "kind": "sap", "qty": 1, "chance": 0.2 }
+      ]
     },
     "StateMachine": {
       "initial": "alive",

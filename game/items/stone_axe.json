@@ -1,5 +1,6 @@
 {
   "kind": "stone_axe",
   "maxStack": 1,
+  "toolType": "axe",
   "equip": { "slot": "tool", "gatherMult": 2 }
 }

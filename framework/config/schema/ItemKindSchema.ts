@@ -68,6 +68,12 @@ export const ItemKindSchema = z.object({
   effects: z.array(EffectSpecSchema).optional(),
   /** 穿戴效果（槽位 + 加成）；缺省表示不可穿戴。 */
   equip: EquipEffectSchema.optional(),
+  /**
+   * 工具分类字符串：通用机制字段，框架不解释其语义，取值由 game/ 配置定义，
+   * 仅用于与 ResourceNode.requiredToolType 做相等比对（采集门槛）。
+   * 缺省 = 该物品不构成任何工具门槛的满足条件。
+   */
+  toolType: z.string().optional(),
   /** 可放置声明（目标 archetype）；缺省表示不可放置。 */
   place: PlaceEffectSchema.optional(),
   /**

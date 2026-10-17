@@ -189,6 +189,27 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
       yieldsKind: z.string().default(""),
       /** 是否直接施加 consume 效果而不入背包。 */
       directConsume: z.boolean().default(false),
+      /**
+       * 采集工具门槛：采集者 tool 装备槽中的物品须声明同名 toolType；
+       * 缺省/空串 = 无门槛（徒手可采）。
+       */
+      requiredToolType: z.string().optional(),
+      /**
+       * 多产物掉落表：配置后取代 yieldsKind 单产物路径（逐条按 chance 掷骰，
+       * 确定性 rng）。空/缺省 = 回退单产物 yieldsKind。
+       */
+      lootTable: z
+        .array(
+          z.object({
+            /** item kind 字符串。 */
+            kind: z.string().default(""),
+            /** 命中时的产出数量（再乘采集倍率）。 */
+            qty: z.number().default(1),
+            /** 命中概率（0~1）。 */
+            chance: z.number().min(0).max(1).default(1),
+          }),
+        )
+        .optional(),
     }),
   });
   registry.register("LootTable", LootTable, {

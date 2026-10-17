@@ -2,6 +2,7 @@ import type { ZodType } from "zod";
 import {
   CombatRuleSchema,
   NeedsRuleSchema,
+  DialogueRuleSchema,
   CraftingRuleSchema,
   DayNightRuleSchema,
   EnvironmentRuleSchema,
@@ -48,6 +49,7 @@ export function hasRuleSchema(name: string): boolean {
 export function registerBuiltinRuleSchemas(): void {
   registerRuleSchema("combat", CombatRuleSchema);
   registerRuleSchema("needs", NeedsRuleSchema);
+  registerRuleSchema("dialogue", DialogueRuleSchema);
   registerRuleSchema("crafting", CraftingRuleSchema);
   registerRuleSchema("daynight", DayNightRuleSchema);
   registerRuleSchema("environment", EnvironmentRuleSchema);
