@@ -363,7 +363,7 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("LastSynced", LastSynced, {
     description: "同步帧：记录最近一次被同步的逻辑帧，供增量同步使用。",
   });
-  // 断线保留标记（SoA，瞬态——运行时会话事实，不入档）
+  // 断线保留标记（SoA，入档——保留语义跨重启有效）
   registry.register("Offline", Offline, {
     description: "断线保留标记：会话断开后实体保留至到期 tick，期间对同步与玩法系统不可见；重连复用时摘除，到期由仿真层清扫销毁。",
   });

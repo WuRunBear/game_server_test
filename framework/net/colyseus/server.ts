@@ -82,6 +82,10 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
 
   const gameServer = new Server({
     transport,
+    // 停机存档接线（F-08）：Colyseus 的 gracefullyShutdown 钩子默认会监听
+    // SIGINT/SIGTERM，并在退出前 await 每个房间的 dispose（GameRoom.onDispose
+    // 内 await sim.flushSave）；这里显式声明，避免默认值变化导致无停机存档。
+    gracefullyShutdown: true,
     express: (app) => {
       app.use((req: any, res: any, next: any) => {
         const origin = req.headers.origin;

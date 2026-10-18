@@ -9,7 +9,7 @@
 import type { SimulationPort } from "simulation";
 import { describe, it, expect, beforeAll } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { query } from "bitecs";
@@ -244,7 +244,7 @@ describe("Slice 5：持久化（定时存档 + 读档恢复 + 玩家复用）", 
 
     const record = (await repo.loadWorld("s1"))!;
     const sim2 = await createGameSimulation(def, { repository: repo, saveId: "s1" });
-    expect(sim2.addPlayer("s1").networkId).toBe(savedNid);
+    expect(sim2.addPlayer("s1", { networkId: savedNid }).networkId).toBe(savedNid);
 
     const world2 = simWorld(sim2);
     const p2 = query(world2, [Player])[0];
@@ -416,7 +416,7 @@ describe("Slice 5：真实 game 配置（server 规则 + 存档→恢复 demo）
     expect(record.entities.some((e) => e.kind === "campfire")).toBe(true);
 
     const sim2 = await createGameSimulation(def, { repository: repo, saveId: server.saveId });
-    expect(sim2.addPlayer("s1").networkId).toBe(NetworkId.value[p1]);
+    expect(sim2.addPlayer("s1", { networkId: NetworkId.value[p1] }).networkId).toBe(NetworkId.value[p1]);
 
     const world2 = simWorld(sim2);
     // 开机演化可能已铺放同 kind 实体——按存档 networkId 精确断言恢复的火堆
@@ -473,11 +473,13 @@ describe("Slice 5：审查修复（destroyEntity / 存档防御 / 写盘串行 /
     expect(world.time.tick).toBe(5);
   });
 
-  it("fileRepository：损坏 JSON 返回 null；并发写盘串行化，最终为后写内容", async () => {
+  it("fileRepository：损坏 JSON fail-fast 且保留原文件；并发写盘串行化，最终为后写内容", async () => {
     const dir = mkdtempSync(join(tmpdir(), "s5-serial-"));
     await writeFile(join(dir, "bad.json"), "{not-json", "utf8");
     const repo = createFileRepository(dir);
-    expect(await repo.loadWorld("bad")).toBeNull();
+    // F-09：坏档不再静默当无档——抛出带路径的明确错误，原文件保留
+    await expect(repo.loadWorld("bad")).rejects.toThrow(/corrupt save/);
+    expect(await readFile(join(dir, "bad.json"), "utf8")).toBe("{not-json");
 
     const p1 = repo.saveWorld({
       id: "w", savedAt: 1, tick: 1, nextNetworkId: 2,

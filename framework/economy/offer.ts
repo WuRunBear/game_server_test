@@ -41,6 +41,39 @@ export interface OpenOfferOptions {
   expiresTick?: number;
 }
 
+/** 判断交易数量条目结构是否合法（容器种类/物品 kind/正整数数量）。 */
+function isValidAmount(amount: unknown): boolean {
+  if (!amount || typeof amount !== "object") return false;
+  const a = amount as { container?: unknown; kind?: unknown; count?: unknown };
+  return (
+    (a.container === "inventory" || a.container === "ledger") &&
+    typeof a.kind === "string" &&
+    a.kind.length > 0 &&
+    typeof a.count === "number" &&
+    Number.isInteger(a.count) &&
+    a.count > 0
+  );
+}
+
+/** 判断单方条款结构是否合法（party 正整数 eid；give/take 缺省或合法数组）。 */
+function isValidParty(party: unknown): boolean {
+  if (!party || typeof party !== "object") return false;
+  const p = party as { party?: unknown; give?: unknown; take?: unknown };
+  if (typeof p.party !== "number" || !Number.isInteger(p.party) || p.party <= 0) return false;
+  if (p.give !== undefined && (!Array.isArray(p.give) || !p.give.every(isValidAmount))) return false;
+  if (p.take !== undefined && (!Array.isArray(p.take) || !p.take.every(isValidAmount))) return false;
+  return true;
+}
+
+/**
+ * 条款结构校验（命令入口与 openOffer 共用）：非空数组、每方 party 为合法
+ * eid、give/take 为合法数量条目数组。**只校验结构，不校验身份/在线状态**——
+ * 后者属命令层（GameSimulation），economy 保持通用多方结算原语语义。
+ */
+export function isValidSettleTerms(terms: unknown): terms is SettleTerms {
+  return Array.isArray(terms) && terms.length > 0 && terms.every(isValidParty);
+}
+
 /** 判断实体是否玩家（有 Player 标签即需显式确认；无玩家确认通道的方即时成立）。 */
 function isPlayerEntity(world: GameWorld, eid: number): boolean {
   return hasComponent(world, eid, Player);
@@ -77,7 +110,7 @@ export function openOffer(
 ): number | null {
   pruneExpiredOffers(world);
 
-  if (!Array.isArray(terms) || terms.length === 0) return null;
+  if (!isValidSettleTerms(terms)) return null;
 
   const session: OfferSession = {
     id: world.nextOfferId++,

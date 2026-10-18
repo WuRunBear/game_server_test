@@ -11,6 +11,11 @@
 export interface DialogueState {
   /** 对话对象实体的 networkId（稳定标识，客户端凭此知道和谁对话）。 */
   npcId: number;
+  /**
+   * 对话对象实体的**运行时 eid**（advance 时解析距离/存活用；同进程内稳定）。
+   * 可选以兼容手工构造/旧会话——缺失时回退按 npcId 线性查找。
+   */
+  npcEid?: number;
   /** 对话树 id（game/dialogues/*.json 的树引用，节点定位不依赖 NPC 存活）。 */
   treeId: string;
   /** 当前对话节点 id（引用该树的 nodes 表）。 */

@@ -88,7 +88,7 @@ export interface PlayerCommand {
   target?: number;
   /** 对话选项索引（dialogue 用，推进当前对话节点）。 */
   option?: number;
-  /** 交易条款（offer 用，各方 give/take 列表；发送方本人视为已确认）。 */
+  /** 交易条款（offer 用，恰好两方；发送方本人视为已确认，另一方必须是在线玩家并经 offer-accept 显式确认）。 */
   offer?: TradeParty[];
   /** 报价会话 id（offer-accept / offer-cancel 用）。 */
   offerId?: number;

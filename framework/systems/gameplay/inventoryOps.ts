@@ -18,8 +18,13 @@ import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { ItemKindSpec, ConsumeEffect } from "framework/config/schema/ItemKindSchema";
 import { mergeSpoilAt, spoilAtForTick } from "framework/systems/gameplay/spoilSystem";
+import { isGameplayReachable } from "framework/utils/gameplayDistance";
+import { isOfflineRetained } from "framework/components/offline";
 
 const DEFAULT_MAX_STACK = 1;
+
+/** 容器取回可达半径缺省值（px）：rules/place.json 未配 containerRange 时生效。 */
+const DEFAULT_CONTAINER_RANGE = 64;
 
 /** addToInventory 的可选逐实例元数据（缺省按 kind 惰性补齐）。 */
 export interface AddToInventoryOptions {
@@ -206,10 +211,11 @@ export const DROP_PICKUP_AFTER_MS = 1000;
  * 从容器实体取回槽位物品到操作者背包（死亡容器/储物容器共用原语）。
  *
  * 经命令通道调用（transfer + target = 容器 networkId；transferSlot 是
- * 单背包内原子，跨容器转移由此原语承担）：目标须带 Inventory 且与操作者
- * 同图；整并入则清源槽，部分并入则回写剩余（满包不吞，容器侧零变更）。
- * 不做距离校验——与 consume/drop/transfer 同层级的命令原子，范围限制
- * 属交互层关注（与 deconstruct 的 placeRange 校验不同源，避免耦合规则）。
+ * 单背包内原子，跨容器转移由此原语承担）：目标须带 Inventory、与操作者
+ * **同图、同层且距离 ≤ rules/place.json 的 containerRange（缺省 64px）**；
+ * 整并入则清源槽，部分并入则回写剩余（满包不吞，容器侧零变更）。
+ * 距离/可达性复核与 deconstruct 同源（isGameplayReachable），杜绝隔墙/
+ * 隔层远程搬空容器。
  *
  * @param world 游戏世界
  * @param playerEid 操作者实体
@@ -226,6 +232,7 @@ export function lootContainerSlot(
   if (!Number.isInteger(containerNetworkId) || containerNetworkId <= 0) return false;
   const playerInv = Inventory[playerEid];
   if (!playerInv) return false;
+  if (!hasComponent(world, playerEid, Transform)) return false;
 
   // 按 networkId 查容器 eid（实体量小，线性查找即可，与 deconstruct 同模式）
   let containerEid: number | undefined;
@@ -239,8 +246,28 @@ export function lootContainerSlot(
   const containerInv = Inventory[containerEid];
   if (!containerInv) return false;
 
+  // 断线保留实体对玩法系统不可见，也不可作为容器被远程/近距取回
+  if (isOfflineRetained(world, containerEid)) return false;
+
   // 同图校验：跨图取回拒绝（归属异常时双方同回退默认图，比较仍成立）
   if (entityMapOf(world, containerEid) !== entityMapOf(world, playerEid)) return false;
+
+  // 可达性校验（F-02）：同层 + 射程内；距离配置走 rules/place.json 的
+  // containerRange（缺省 64px，与 placeRange 解耦，便于单独调参）。
+  const placeRules = world.gameDef.resolvedRules["place"] as
+    | { containerRange?: number }
+    | undefined;
+  const range = placeRules?.containerRange ?? DEFAULT_CONTAINER_RANGE;
+  if (!hasComponent(world, containerEid, Transform)) return false;
+  if (
+    !isGameplayReachable(
+      { x: Transform.x[playerEid], y: Transform.y[playerEid], level: entityLevelOf(playerEid) },
+      { x: Transform.x[containerEid], y: Transform.y[containerEid], level: entityLevelOf(containerEid) },
+      range,
+    )
+  ) {
+    return false;
+  }
 
   const stack = containerInv.slots[slot];
   if (!stack) return false;

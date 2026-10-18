@@ -115,7 +115,7 @@ describe("snapshot", () => {
     const sim = await createGameSimulation(def, { repository: repo, saveId: "s1" });
     const world = simWorld(sim);
 
-    const { networkId } = sim.addPlayer("s1");
+    const { networkId } = sim.addPlayer("s1", { networkId: 7 });
     expect(networkId).toBe(7);
 
     const [playerEid] = query(world, [Player]);

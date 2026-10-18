@@ -37,7 +37,7 @@ import type { Repository, WorldRecord } from "framework/repository";
 import type { ServerRule } from "framework/config/schema/RuleSchema";
 import { computeInterest } from "./interest";
 import { createInputGuard, type InputGuard } from "./inputValidation";
-import { openOffer, acceptOffer, cancelOffer } from "framework/economy/offer";
+import { openOffer, acceptOffer, cancelOffer, isValidSettleTerms } from "framework/economy/offer";
 import { queueEvent } from "framework/simulation/events/eventBus";
 import { mixSeed } from "framework/simulation/rng";
 import { createLogger } from "framework/utils/logger";
@@ -58,6 +58,23 @@ export const DEFAULT_MAX_OFFLINE_TICKS = 1_728_000;
  * 缺省保留窗口；0 配置值表示维持旧行为（断线立即销毁）。
  */
 export const DEFAULT_OFFLINE_RETENTION_SEC = 300;
+
+/**
+ * 移动分量归一化：缺省（undefined/null）按 0；非 number / 非有限数返回
+ * undefined（调用方拒绝整条输入）；有限数钳到安全轴上限。
+ *
+ * 注意协议单位：moveX/moveY 是**像素/秒**（见 docs/CLIENT-INTEGRATION.md），
+ * 因此这里不能钳到 [-1,1]（那会让角色只能以 1px/s 移动）。安全上限取一个
+ * 远高于任何合法配置的值，只用于挡住 `Number.MAX_VALUE` 级别的异常输入；
+ * 真正的速度上限仍由 server 规则 maxMoveSpeed 拒绝式校验负责。
+ */
+const MAX_INPUT_AXIS = 10_000;
+
+function normalizeMoveAxis(value: unknown): number | undefined {
+  if (value === undefined || value === null) return 0;
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.max(-MAX_INPUT_AXIS, Math.min(MAX_INPUT_AXIS, value));
+}
 
 import type { SimulationPort } from "./SimulationPort";
 import type {
@@ -164,9 +181,6 @@ export class GameSimulation implements SimulationPort {
   /** 断线保留时长（tick，来自 rules/server.json；0 = 断线立即销毁旧行为）。 */
   private offlineRetentionTicks: number;
 
-  /** 读档恢复出的、尚未绑定 session 的玩家实体 eid 队列（addPlayer 时复用）。 */
-  private orphanPlayerEids: number[] = [];
-
   /** 地图 key → 生成配置（演化钩子按图取 seed）。 */
   private mapConfigsByKey = new Map<string, MapConfig>();
 
@@ -199,10 +213,11 @@ export class GameSimulation implements SimulationPort {
     }
 
     const initialRecord = bootDeps.loadRecord();
+    let restoredPlayerEids: number[] = [];
     if (initialRecord) {
       // 实体/全局时刻/激活集恢复（地图快照回填归 bootMaps，已在
       // createGameInstance → bootMaps 完成）
-      this.orphanPlayerEids = restoreWorld(this.world, initialRecord);
+      restoredPlayerEids = restoreWorld(this.world, initialRecord);
     }
 
     const serverRules = this.world.gameDef.resolvedRules["server"] as ServerRule | undefined;
@@ -228,6 +243,12 @@ export class GameSimulation implements SimulationPort {
       this.runOfflineCatchUp(initialRecord);
     }
 
+    // 读档玩家实体统一按"离线保留"处理：带 Offline 的保留档内 untilTick（随档
+    // 恢复）；无 Offline 的（旧档/崩溃瞬间在线）补标为保留实体，避免幽灵玩家。
+    // 放在离线补差之后：untilTick 基于补差后的当前 tick，旧档玩家仍有一次
+    // 完整的重连窗口（否则停机时长会立即耗尽保留期）。
+    this.retainRestoredPlayers(restoredPlayerEids);
+
     // 演化钩子：每 tick 对全部激活图按 (tick-1, tick] 跨度补差（常驻语义 D13）。
     // 注入位置见 GameInstance.beforeSystems——位于 tick 自增与系统拓扑序之间。
     // 命令事件冲刷在同一钩子先行：submitCommand 产生的 on-command 事件在
@@ -240,6 +261,36 @@ export class GameSimulation implements SimulationPort {
       stepFuelBurn(this.world);
       stepCraftingJobs(this.world);
     };
+  }
+
+  /**
+   * 读档恢复出的玩家实体 → 统一离线保留语义。
+   *
+   * - 已带 Offline（新档）：保留存档时写入的 untilTick（断线时刻推导，跨重启
+   *   有效期语义不变），不刷新；
+   * - 无 Offline（旧档或崩溃瞬间在线）：补标 Offline，untilTick = 当前 tick +
+   *   offlineRetentionTicks——重启后它们对系统不可见，客户端按 networkId
+   *   重连可复用，否则到期清扫；
+   * - offlineRetentionTicks = 0：保留语义关闭，直接销毁这些无主实体（与
+   *   removePlayer 的 0 配置行为一致，避免幽灵玩家）。
+   */
+  private retainRestoredPlayers(eids: number[]): void {
+    if (eids.length === 0) return;
+
+    for (const eid of eids) {
+      if (this.offlineRetentionTicks <= 0) {
+        destroyEntity(this.world, eid);
+        continue;
+      }
+      if (isOfflineRetained(this.world, eid)) continue;
+      addComponent(this.world, eid, Offline);
+      Offline.untilTick[eid] = this.world.time.tick + this.offlineRetentionTicks;
+      this.world.logger.info("读档玩家实体补标记为离线保留", {
+        eid,
+        networkId: NetworkId.value[eid],
+        untilTick: Offline.untilTick[eid],
+      });
+    }
   }
 
   /**
@@ -398,13 +449,16 @@ export class GameSimulation implements SimulationPort {
   /**
    * 玩家加入——创建玩家实体并返回网络标识。
    *
-   * 实体来源按优先级：
-   * 1. **断线保留实体**：options.networkId 命中保留中的离线实体 → 复用
-   *    （清除 Offline 保留标记、恢复会话映射，背包/位置/进度原样保留）
-   * 2. **读档 orphan**：restoreWorld 恢复的玩家实体（networkId 保持存档值）
-   * 3. **新生成**：按玩家出生规则（game/rules/player.json → resolvedPlayerRule.spawn）
+   * 实体来源：
+   * 1. **断线保留实体**：options.networkId 命中保留中且未到期的离线实体 →
+   *    复用（清除 Offline 保留标记、恢复会话映射，背包/位置/进度原样保留）
+   * 2. **新生成**：按玩家出生规则（game/rules/player.json → resolvedPlayerRule.spawn）
    *    在默认图选出生点（random 每玩家独立随机 / seededRandom 同图同点 /
    *    exact 固定），写入持久化 SpawnPoint 组件，并按 "player" archetype 生成
+   *
+   * 身份复用**只按客户端给出的 networkId 严格匹配**：未提供或未命中时新建
+   * 实体，绝不按 FIFO 把他人（或已过期）的旧实体绑给新客户端；读档/保留的
+   * 未认领实体由保留期到期清扫负责清理。
    *
    * @param sessionId Colyseus 连接标识
    * @param options 可选加入参数（重连复用保留实体的匹配键）
@@ -413,10 +467,14 @@ export class GameSimulation implements SimulationPort {
   addPlayer(sessionId: string, options?: PlayerJoinOptions): PlayerJoinResult {
     let eid: number | undefined;
 
-    // 1) 断线保留实体：按客户端自报 networkId 匹配（Player 限定，防误挂非玩家实体）
+    // 断线保留实体：按客户端自报 networkId 匹配（Player + Offline 限定，
+    // 且只复用未到期的保留实体——到期实体的复用等同篡改保留语义）。
     if (typeof options?.networkId === "number") {
+      const now = this.world.time.tick;
       const retained = [...query(this.world, [NetworkId, Player, Offline])].find(
-        (candidate) => NetworkId.value[candidate] === options.networkId,
+        (candidate) =>
+          NetworkId.value[candidate] === options.networkId &&
+          Offline.untilTick[candidate] > now,
       );
       if (retained !== undefined) {
         eid = retained;
@@ -427,21 +485,15 @@ export class GameSimulation implements SimulationPort {
           networkId: NetworkId.value[eid],
         });
       } else {
-        // 提示键未命中（实体已到期销毁/存档恢复前断线等）：降级常规路径
-        this.world.logger.warn("重连提示 networkId 未命中保留实体，走常规加入", {
+        // 提示键未命中（实体已到期销毁/不存在）：走常规路径新建，不挪用旧实体
+        this.world.logger.warn("重连提示 networkId 未命中可用保留实体，走常规加入", {
           sessionId,
           networkId: options.networkId,
         });
       }
     }
 
-    // 2) 读档恢复的玩家实体优先复用绑定（networkId 保持存档值，进度不丢）；
-    // 持久化出生点已随存档恢复，复用路径不重新选点。
-    if (eid === undefined && this.orphanPlayerEids.length > 0) {
-      eid = this.orphanPlayerEids.shift()!;
-    }
-
-    // 3) 新生成
+    // 未命中 → 新生成（无 FIFO / orphan 兜底）
     if (eid === undefined) {
       eid = this.spawnNewPlayer();
     }
@@ -492,7 +544,7 @@ export class GameSimulation implements SimulationPort {
    * 玩家离开——按断线保留策略处理玩家实体，清理所有会话关联缓存。
    *
    * 实体处理（offlineRetentionTicks 驱动）：
-   * - 保留时长 > 0：标记 Offline（瞬态组件，不入档）+ 记录到期 tick，
+   * - 保留时长 > 0：标记 Offline（入档组件）+ 记录到期 tick，
    *   实体保留在 ECS 中——保留期内对同步与玩法系统不可见（isOfflineRetained
    *   排除点），重连可按 networkId 复用；到期由 sweepExpiredOfflinePlayers
    *   销毁并触发一次立即存档。
@@ -544,20 +596,47 @@ export class GameSimulation implements SimulationPort {
    * @param input 客户端输入
    */
   submitInput(sessionId: string, input: PlayerInput): void {
+    // 入口严格数值校验（F-43）：seq 必须为有限非负整数；moveX/moveY 缺省按 0，
+    // 出现时必须为有限数；NaN/Infinity/非整数 seq 一律拒绝（含未配置
+    // maxMoveSpeed 时），绝不让非法值进入 ECS Velocity。
+    const seq = input?.seq;
+    if (typeof seq !== "number" || !Number.isInteger(seq) || seq < 0) {
+      this.world.logger.warn("输入被拒：seq 非有限非负整数", { sessionId, seq: String(seq) });
+      return;
+    }
+    const moveX = normalizeMoveAxis(input.moveX);
+    const moveY = normalizeMoveAxis(input.moveY);
+    if (moveX === undefined || moveY === undefined) {
+      this.world.logger.warn("输入被拒：移动分量非有限数", {
+        sessionId,
+        moveX: String(input.moveX),
+        moveY: String(input.moveY),
+      });
+      return;
+    }
+    const normalized: PlayerInput = {
+      seq,
+      moveX,
+      moveY,
+      interact: input.interact === true,
+      attack: input.attack === true,
+      talk: input.talk === true,
+    };
+
     const lastSeq = this.lastSeqBySessionId.get(sessionId) ?? 0;
-    if (input.seq <= lastSeq) return;
+    if (seq <= lastSeq) return;
 
     // 输入校验（anti-cheat）：超速输入被拒且不推进 seq，客户端无法靠重发绕过
-    if (!this.inputGuard.validateMove(input)) {
+    if (!this.inputGuard.validateMove(normalized)) {
       this.world.logger.warn("输入被拒：超出移动速度上限", {
         sessionId,
-        speed: Math.hypot(input.moveX, input.moveY),
+        speed: Math.hypot(normalized.moveX, normalized.moveY),
       });
       return;
     }
 
-    this.lastSeqBySessionId.set(sessionId, input.seq);
-    this.latestInputBySessionId.set(sessionId, input);
+    this.lastSeqBySessionId.set(sessionId, seq);
+    this.latestInputBySessionId.set(sessionId, normalized);
   }
 
   /**
@@ -627,13 +706,27 @@ export class GameSimulation implements SimulationPort {
       case "dialogue":
         return this.finishCommand(eid, command.type, advanceDialogue(this.world, eid, command.option ?? -1));
       case "offer": {
-        if (!command.offer) return false;
+        // 交易条款严格校验（F-01）：恰好两方、结构合法、发起者在条款中、
+        // 另一方必须是**当前在线的 Player 实体**（有会话绑定且非断线保留）。
+        // 非 Player/离线/不存在/重复 party 一律拒绝——杜绝"非玩家方自动确认"
+        // 把尸体/箱子当交易对手搬空。
+        const terms = command.offer;
+        if (!isValidSettleTerms(terms)) return false;
+        if (terms.length !== 2) return false;
+        const partyEids = terms.map((party) => party.party);
+        if (new Set(partyEids).size !== 2) return false;
+        if (!partyEids.includes(eid)) return false;
+        const counterparty = partyEids.find((partyEid) => partyEid !== eid)!;
+        if (!this.isOnlinePlayerEid(counterparty)) return false;
         const expiresTick =
-          command.ttlTicks !== undefined && command.ttlTicks > 0
+          command.ttlTicks !== undefined &&
+          Number.isInteger(command.ttlTicks) &&
+          command.ttlTicks > 0
             ? this.world.time.tick + command.ttlTicks
             : undefined;
-        // 发起方本人视为已确认；无玩家方即时成立（openOffer 语义）
-        const offerId = openOffer(this.world, command.offer, {
+        // 发起方本人视为已确认；另一方必须 offer-accept 显式确认（双方均为
+        // 在线 Player，openOffer 不会把任何一方当作自动确认方）。
+        const offerId = openOffer(this.world, terms, {
           confirmedParties: [eid],
           expiresTick,
         });
@@ -646,6 +739,19 @@ export class GameSimulation implements SimulationPort {
       default:
         return false;
     }
+  }
+
+  /**
+   * 实体是否为**当前在线**的玩家：带 Player 标签、有 session 绑定、且不处于
+   * 断线保留期。用于 offer 交易对手身份校验（非 Player/离线一律不可交易）。
+   */
+  private isOnlinePlayerEid(eid: number): boolean {
+    if (!hasComponent(this.world, eid, Player)) return false;
+    if (isOfflineRetained(this.world, eid)) return false;
+    for (const onlineEid of this.playerEidBySessionId.values()) {
+      if (onlineEid === eid) return true;
+    }
+    return false;
   }
 
   /**
@@ -702,19 +808,39 @@ export class GameSimulation implements SimulationPort {
    * @param reason 存档触发原因（日志定位用）
    */
   private saveNow(reason: string): void {
-    if (!this.repository || !this.saveId) return;
-
     // 序列化同步完成；写盘 fire-and-forget（异步 I/O 不入 ECS 系统）
+    void this.flushSave(reason);
+  }
+
+  /**
+   * 立即存档（可等待版本）——供**进程退出/存档 flush** 路径使用，保证写盘
+   * 完成后再让调用方继续（GameRoom.onDispose / SIGINT/SIGTERM 停机）。
+   *
+   * 与定时存档共用同一 `serializeWorld → repository.saveWorld` 通路；序列化
+   * 同步完成（快照一致性），写盘串行化由仓储实现负责。重复调用幂等：同一
+   * 世界状态重复落盘，最后一次内容一致；失败仅记日志并返回 false。
+   *
+   * @param reason 存档触发原因（日志定位用）
+   * @returns 是否成功落盘；未接仓储/存档 id 时返回 false（no-op）
+   */
+  async flushSave(reason = "manual"): Promise<boolean> {
+    if (!this.repository || !this.saveId) return false;
+
     const record = serializeWorld(this.world, this.saveId);
-    void this.repository.saveWorld(record).catch((err) => {
+    // 重置定时存档累计：本次已落盘，避免紧随其后的重复定时存档
+    this.sinceLastSaveMs = 0;
+
+    try {
+      await this.repository.saveWorld(record);
+      return true;
+    } catch (err) {
       this.world.logger.error("存档写入失败", {
         saveId: this.saveId,
         reason,
         error: err instanceof Error ? err.stack : String(err),
       });
-    });
-    // 重置定时存档累计：立即存档已落盘，避免紧随其后的重复定时存档
-    this.sinceLastSaveMs = 0;
+      return false;
+    }
   }
 
   /**

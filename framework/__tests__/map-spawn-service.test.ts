@@ -180,8 +180,10 @@ describe("spawn service（真实配置）", () => {
     const sim2 = await createGameSimulation(gameDef, { repository: repo, saveId: "spawn-roundtrip" });
     const world2 = (sim2 as unknown as { world: GameWorld }).world;
 
-    // 复用绑定：返回 networkId 必是存档玩家之一（新创建会拿到更大的 nextNetworkId）
-    const reboundNet = sim2.addPlayer("s-roundtrip-2").networkId;
+    // 复用绑定：出示存档 networkId（严格匹配）→ 返回同一 networkId
+    const reboundTarget = [...savedByNetworkId.keys()][0]!;
+    const reboundNet = sim2.addPlayer("s-roundtrip-2", { networkId: reboundTarget }).networkId;
+    expect(reboundNet).toBe(reboundTarget);
     const saved = savedByNetworkId.get(reboundNet)!;
     const eid2 = eidByNetworkId(world2, reboundNet);
 

@@ -63,6 +63,53 @@ function dialogueTreeOf(world: GameWorld, treeId: string): DialogueTreeJson | un
   return world.gameDef.dialoguesByKind?.get(treeId);
 }
 
+/** 对话距离的单一配置来源：rules/dialogue.json 的 talkRange（缺省 48）。 */
+export function dialogueTalkRange(world: GameWorld, range?: number): number {
+  const rules = world.gameDef.resolvedRules["dialogue"] as DialogueRule | undefined;
+  return rules?.talkRange ?? range ?? DEFAULT_TALK_RANGE;
+}
+
+/**
+ * 对话对象可达性复核（start/advance 共用）：同图 + NPC 存活 + 同层射程内。
+ * 每次推进都重新求值——NPC 走远/死亡/换图后旧会话不可继续（防远距离交易/交任务）。
+ */
+function isDialogueNpcReachable(
+  world: GameWorld,
+  playerEid: EntityId,
+  npcEid: EntityId,
+  range?: number,
+): boolean {
+  if (!hasComponent(world, playerEid, Transform)) return false;
+  if (!hasComponent(world, npcEid, Transform)) return false;
+  if (entityMapOf(world, playerEid) !== entityMapOf(world, npcEid)) return false;
+  // 存活：带 Health 且当前值 ≤ 0 视为死亡；无 Health 的对话源按存活处理
+  if (hasComponent(world, npcEid, Health) && (Health.current[npcEid] ?? 0) <= 0) return false;
+
+  const talkRange = dialogueTalkRange(world, range);
+  return isGameplayReachable(
+    { x: Transform.x[playerEid], y: Transform.y[playerEid], level: entityLevelOf(playerEid) },
+    { x: Transform.x[npcEid], y: Transform.y[npcEid], level: entityLevelOf(npcEid) },
+    talkRange,
+  );
+}
+
+/**
+ * 解析会话中的 NPC 实体：优先用会话创建时记录的 eid（同进程内稳定），并用
+ * networkId 复核防 eid 复用错绑；旧会话/手工构造无 npcEid 时回退 networkId 查找。
+ */
+function resolveDialogueNpc(world: GameWorld, dlg: { npcId: number; npcEid?: number }): EntityId {
+  const direct = dlg.npcEid;
+  if (
+    typeof direct === "number" &&
+    direct >= 0 &&
+    hasComponent(world, direct, NetworkId) &&
+    NetworkId.value[direct] === dlg.npcId
+  ) {
+    return direct;
+  }
+  return findNpcByNetworkId(world, dlg.npcId);
+}
+
 /** 打开对话：玩家与 npcEid（须带 DialogueSource）建立会话（超范围/跨图/无树/死亡拒绝）。 */
 export function startDialogue(
   world: GameWorld,
@@ -73,24 +120,13 @@ export function startDialogue(
   if (!hasComponent(world, playerEid, Player)) return false;
   if ((Health.current[playerEid] ?? 0) <= 0) return false;
   if (!hasComponent(world, playerEid, Transform)) return false;
-  if (entityMapOf(world, playerEid) !== entityMapOf(world, npcEid)) return false;
 
   const src = DialogueSource[npcEid];
   if (!src || !src.treeId) return false;
 
-  // 距离校验（talk 路由同规则源；缺省 48）——统一距离检查（前置修正 4）：
-  // 同层欧氏距离，异层 NPC 不可对话
-  const rules = world.gameDef.resolvedRules["dialogue"] as DialogueRule | undefined;
-  const talkRange = rules?.talkRange ?? range ?? DEFAULT_TALK_RANGE;
-  if (
-    !isGameplayReachable(
-      { x: Transform.x[playerEid], y: Transform.y[playerEid], level: entityLevelOf(playerEid) },
-      { x: Transform.x[npcEid], y: Transform.y[npcEid], level: entityLevelOf(npcEid) },
-      talkRange,
-    )
-  ) {
-    return false;
-  }
+  // 距离校验（talk 路由同规则源：rules/dialogue.json 的 talkRange，缺省 48）：
+  // 同图 + 同层欧氏距离 + NPC 存活。
+  if (!isDialogueNpcReachable(world, playerEid, npcEid, range)) return false;
 
   const tree = dialogueTreeOf(world, src.treeId);
   if (!tree) return false;
@@ -99,6 +135,7 @@ export function startDialogue(
 
   Dialogue[playerEid] = {
     npcId: NetworkId.value[npcEid],
+    npcEid,
     treeId: tree.id,
     nodeId: tree.start,
     options: node.options.map((o) => o.label),
@@ -217,6 +254,14 @@ export function advanceDialogue(world: GameWorld, playerEid: EntityId, optionInd
   const dlg = Dialogue[playerEid];
   if (!dlg) return false;
 
+  // 每次推进都复核 NPC 可达性（同图/存活/同层射程）：NPC 走远、消失或死亡
+  // → 结束会话并拒绝推进（对话不是一次性 token，不能拿着会话远距离交易/交任务）。
+  const npcEid = resolveDialogueNpc(world, dlg);
+  if (npcEid < 0 || !isDialogueNpcReachable(world, playerEid, npcEid)) {
+    Dialogue[playerEid] = undefined;
+    return false;
+  }
+
   const tree = dialogueTreeOf(world, dlg.treeId);
   if (!tree) return false;
   const node = tree.nodes[dlg.nodeId];
@@ -236,8 +281,6 @@ export function advanceDialogue(world: GameWorld, playerEid: EntityId, optionInd
 
   // 效果失败不推进（停留在当前节点，可重试）
   if (option.effect) {
-    const npcEid = findNpcByNetworkId(world, dlg.npcId);
-    if (npcEid < 0) return false;
     if (!applyDialogueEffect(world, playerEid, npcEid, option.effect)) return false;
   }
 

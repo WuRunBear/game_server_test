@@ -31,19 +31,65 @@ const DEBUG_COLLIDERS_PUSH_INTERVAL_MS = 500;
  * 类型守卫：判断收到的消息是否为合法的 PlayerInput 格式。
  *
  * 传输层只做"字段存在 + 类型正确"的结构验证，不做游戏逻辑校验
- * （seq 去重、移动速度限制等由仿真层处理）。
+ * （seq 去重、移动速度限制等由仿真层处理）。数值必须为有限数：
+ * NaN/Infinity/非整数 seq 在此即丢弃（仿真层仍有同款权威校验）。
+ * moveX/moveY 缺省视为 0（由仿真层归一化）。
  */
 function isPlayerInput(message: unknown): message is PlayerInput {
   if (!message || typeof message !== "object") return false;
   const obj = message as Record<string, unknown>;
   return (
     typeof obj.seq === "number" &&
-    typeof obj.moveX === "number" &&
-    typeof obj.moveY === "number" &&
+    Number.isInteger(obj.seq) &&
+    obj.seq >= 0 &&
+    (obj.moveX === undefined ||
+      (typeof obj.moveX === "number" && Number.isFinite(obj.moveX))) &&
+    (obj.moveY === undefined ||
+      (typeof obj.moveY === "number" && Number.isFinite(obj.moveY))) &&
     (obj.interact === undefined || typeof obj.interact === "boolean") &&
     (obj.attack === undefined || typeof obj.attack === "boolean") &&
     (obj.talk === undefined || typeof obj.talk === "boolean")
   );
+}
+
+/** 交易数量条目浅校验（结构合法性由仿真层最终裁决）。 */
+function isTradeAmountShape(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const amount = value as Record<string, unknown>;
+  return (
+    (amount.container === "inventory" || amount.container === "ledger") &&
+    typeof amount.kind === "string" &&
+    amount.kind.length > 0 &&
+    typeof amount.count === "number" &&
+    Number.isInteger(amount.count) &&
+    amount.count > 0
+  );
+}
+
+/** 交易单方条款浅校验（party eid + give/take 条目）。 */
+function isTradePartyShape(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const party = value as Record<string, unknown>;
+  if (
+    typeof party.party !== "number" ||
+    !Number.isInteger(party.party) ||
+    party.party <= 0
+  ) {
+    return false;
+  }
+  if (
+    party.give !== undefined &&
+    (!Array.isArray(party.give) || !party.give.every(isTradeAmountShape))
+  ) {
+    return false;
+  }
+  if (
+    party.take !== undefined &&
+    (!Array.isArray(party.take) || !party.take.every(isTradeAmountShape))
+  ) {
+    return false;
+  }
+  return true;
 }
 
 /** 命令消息类型守卫：只做结构校验，游戏逻辑校验在仿真层。 */
@@ -72,10 +118,16 @@ function isPlayerCommand(message: unknown): message is PlayerCommand {
     (obj.y === undefined || typeof obj.y === "number") &&
     (obj.target === undefined || typeof obj.target === "number") &&
     (obj.option === undefined || typeof obj.option === "number") &&
-    // offer 条款结构仅做浅校验（数组形态）；条款内容合法性由仿真层服务端权威校验
-    (obj.offer === undefined || Array.isArray(obj.offer)) &&
-    (obj.offerId === undefined || typeof obj.offerId === "number") &&
-    (obj.ttlTicks === undefined || typeof obj.ttlTicks === "number")
+    // offer 条款浅校验到元素级（畸形对象直接丢弃，不抛崩）；
+    // 双人/在线玩家/归属等权威校验由仿真层完成。
+    (obj.offer === undefined ||
+      (Array.isArray(obj.offer) && obj.offer.every(isTradePartyShape))) &&
+    (obj.offerId === undefined ||
+      (typeof obj.offerId === "number" && Number.isInteger(obj.offerId))) &&
+    (obj.ttlTicks === undefined ||
+      (typeof obj.ttlTicks === "number" &&
+        Number.isInteger(obj.ttlTicks) &&
+        obj.ttlTicks >= 0))
   );
 }
 
@@ -283,6 +335,21 @@ export class GameRoom extends Room<{ state: RoomState }> {
 
     // 从 RoomState 移除玩家信息
     this.state.players.delete(client.sessionId);
+  }
+
+  /**
+   * 房间释放——无停机存档（F-08）。
+   *
+   * Colyseus 在房间真正 dispose 时调用（常驻房间由 server.gracefullyShutdown
+   * 触发；autoDispose 已禁用，不会因最后一名玩家离开而释放）。此处 **await**
+   * 仿真层 flushSave，确保进程退出/房间销毁路径上最新 tick 的世界状态已落盘，
+   * 而不是等下一次 60s 定时存档。
+   *
+   * 注意生命周期：onCreate 失败时 sim 可能尚未赋值——此时无事可做。
+   */
+  async onDispose(): Promise<void> {
+    if (!this.sim) return;
+    await this.sim.flushSave("room-dispose");
   }
 
   /**

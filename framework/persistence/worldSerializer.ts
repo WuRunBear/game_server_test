@@ -19,10 +19,11 @@
  * 4. **eid 不保真**：恢复后 eid 由 bitecs 重新分配，跨存档引用（如 Target 的 eid）
  *    一律不入存档（瞬态名单）；客户端凭 networkId 稳定追踪实体。
  */
-import { query, hasComponent } from "bitecs";
+import { query, hasComponent, addComponent } from "bitecs";
 
 import { NetworkId } from "framework/components/network";
 import { Kind } from "framework/components/kind";
+import { Offline } from "framework/components/offline";
 import { Player } from "framework/components/tags";
 import { spawnEntity } from "framework/entities/spawn";
 import { destroyEntity } from "framework/entities/destroyEntity";
@@ -54,8 +55,11 @@ import type { SerializedEntity, WorldRecord } from "framework/repository";
  * - ExpiresAt / Interval：定时器运行时状态（绝对 tick 跨存档失效），
  *   恢复后由效果/触发配置重建
  * - Projectile：投射物运行时实体（owner eid 跨存档失效），寿命短暂不入档
- * - Offline：断线保留标记（到期 tick 是会话断开时刻的运行时推导值）——读档
- *   恢复的玩家实体复用走 orphan 队列，保留语义跨存档无意义
+ *
+ * 例外：Offline（断线保留标记 + 到期绝对 tick）**入档**——重启后保留中的
+ * 玩家实体必须继续保持离线排除语义，否则会变成被饥饿/感知/袭击的幽灵玩家。
+ * 恢复出的无 Offline 玩家实体（旧档或断线前的在线实体）由 GameSimulation
+ * 在开机时统一补标记为离线保留。
  */
 const RUNTIME_ONLY_COMPONENTS = new Set([
   "Velocity",
@@ -72,7 +76,6 @@ const RUNTIME_ONLY_COMPONENTS = new Set([
   "ExpiresAt",
   "Interval",
   "Projectile",
-  "Offline",
 ]);
 
 /** 序列化单实体：遍历组件注册表，按 SoA/AoS 读当前值。 */
@@ -94,6 +97,10 @@ function serializeEntity(
     }
 
     const compObj = comp as Record<string, { [eid: number]: number }>;
+    // Offline 入档需按"实际挂载"判定：bitecs legacy 组件字段是定长 typed array，
+    // `eid in arr` 恒为 true（含从未挂载/已摘除的实体），直接按值序列化会把
+    // 所有实体都写成 Offline{untilTick:0}，恢复后下一 tick 全被清扫。
+    if (name === "Offline" && !hasComponent(world, eid, Offline)) continue;
     const values: Record<string, number> = {};
     for (const field of Object.keys(compObj)) {
       const arr = compObj[field];
@@ -167,6 +174,24 @@ function clearWorld(world: GameWorld): void {
   }
 }
 
+/**
+ * 恢复断线保留标记：Offline 随档入档（见 RUNTIME_ONLY_COMPONENTS 注释）。
+ *
+ * spawnEntity 不挂 Offline（原型配置表达不了会话事实），故按存档条目显式
+ * 补挂后再写字段；畸形 untilTick 归一为 0（下一 tick 清扫即销毁，不让坏档
+ * 留下永久幽灵实体）。
+ */
+function restoreOfflineMarker(world: GameWorld, eid: number, saved: SerializedEntity): void {
+  const raw = saved.components["Offline"];
+  if (!raw || typeof raw !== "object") return;
+  if (!hasComponent(world, eid, Offline)) {
+    addComponent(world, eid, Offline);
+  }
+  const until = (raw as { untilTick?: unknown }).untilTick;
+  Offline.untilTick[eid] =
+    typeof until === "number" && Number.isFinite(until) && until >= 0 ? Math.floor(until) : 0;
+}
+
 /** 覆写单实体的组件值（SoA 写字段，AoS 整体替换）。 */
 function applyEntityState(world: GameWorld, eid: number, saved: SerializedEntity): void {
   const registry = world.components_registry;
@@ -208,7 +233,9 @@ function applyEntityState(world: GameWorld, eid: number, saved: SerializedEntity
  * 防御畸形存档：entities 缺省/非数组按空处理（恢复出一个空世界，不抛错）；
  * 单实体 components 缺省按空对象处理。
  *
- * @returns 恢复出的玩家实体 eid 列表（供 addPlayer 复用绑定）。
+ * @returns 恢复出的玩家实体 eid 列表（GameSimulation 开机时对其中无 Offline
+ *   标记的实体统一补 marked-offline，避免旧档/在线实体变成幽灵玩家；
+ *   不再作为 addPlayer 的 FIFO 复用队列——身份复用只按 networkId 严格匹配）。
  */
 export function restoreWorld(world: GameWorld, record: WorldRecord): number[] {
   clearWorld(world);
@@ -245,6 +272,7 @@ export function restoreWorld(world: GameWorld, record: WorldRecord): number[] {
     // 归属恢复：spawnEntity 先写默认图，随后的 applyEntityState 用存档
     // components["EntityMap"]（AoS 自动入档）整体覆写——存档值胜出。
     const eid = spawnEntity(world, archetype, world.components_registry);
+    restoreOfflineMarker(world, eid, saved);
     applyEntityState(world, eid, saved);
     NetworkId.value[eid] = saved.networkId;
     eidByNetworkId.set(saved.networkId, eid);

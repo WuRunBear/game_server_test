@@ -148,7 +148,7 @@ describe("A. 离线燃料快进", () => {
     const def = fuelDef();
     const sim1 = await createGameSimulation(def);
     const world1 = simWorld(sim1);
-    sim1.addPlayer("s1");
+    const nid = sim1.addPlayer("s1").networkId;
     const player = playerEidOf(world1);
     Inventory[player] = { capacity: 4, slots: [{ kind: "raw", count: 5 }, null, null, null] };
     spawnLamp(world1, 1000);
@@ -156,7 +156,7 @@ describe("A. 离线燃料快进", () => {
     const record = serializeWorld(world1, "fuel");
     const sim2 = await loadWithOfflineTicks(def, record, 2000);
     const world2 = simWorld(sim2);
-    sim2.addPlayer("s2");
+    sim2.addPlayer("s2", { networkId: nid });
 
     const lamp = findEidByKind(world2, "lamp");
     expect(LightSource.fuelRemainingMs[lamp]).toBe(0);
@@ -169,7 +169,7 @@ describe("A. 离线燃料快进", () => {
     const def = fuelDef();
     const sim1 = await createGameSimulation(def);
     const world1 = simWorld(sim1);
-    sim1.addPlayer("s1");
+    const nid = sim1.addPlayer("s1").networkId;
     const player = playerEidOf(world1);
     Inventory[player] = { capacity: 4, slots: [{ kind: "raw", count: 3 }, null, null, null] };
     spawnLamp(world1, 5000);
@@ -177,7 +177,7 @@ describe("A. 离线燃料快进", () => {
     const record = serializeWorld(world1, "fuel");
     const sim2 = await loadWithOfflineTicks(def, record, 10);
     const world2 = simWorld(sim2);
-    sim2.addPlayer("s2");
+    sim2.addPlayer("s2", { networkId: nid });
 
     const lamp = findEidByKind(world2, "lamp");
     expect(LightSource.fuelRemainingMs[lamp]).toBe(4000);
@@ -257,7 +257,7 @@ describe("B. 延时制作任务入档", () => {
     // 零离线读档：任务恢复，已扣材料不回吐、产出未生成
     const sim2 = await loadWithOfflineTicks(def, record, 0);
     const world2 = simWorld(sim2);
-    sim2.addPlayer("s2");
+    sim2.addPlayer("s2", { networkId: ownerNetworkId });
     const player2 = playerEidOf(world2);
     expect(inventoryCount(world2, player2, "m")).toBe(3);
     expect(inventoryCount(world2, player2, "out")).toBe(0);
@@ -274,23 +274,23 @@ describe("B. 延时制作任务入档", () => {
   });
 
   it("离线补差跨过完成点：恢复时直接结算产出（与在线同款 stepCraftingJobs）", async () => {
-    const { def, record } = await startSlowCraft();
+    const { def, record, ownerNetworkId } = await startSlowCraft();
 
     const sim2 = await loadWithOfflineTicks(def, record, 40);
     const world2 = simWorld(sim2);
     expect(world2.time.tick).toBe(record.tick + 40);
-    sim2.addPlayer("s2");
+    sim2.addPlayer("s2", { networkId: ownerNetworkId });
     const player2 = playerEidOf(world2);
     expect(inventoryCount(world2, player2, "out")).toBe(1);
     expect(craftingProgressOf(world2, player2)).toEqual([]);
   });
 
   it("恢复后取消退料语义仍可用（材料退回背包，任务清空）", async () => {
-    const { def, record } = await startSlowCraft();
+    const { def, record, ownerNetworkId } = await startSlowCraft();
 
     const sim2 = await loadWithOfflineTicks(def, record, 5);
     const world2 = simWorld(sim2);
-    sim2.addPlayer("s2");
+    sim2.addPlayer("s2", { networkId: ownerNetworkId });
     const player2 = playerEidOf(world2);
     expect(craftingProgressOf(world2, player2).length).toBe(1);
     expect(sim2.submitCommand("s2", { type: "craft-cancel", recipe: "slow" })).toBe(true);
@@ -299,12 +299,12 @@ describe("B. 延时制作任务入档", () => {
   });
 
   it("旧档缺 craftingJobs 字段：按空表恢复（不抛错）", async () => {
-    const { def, record } = await startSlowCraft();
+    const { def, record, ownerNetworkId } = await startSlowCraft();
     const legacy = { ...record, craftingJobs: undefined } as WorldRecord;
 
     const sim2 = await loadWithOfflineTicks(def, legacy, 0);
     const world2 = simWorld(sim2);
-    sim2.addPlayer("s2");
+    sim2.addPlayer("s2", { networkId: ownerNetworkId });
     expect(craftingProgressOf(world2, playerEidOf(world2))).toEqual([]);
     expect(world2.craftingJobs.size).toBe(0);
   });
@@ -365,7 +365,7 @@ describe("C/D. Progression 与 Achievements 同步", () => {
     const record = serializeWorld(world, "progress");
     const sim2 = await loadWithOfflineTicks(def, record, 0);
     const world2 = simWorld(sim2);
-    sim2.addPlayer("s2");
+    sim2.addPlayer("s2", { networkId });
     const restored = Progression[playerEidOf(world2)] as ProgressionState;
     expect(restored).toEqual({
       totalXp: 1234,

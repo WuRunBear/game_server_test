@@ -5,7 +5,7 @@ import { sameLevelDistance } from "framework/utils/gameplayDistance";
 import type { GameWorld } from "world";
 import { harvest, hasRequiredTool } from "framework/systems/gameplay/gatheringSystem";
 import { attackTarget } from "framework/systems/gameplay/combatSystem";
-import { startDialogue } from "framework/systems/gameplay/dialogueSystem";
+import { startDialogue, dialogueTalkRange } from "framework/systems/gameplay/dialogueSystem";
 import { awardHarvestXp } from "framework/systems/gameplay/progression";
 
 interface SystemConfig {
@@ -117,6 +117,10 @@ export function createInteractionSystem(config?: Record<string, unknown>) {
           attackTarget(world, playerEid, nearestEid);
         }
       } else if (intent === "talk") {
+        // 对话半径单一来源：rules/dialogue.json 的 talkRange（缺省 48）。
+        // interaction.range 只约束 interact/attack，避免"talkRange 48 被
+        // interaction.range 24 屏蔽"的两套半径问题。
+        const talkRange = dialogueTalkRange(world);
         let nearestEid = -1;
         let nearestDist = Infinity;
         for (const npcEid of query(world, [NPC, Transform])) {
@@ -131,7 +135,7 @@ export function createInteractionSystem(config?: Record<string, unknown>) {
             entityLevelOf(npcEid),
           );
           if (d === undefined) continue;
-          if (d <= range && d < nearestDist) {
+          if (d <= talkRange && d < nearestDist) {
             nearestEid = npcEid;
             nearestDist = d;
           }

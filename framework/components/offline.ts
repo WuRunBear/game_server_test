@@ -1,5 +1,5 @@
 /**
- * Offline 组件：断线保留标记（SoA，瞬态——不入存档）。
+ * Offline 组件：断线保留标记（SoA，**入档**——保留语义跨重启有效）。
  *
  * 玩家会话断开时，仿真层不立即销毁实体，而是挂上本组件并写入到期 tick：
  * 保留期内实体继续存在于 ECS（进度不丢、重连可复用），但对同步与玩法系统
@@ -8,11 +8,13 @@
  *
  * 生命周期：
  * - 挂载：removePlayer（保留时长来自 rules/server.json 的 offlineRetentionTicks）
- * - 摘除：addPlayer 复用该实体时（重连恢复会话）
+ * - 摘除：addPlayer 按客户端自报 networkId 命中该实体时（重连恢复会话）
  * - 到期：仿真层每 tick 清扫点销毁实体并触发一次立即存档
  *
- * 瞬态原因：保留是"会话断开"这一运行时事实，跨存档无意义——读档路径的
- * 玩家实体复用走 orphan 队列（restoreWorld 返回值），无需保留标记参与。
+ * 入档原因：重启后保留中的玩家实体若丢标记，会重新进入饥饿/感知/袭击/同步，
+ * 成为"幽灵玩家"；读档路径显式恢复本组件并保留绝对 untilTick，到期由既有
+ * 清扫点处理。旧档（无 Offline 字段）恢复出的玩家实体由 GameSimulation 在
+ * 开机时补标记为离线保留。
  */
 import { defineComponent, Types } from "bitecs/legacy";
 import { hasComponent } from "bitecs";

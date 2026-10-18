@@ -18,7 +18,7 @@
 
 ## 1. P0 —— 服务端权威/安全（可利用）
 
-### ☐ F-01 `offer` 命令可越权搬空/销毁任意容器物品
+### ☑ F-01 `offer` 命令可越权搬空/销毁任意容器物品
 - 位置：`framework/simulation/GameSimulation.ts:629-641`、`framework/economy/offer.ts:91-95`、
   `framework/economy/settle.ts:77-124`、`framework/simulation/types.ts:91-92`、
   `framework/net/colyseus/rooms/GameRoom.ts:76`
@@ -29,7 +29,7 @@
   显式确认；禁止把非 Player 方当作自动确认方；商店走 `dialogueSystem` 专用路径。
 - 验收：新增测试——构造第三方 party 的 offer 被拒；只有双方显式确认才结算；现有经济测试零回归。
 
-### ☐ F-02 容器/对话交互缺距离与可达性复核
+### ☑ F-02 容器/对话交互缺距离与可达性复核
 - 位置：`framework/systems/gameplay/inventoryOps.ts:220-259`（`lootContainerSlot`）、
   `framework/simulation/GameSimulation.ts:593-602`、`framework/systems/gameplay/dialogueSystem.ts:216-252`
 - 问题：`transfer + target` 只校验同图，不校验距离/层；`advanceDialogue` 只在
@@ -40,7 +40,7 @@
   选项推进重新解析 NPC 实体并校验距离；对话可配置过期。
 - 验收：新增测试——隔层/超距 transfer 被拒、走远后 advanceDialogue 被拒；现有测试零回归。
 
-### ☐ F-03 断线保留实体丢 `Offline` 标记 + orphan FIFO 身份错绑
+### ☑ F-03 断线保留实体丢 `Offline` 标记 + orphan FIFO 身份错绑
 - 位置：`framework/persistence/worldSerializer.ts:57-58,139-141`、
   `framework/components/offline.ts:2`、`framework/simulation/GameSimulation.ts:417-442`
 - 问题：`Offline` 在 `RUNTIME_ONLY_COMPONENTS`，重启后恢复的玩家实体无离线标记；而序列化器
@@ -96,7 +96,7 @@
   顺带修复 `deathSystem` 重启后 0 血玩家重复生成空尸体。
 - 验收：存档→重启→容器在剩余时间内仍在、到期被清；不重复生成空容器。
 
-### ☐ F-08 无停机存档：每次重启丢 ≤60s 在线进度
+### ☑ F-08 无停机存档：每次重启丢 ≤60s 在线进度
 - 位置：`framework/net/colyseus/rooms/GameRoom.ts`（无 onDispose）、
   `framework/simulation/GameSimulation.ts:684-718`、`src/main.ts`（无 SIGTERM 处理）
 - 问题：`saveNow` 只由定时器与断线保留到期触发；进程退出无 flush，且 save 未 await。
@@ -104,7 +104,7 @@
   `removePlayer` 顺手落盘。
 - 验收：模拟 dispose 后存档包含最新 tick/实体；崩溃路径不覆盖旧档（与 F-09 配合）。
 
-### ☐ F-09 损坏存档被静默当成"无档"
+### ☑ F-09 损坏存档被静默当成"无档"
 - 位置：`framework/persistence/fileRepository.ts:53-60`
 - 问题：读取/解析错误一律 `return null`，无日志；随后开机生成新世界并可能覆盖旧档。
 - 修复方向：区分"文件不存在"（合法无档）与"解析失败"（fail-fast：抛错/拒绝启动/备份后告警）；
@@ -256,9 +256,13 @@
 - `src/network/colyseus/client-schema/schema.ts:1-9` 称"仓库无 codegen"，实际
   `node_modules/.bin/schema-codegen` 可用。处理：接 codegen 或改注释 + CI 校验生成物一致。
 
-### ☐ F-43 输入校验缺口
+### ☑ F-43 输入校验缺口
 - `GameSimulation.ts:776-789`、`GameRoom.isPlayerInput`：seq 未校验整数/有限值；无
   `maxMoveSpeed` 时 NaN 可直接进 ECS。处理：严格数值校验（finite/范围）。
+- 实施记录：seq 必须有限非负整数；moveX/moveY 缺失/null 按 0，出现时必须 finite；
+  每轴安全上限 `MAX_INPUT_AXIS = 10_000`（协议单位是像素/秒，不是 [-1,1]；速度上限
+  仍由 `maxMoveSpeed` 拒绝式校验负责）；NaN/Infinity 整条拒绝；interact/attack/talk
+  归一布尔。GameRoom 浅校验同规则。
 
 ### ☐ F-44 商店无限货架/钱箱
 - `dialogueSystem.ts:150-190`：单方 settle，无商人库存/资金；卖出物品直接消失。

@@ -1,4 +1,5 @@
 {
   "placeRange": 64,
+  "containerRange": 64,
   "gridSnap": true
 }

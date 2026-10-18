@@ -353,10 +353,10 @@ describe("per-player integration", () => {
     expect(savedByNid.get(nidB)).toBe(DEFAULT_MAP_ID);
     void eB;
 
-    // 服务端重启：repository 预载恢复（读档通道唯一化）+ addPlayer 复用绑定
+    // 服务端重启：repository 预载恢复（读档通道唯一化）+ addPlayer 按 networkId 复用绑定
     const sim2 = await createGameSimulation(def, { repository: repo, saveId: SAVE_ID });
-    expect(sim2.addPlayer("sA").networkId).toBe(nidA);
-    expect(sim2.addPlayer("sB").networkId).toBe(nidB);
+    expect(sim2.addPlayer("sA", { networkId: nidA }).networkId).toBe(nidA);
+    expect(sim2.addPlayer("sB", { networkId: nidB }).networkId).toBe(nidB);
     const restored = sim2.tick(TICK_MS);
     expect(restored.snapshot.playerMaps.get("sA")).toBe(CAVE_MAP_ID);
     expect(restored.snapshot.playerMaps.get("sB")).toBe(DEFAULT_MAP_ID);

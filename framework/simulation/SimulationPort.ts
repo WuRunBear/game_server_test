@@ -48,8 +48,8 @@ export interface SimulationPort {
    * 内部创建玩家实体（spawn "player" archetype）、分配 NetworkId，
    * 并建立 sessionId → eid 的映射，后续 submitInput 通过 sessionId 找到正确实体。
    *
-   * 复用优先级：断线保留实体（按 options.networkId 匹配，清除保留标记）→
-   * 读档恢复的 orphan 实体（FIFO）→ 新生成。
+   * 复用：断线保留实体（按 options.networkId 严格匹配且未到期，清除保留
+   * 标记）→ 否则新生成。不做 orphan FIFO 兜底（避免把旧实体绑给错误客户端）。
    *
    * @param sessionId Colyseus 连接标识
    * @param options 可选加入参数（重连复用保留实体的匹配键）
@@ -88,6 +88,17 @@ export interface SimulationPort {
    * @param command 命令数据
    */
   submitCommand(sessionId: string, command: PlayerCommand): boolean;
+
+  /**
+   * 立即落盘并等待写入完成（无停机存档）。
+   *
+   * 供传输层 `onDispose` 与进程信号停机路径调用；未接仓储/存档 id 时
+   * 返回 false（no-op）。可重复调用（幂等）。
+   *
+   * @param reason 存档触发原因（日志定位用）
+   * @returns 是否成功落盘
+   */
+  flushSave(reason?: string): Promise<boolean>;
 
   /**
    * 获取当前帧的碰撞调试快照。

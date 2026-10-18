@@ -4,6 +4,10 @@
  * 每个存档 id 对应 `<dir>/<id>.json`。写入采用「临时文件 + rename」原子替换，
  * 避免崩溃时留下半写文件；目录不存在时自动创建。
  *
+ * 读取区分「无档」与「坏档」：只有 ENOENT 返回 null（合法首次开机）；读取/
+ * 解析失败一律抛出带路径与原始原因的明确错误——进程 fail-fast，绝不把损坏
+ * 存档当成无档而用新世界覆盖它。
+ *
  * 写盘**串行化**：并发的 saveWorld 通过内部 Promise 队列排队执行——
  * 若两个存档同时写同一 id 的 tmp 文件再各自 rename，慢写者会覆盖快写者
  * （旧档覆盖新档）；排队后写入顺序即调用顺序，最终文件为最后一次调用的内容。
@@ -24,6 +28,20 @@ function safeId(id: string): string {
   const sanitized = id.replace(/[^a-zA-Z0-9._-]/g, "_");
   if (!sanitized) return "world";
   return sanitized;
+}
+
+/** 判断 Node 文件系统错误是否为指定 errno（ENOENT 等）。 */
+function isErrno(err: unknown, code: string): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as NodeJS.ErrnoException).code === code
+  );
+}
+
+/** 错误消息提取（保留原始 message 供排障，避免只给出 "Error"）。 */
+function describeError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 /**
@@ -51,12 +69,28 @@ export function createFileRepository(dir: string): Repository {
     },
 
     async loadWorld(id: string) {
+      const target = join(dir, `${safeId(id)}.json`);
+      let raw: string;
       try {
-        const raw = await readFile(join(dir, `${safeId(id)}.json`), "utf8");
+        raw = await readFile(target, "utf8");
+      } catch (err) {
+        // ENOENT = 合法无档（首次开机）；其余读取错误（权限/IO）必须 fail-fast，
+        // 否则会被误判为"无档"并以新世界覆盖掉可能完好的旧档。
+        if (isErrno(err, "ENOENT")) return null;
+        throw new Error(
+          `loadWorld("${id}") failed to read save "${target}": ${describeError(err)}`,
+          { cause: err },
+        );
+      }
+
+      try {
         return JSON.parse(raw) as WorldRecord;
-      } catch {
-        // 文件不存在/解析失败均视为无存档
-        return null;
+      } catch (err) {
+        // 解析失败 = 存档损坏：明确报错并保留原文件（绝不覆盖、绝不静默新建世界）。
+        throw new Error(
+          `loadWorld("${id}") found a corrupt save at "${target}" (${describeError(err)}); the file was left untouched`,
+          { cause: err },
+        );
       }
     },
   };
