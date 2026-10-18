@@ -5,6 +5,7 @@ import {
   Needs,
   Inventory,
   Equipment,
+  Transform,
   entityMapOf,
   type ResourceNodeState,
   type LootEntry,
@@ -15,6 +16,9 @@ import { getEquipModifiers } from "framework/systems/gameplay/equipmentSystem";
 import { wearEquippedItem } from "framework/systems/gameplay/durability";
 import { rngFrom } from "framework/simulation/rng";
 import { applyEffectSpecs } from "framework/simulation/effects/effectRegistry";
+import { EntityLevel } from "framework/components/entityLevel";
+import { walkableAtLevel } from "map/geometry/query";
+import { collectBuiltStructures } from "framework/map/runtime/builtStructures";
 import {
   StateMachine,
   FSM_SIGNAL_HARVESTED,
@@ -96,6 +100,111 @@ function rollHarvestProducts(
   return products;
 }
 
+/** 溢出掉落小幅散布半径（px）：4~12px，明显小于丢弃物的 16~24px。 */
+const HARVEST_DROP_SCATTER_MIN_PX = 4;
+const HARVEST_DROP_SCATTER_RANGE_PX = 8;
+
+/** 溢出掉落落点（像素 + 地图 key）。 */
+export interface HarvestDropPoint {
+  x: number;
+  y: number;
+  mapId: string;
+}
+
+/**
+ * 采集溢出（背包部分容纳后剩余）的掉落落点（确定性，F-19）。
+ *
+ * 锚点取**资源节点**：剩余产物是节点本轮产出的一部分，落在节点附近比落在
+ * 采集者脚下更符合语义，且不受采集者随后移动影响（节点无 Transform 时退回
+ * 采集者）。
+ *
+ * 散布流 = rngFrom(tick, actorEid, nodeEid, "harvest-drop", productKey)：同
+ * (tick, 玩家, 节点, 产物) 恒同落点；半径 4~12px（小幅，避免像丢弃物那样
+ * 飞出交互半径）。落点格按采集者层视角经 walkableAtLevel（地形 OR 同层
+ * 楼板，built 索引与碰撞/层号系统同源）校验；不可走时依次回退节点格中心、
+ * 采集者格中心（同图时）、锚点周围 4 格内最近可走格——不落到地图原点。
+ *
+ * @param world 游戏世界
+ * @param actorEid 采集者实体
+ * @param nodeEid 资源节点实体
+ * @param productKey 产物 kind（同节点多产物溢出时各占不同散布流，避免完全重叠）
+ * @returns 掉落像素坐标与所属地图 key
+ */
+export function harvestDropPosition(
+  world: GameWorld,
+  actorEid: number,
+  nodeEid: number,
+  productKey = "",
+): HarvestDropPoint {
+  const actorHasTransform = hasComponent(world, actorEid, Transform);
+  const nodeHasTransform = hasComponent(world, nodeEid, Transform);
+  if (!actorHasTransform && !nodeHasTransform) {
+    return { x: 0, y: 0, mapId: entityMapOf(world, actorEid) };
+  }
+
+  const anchorEid = nodeHasTransform ? nodeEid : actorEid;
+  const anchorX = Transform.x[anchorEid];
+  const anchorY = Transform.y[anchorEid];
+  const mapId = entityMapOf(world, anchorEid);
+  const level = EntityLevel[anchorEid] ?? EntityLevel[actorEid] ?? 0;
+  const geometry = world.maps[mapId];
+  if (!geometry) return { x: anchorX, y: anchorY, mapId };
+
+  const { width, height, tileWidth, tileHeight } = geometry.grid;
+  const built = collectBuiltStructures(world, mapId);
+  const walkableAtPx = (px: number, py: number, atLevel: number): boolean => {
+    const tx = Math.floor(px / tileWidth);
+    const ty = Math.floor(py / tileHeight);
+    if (tx < 0 || ty < 0 || tx >= width || ty >= height) return false;
+    return walkableAtLevel(geometry, tx, ty, atLevel, built);
+  };
+  /** 像素所在格的格中心（回退落点：与节点/采集者同格但不重叠）。 */
+  const tileCenter = (px: number, py: number): { x: number; y: number } => ({
+    x: (Math.floor(px / tileWidth) + 0.5) * tileWidth,
+    y: (Math.floor(py / tileHeight) + 0.5) * tileHeight,
+  });
+
+  const rng = rngFrom(world.time.tick, actorEid, nodeEid, "harvest-drop", productKey);
+  const angle = rng.next() * Math.PI * 2;
+  const dist = HARVEST_DROP_SCATTER_MIN_PX + rng.next() * HARVEST_DROP_SCATTER_RANGE_PX;
+  const dropX = anchorX + Math.cos(angle) * dist;
+  const dropY = anchorY + Math.sin(angle) * dist;
+  if (walkableAtPx(dropX, dropY, level)) return { x: dropX, y: dropY, mapId };
+
+  // 回退 1：节点（锚点）所在格中心
+  if (walkableAtPx(anchorX, anchorY, level)) {
+    const center = tileCenter(anchorX, anchorY);
+    return { ...center, mapId };
+  }
+  // 回退 2：采集者所在格中心（须同图）
+  if (actorHasTransform && entityMapOf(world, actorEid) === mapId) {
+    const actorX = Transform.x[actorEid];
+    const actorY = Transform.y[actorEid];
+    const actorLevel = EntityLevel[actorEid] ?? level;
+    if (walkableAtPx(actorX, actorY, actorLevel)) {
+      const center = tileCenter(actorX, actorY);
+      return { ...center, mapId };
+    }
+  }
+  // 回退 3：锚点周围 4 格内最近可走格（节点本身在不可走格、采集者也非可走时）
+  const anchorTx = Math.floor(anchorX / tileWidth);
+  const anchorTy = Math.floor(anchorY / tileHeight);
+  for (let radius = 1; radius <= 4; radius++) {
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+        const tx = anchorTx + dx;
+        const ty = anchorTy + dy;
+        if (tx < 0 || ty < 0 || tx >= width || ty >= height) continue;
+        if (!walkableAtLevel(geometry, tx, ty, level, built)) continue;
+        return { x: (tx + 0.5) * tileWidth, y: (ty + 0.5) * tileHeight, mapId };
+      }
+    }
+  }
+  // 最后兜底：节点原坐标（至少不再是地图原点）
+  return { x: anchorX, y: anchorY, mapId };
+}
+
 /** 对资源节点采集一次。返回是否成功（成功才扣 remaining）。 */
 export function harvest(world: GameWorld, actorEid: number, nodeEid: number): boolean {
   const nodeState = ResourceNode[nodeEid];
@@ -146,15 +255,18 @@ export function harvest(world: GameWorld, actorEid: number, nodeEid: number): bo
     if (added <= 0) continue; // 满包：该产物一点未入
     applied += 1;
     if (leftover > 0) {
-      // 部分入：剩余落到地上，避免丢失
+      // 部分入：剩余落到地上，避免丢失——落在资源节点附近（F-19），
+      // 落点经可走性校验且确定性散布，绝不再落到地图原点 (0,0)。
+      const drop = harvestDropPosition(world, actorEid, nodeEid, product.kind);
       spawnDroppedItem(
         world,
         { kind: product.kind, count: leftover },
-        0,
-        0,
+        drop.x,
+        drop.y,
         world.time.tick * world.time.fixedDtMs + DROP_PICKUP_AFTER_MS,
-        entityMapOf(world, actorEid),
-        actorEid,
+        drop.mapId,
+        nodeEid,
+        { scatter: false },
       );
     }
   }

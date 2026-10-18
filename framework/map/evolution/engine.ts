@@ -42,6 +42,7 @@ import { createLogger } from "framework/utils/logger";
 import type { GameWorld } from "framework/world";
 import type { MapGeometry } from "map/geometry/types";
 import { pickPoint, placementCandidates } from "map/evolution/placement";
+import { regionOf } from "map/geometry/query";
 import { getPopulationModel, type PopulationModel } from "map/evolution/populationModels";
 import type { DensityRule, EntityRule, ExactRule, NodeRule, TemplateRule } from "map/evolution/schema";
 import { ruleIdentity } from "map/evolution/schema";
@@ -148,10 +149,19 @@ function spawnExact(rule: ExactRule, ctx: EvolutionContext, slot: number): numbe
  * 任一非法换下一候选原点（候选序列不变，占用只过滤），候选耗尽则整组放弃
  * （永不产生半座结构）。
  *
+ * 区域归属校验（F-18）：选点池只保证**原点**属于 rule.region，模板锚点
+ * （rule.kind 条目）与伴生条目可能因偏移落出区域。countByKind 按实体中心格
+ * 的区域计数 → 落出区域的锚点永远不被计数，规则会在每个 timeSlot 反复补种
+ * （跨调用无界）。故在成组前要求**锚点及全部模板占用格**的中心格仍属
+ * rule.region（区域归属按 geometry.regionOfTile 判定；map 由 ctx 绑定，
+ * 候选只从本图采样）。不满足的候选直接跳过，与占用过滤同语义——候选序列
+ * 与槽语义不变，确定性保持。
+ *
  * 返回本槽新增的锚 kind（rule.kind）实体数 = 成组数 × 每组锚条目数。
  */
 function spawnTemplate(rule: TemplateRule, groups: number, ctx: EvolutionContext, slot: number): number {
   const anchorPerGroup = rule.template.filter((entry) => entry.kind === rule.kind).length;
+  const inRegion = (x: number, y: number): boolean => regionOf(ctx.geometry, x, y) === rule.region;
   let placed = 0;
   for (let g = 0; g < groups; g++) {
     let placedThisGroup = false;
@@ -162,7 +172,9 @@ function spawnTemplate(rule: TemplateRule, groups: number, ctx: EvolutionContext
         y: origin.y + entry.dy,
       }));
       const distinct = new Set(parts.map((p) => `${p.x},${p.y}`)).size === parts.length;
-      const allLegal = distinct && parts.every((p) => ctx.canPlace(p.kind, p.x, p.y));
+      const allLegal =
+        distinct &&
+        parts.every((p) => inRegion(p.x, p.y) && ctx.canPlace(p.kind, p.x, p.y));
       if (!allLegal) continue;
       for (const part of parts) {
         ctx.spawn(part.kind, ctx.mapKey, part.x, part.y);

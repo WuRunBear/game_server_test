@@ -185,3 +185,15 @@ export function environmentAt(world: GameWorld): EnvironmentView {
     modifiers: resolveModifiers(rule.phases[phase.phaseIndex], phase.progress),
   };
 }
+
+// 昼夜时钟（hour/phase 同为 tick 纯函数派生，与上面的相位/天气共用同一时钟源）
+export {
+  DEFAULT_DAYNIGHT_START_HOUR,
+  dayTicks,
+  getDayNightRule,
+  phaseOfHour,
+  syncTimeOfDay,
+  tickRateOf,
+  timeOfDayAt,
+  timeOfDayOf,
+} from "framework/simulation/worldClock/dayNight";

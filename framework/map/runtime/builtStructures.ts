@@ -62,6 +62,49 @@ export function emptyBuiltStructuresIndex(): BuiltStructuresIndex {
 }
 
 /**
+ * 把单个建造实体投影进索引（floors / walls / connectors）。
+ *
+ * 建造实体的层号 = 放置/生成时显式写入的 EntityLevel（entityLevelSystem
+ * 对 Structure 实体跳过推导）；无条目回退 0（配置/放置链漏写的兜底）。
+ * 同格多连接器取首个（query 顺序 = eid 序，结果确定）。
+ */
+function projectStructure(
+  index: BuiltStructuresIndex,
+  role: number,
+  level: number,
+  tileIndex: number,
+  connectLow: number,
+  connectHigh: number,
+  connectDir: number,
+  eid: number,
+): void {
+  if (role === STRUCTURE_ROLE_FLOOR) {
+    let byLevel = index.floors.get(level);
+    if (!byLevel) {
+      byLevel = new Set<number>();
+      index.floors.set(level, byLevel);
+    }
+    byLevel.add(tileIndex);
+  } else if (role === STRUCTURE_ROLE_WALL) {
+    let byLevel = index.walls.get(level);
+    if (!byLevel) {
+      byLevel = new Set<number>();
+      index.walls.set(level, byLevel);
+    }
+    byLevel.add(tileIndex);
+  } else if (role === STRUCTURE_ROLE_CONNECTOR) {
+    if (!index.connectors.has(tileIndex)) {
+      index.connectors.set(tileIndex, {
+        low: connectLow,
+        high: connectHigh,
+        dir: connectDir,
+        eid,
+      });
+    }
+  }
+}
+
+/**
  * 投影某图的建造实体为索引。
  *
  * @param world ECS 世界
@@ -78,75 +121,78 @@ export function collectBuiltStructures(world: GameWorld, mapId: string): BuiltSt
     if (entityMapOf(world, eid) !== mapId) continue;
     const role = Structure.role[eid] ?? STRUCTURE_ROLE_NONE;
     if (role === STRUCTURE_ROLE_NONE) continue;
-    // 建造实体的层号 = 放置/生成时显式写入的 EntityLevel（entityLevelSystem
-    // 对 Structure 实体跳过推导）；无条目回退 0（配置/放置链漏写的兜底）。
     const level = entityLevelOf(eid);
     const tx = Math.floor(Transform.x[eid] / tileWidth);
     const ty = Math.floor(Transform.y[eid] / tileHeight);
     if (tx < 0 || ty < 0 || tx >= width || ty >= height) continue;
-    const tileIndex = ty * width + tx;
-
-    if (role === STRUCTURE_ROLE_FLOOR) {
-      let byLevel = index.floors.get(level);
-      if (!byLevel) {
-        byLevel = new Set<number>();
-        index.floors.set(level, byLevel);
-      }
-      byLevel.add(tileIndex);
-    } else if (role === STRUCTURE_ROLE_WALL) {
-      let byLevel = index.walls.get(level);
-      if (!byLevel) {
-        byLevel = new Set<number>();
-        index.walls.set(level, byLevel);
-      }
-      byLevel.add(tileIndex);
-    } else if (role === STRUCTURE_ROLE_CONNECTOR) {
-      if (!index.connectors.has(tileIndex)) {
-        index.connectors.set(tileIndex, {
-          low: Structure.connectLow[eid] ?? 0,
-          high: Structure.connectHigh[eid] ?? 0,
-          dir: Structure.connectDir[eid] ?? CONNECTOR_DIR_UP,
-          eid,
-        });
-      }
-    }
+    projectStructure(
+      index,
+      role,
+      level,
+      ty * width + tx,
+      Structure.connectLow[eid] ?? 0,
+      Structure.connectHigh[eid] ?? 0,
+      Structure.connectDir[eid] ?? CONNECTOR_DIR_UP,
+      eid,
+    );
   }
 
   return index;
 }
 
 /**
- * 跨层转移判定的连接器查找表：mapId → (tile 线性索引 → 连接器声明)。
+ * 一次全扫把所有图的建造实体投影为按图索引（mapId → BuiltStructuresIndex）。
  *
- * 供 entityLevelSystem 每 tick 构建一次（建造实体量小，全扫可忽略）；
- * resolveEntityLevel 经回调按有效格索引查询，保持 (位置, 地图数据, 查找表)
- * 的纯函数形态。
+ * 供每 tick 需要同时读取**楼板**（层号支撑）与**连接器**（跨层转移）的系统
+ * 使用（entityLevelSystem）：单次 Structure 查询同时喂两条判定，避免逐图
+ * 重复扫描。数据源与 walkableAtLevel 的 `built` 参数完全相同（同一投影
+ * 函数），不另造索引。无建造实体的图不出现在结果中（调用方按 undefined
+ * 视作空索引）。
  */
-export function collectConnectorLookup(world: GameWorld): Map<string, Map<number, StructureConnector>> {
-  const byMap = new Map<string, Map<number, StructureConnector>>();
+export function collectBuiltStructuresByMap(world: GameWorld): Map<string, BuiltStructuresIndex> {
+  const byMap = new Map<string, BuiltStructuresIndex>();
   for (const eid of query(world, [Structure])) {
-    if ((Structure.role[eid] ?? STRUCTURE_ROLE_NONE) !== STRUCTURE_ROLE_CONNECTOR) continue;
+    const role = Structure.role[eid] ?? STRUCTURE_ROLE_NONE;
+    if (role === STRUCTURE_ROLE_NONE) continue;
     const mapId = entityMapOf(world, eid);
+    if (mapId === "") continue;
     const geometry = world.maps[mapId];
     if (!geometry) continue;
     const { width, height, tileWidth, tileHeight } = geometry.grid;
     const tx = Math.floor(Transform.x[eid] / tileWidth);
     const ty = Math.floor(Transform.y[eid] / tileHeight);
     if (tx < 0 || ty < 0 || tx >= width || ty >= height) continue;
-    const tileIndex = ty * width + tx;
-    let byTile = byMap.get(mapId);
-    if (!byTile) {
-      byTile = new Map<number, StructureConnector>();
-      byMap.set(mapId, byTile);
+
+    let index = byMap.get(mapId);
+    if (!index) {
+      index = emptyBuiltStructuresIndex();
+      byMap.set(mapId, index);
     }
-    if (!byTile.has(tileIndex)) {
-      byTile.set(tileIndex, {
-        low: Structure.connectLow[eid] ?? 0,
-        high: Structure.connectHigh[eid] ?? 0,
-        dir: Structure.connectDir[eid] ?? CONNECTOR_DIR_UP,
-        eid,
-      });
-    }
+    projectStructure(
+      index,
+      role,
+      entityLevelOf(eid),
+      ty * width + tx,
+      Structure.connectLow[eid] ?? 0,
+      Structure.connectHigh[eid] ?? 0,
+      Structure.connectDir[eid] ?? CONNECTOR_DIR_UP,
+      eid,
+    );
+  }
+  return byMap;
+}
+
+/**
+ * 跨层转移判定的连接器查找表：mapId → (tile 线性索引 → 连接器声明)。
+ *
+ * 供每 tick 只需连接器的消费方使用（entityLevelSystem 现改用
+ * collectBuiltStructuresByMap 同时取楼板与连接器）；resolveEntityLevel 经
+ * 回调按有效格索引查询，保持 (位置, 地图数据, 查找表) 的纯函数形态。
+ */
+export function collectConnectorLookup(world: GameWorld): Map<string, Map<number, StructureConnector>> {
+  const byMap = new Map<string, Map<number, StructureConnector>>();
+  for (const [mapId, index] of collectBuiltStructuresByMap(world)) {
+    if (index.connectors.size > 0) byMap.set(mapId, index.connectors);
   }
   return byMap;
 }

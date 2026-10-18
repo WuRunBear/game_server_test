@@ -23,8 +23,11 @@ import { query, hasComponent, addComponent } from "bitecs";
 
 import { NetworkId } from "framework/components/network";
 import { Kind } from "framework/components/kind";
+import { Health } from "framework/components/combat";
 import { Offline } from "framework/components/offline";
+import { Lifetime } from "framework/components/lifetime";
 import { Player } from "framework/components/tags";
+import { getRespawnMarkers } from "framework/systems/gameplay/deathSystem";
 import { spawnEntity } from "framework/entities/spawn";
 import { destroyEntity } from "framework/entities/destroyEntity";
 import { restoreCraftingJobs, serializeCraftingJobs } from "framework/systems/gameplay/craftingSystem";
@@ -36,6 +39,7 @@ import {
 } from "map/geometry/delta";
 import { terrainBaselineOf } from "map/runtime/terrainWriteback";
 import { getMapSeeds } from "map/runtime/mapSeeds";
+import { timeOfDayOf, syncTimeOfDay } from "framework/simulation/worldClock/dayNight";
 import type { GameWorld } from "framework/world";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { SerializedEntity, WorldRecord } from "framework/repository";
@@ -53,7 +57,8 @@ import type { SerializedEntity, WorldRecord } from "framework/repository";
  * - NetworkId：单独存于 SerializedEntity.networkId 字段，恢复时显式覆写，故不进组件块
  * - Dialogue：瞬态对话会话（当前对话树/节点/选项），断线重连后重置
  * - ExpiresAt / Interval：定时器运行时状态（绝对 tick 跨存档失效），
- *   恢复后由效果/触发配置重建
+ *   恢复后由效果/触发配置重建；需要跨重启存续的绝对寿命请用 **Lifetime**
+ *   （实体级持久到期 tick，随实体入档，不由本清单排除）。
  * - Projectile：投射物运行时实体（owner eid 跨存档失效），寿命短暂不入档
  *
  * 例外：Offline（断线保留标记 + 到期绝对 tick）**入档**——重启后保留中的
@@ -101,6 +106,9 @@ function serializeEntity(
     // `eid in arr` 恒为 true（含从未挂载/已摘除的实体），直接按值序列化会把
     // 所有实体都写成 Offline{untilTick:0}，恢复后下一 tick 全被清扫。
     if (name === "Offline" && !hasComponent(world, eid, Offline)) continue;
+    // Lifetime 同理：只有真正挂载了持久寿命的实体（死亡容器等）才写入档，
+    // 避免给所有实体塞一个 expiresTick:0（恢复时缺 hasComponent 也会被丢弃）。
+    if (name === "Lifetime" && !hasComponent(world, eid, Lifetime)) continue;
     const values: Record<string, number> = {};
     for (const field of Object.keys(compObj)) {
       const arr = compObj[field];
@@ -158,7 +166,9 @@ export function serializeWorld(world: GameWorld, id: string): WorldRecord {
     savedAt: Date.now(),
     tick: world.time.tick,
     nextNetworkId: world.nextNetworkId,
-    timeOfDay: { ...world.time.timeOfDay },
+    // 昼夜从 tick 现场派生（有 daynight 规则时）——存档与时钟永不漂移；
+    // 无规则世界回退缓存值（时间冻结的既有语义）。
+    timeOfDay: { ...timeOfDayOf(world) },
     maps,
     ...(mapSeeds ? { mapSeeds: { ...mapSeeds } } : {}),
     progress: { ...world.progress },
@@ -244,6 +254,9 @@ export function restoreWorld(world: GameWorld, record: WorldRecord): number[] {
   if (record.timeOfDay) {
     world.time.timeOfDay = { ...record.timeOfDay };
   }
+  // 单一时钟：有 daynight 规则时 hour/phase 从恢复后的 tick 重算（存档值仅
+  // 作为无规则世界的回退）；离线补差随后推进 tick 时由 advanceTickTo 再次重算。
+  syncTimeOfDay(world);
   world.nextNetworkId = record.nextNetworkId;
 
   // 世界进度账本：缺省（旧档）按空账本恢复；只收有限数值，畸形条目丢弃。
@@ -273,6 +286,11 @@ export function restoreWorld(world: GameWorld, record: WorldRecord): number[] {
     // components["EntityMap"]（AoS 自动入档）整体覆写——存档值胜出。
     const eid = spawnEntity(world, archetype, world.components_registry);
     restoreOfflineMarker(world, eid, saved);
+    // Lifetime 是运行时挂载的可选组件（原型不声明）：存档存在该块时先补挂，
+    // 否则 applyEntityState 的 hasComponent 守卫会丢弃到期 tick，容器变永久。
+    if (saved.components["Lifetime"] !== undefined && !hasComponent(world, eid, Lifetime)) {
+      addComponent(world, eid, Lifetime);
+    }
     applyEntityState(world, eid, saved);
     NetworkId.value[eid] = saved.networkId;
     eidByNetworkId.set(saved.networkId, eid);
@@ -286,6 +304,22 @@ export function restoreWorld(world: GameWorld, record: WorldRecord): number[] {
   // 延时制作任务：实体恢复完成后按 networkId → eid 映射重建（旧档缺字段 =
   // 空表；绝对 finishTick 已随世界时钟恢复，离线补差推进 tick 后自然到期）。
   restoreCraftingJobs(world, record.craftingJobs, eidByNetworkId);
+
+  // 重启重复死亡修复（F-32）：重生标记是运行时状态、不入档。若玩家在死亡窗口
+  // 内被存档，重启后 deathSystem 会把"0 血且无标记"再次当成首次死亡——重复
+  // 掷掉落并再生成一个空容器（背包已在首次死亡转移走）。恢复后统一补重生标记
+  // （当前 tick 即到期），首 tick 由 respawnSystem 复活；deathSystem 因已有
+  // 标记直接跳过，容器/掉落均不重复。
+  const respawnMarkers = getRespawnMarkers(world);
+  const nowMs = world.time.tick * world.time.fixedDtMs;
+  for (const eid of orphanPlayers) {
+    if (!hasComponent(world, eid, Player)) continue;
+    if (!hasComponent(world, eid, Health)) continue;
+    if ((Health.current[eid] ?? 0) > 0) continue;
+    if (!respawnMarkers.has(eid)) {
+      respawnMarkers.set(eid, { respawnAtMs: nowMs });
+    }
+  }
 
   // 全部快照图接入激活集（常驻语义：空图也活着）；仅接入已回填的键——
   // world.maps 的回填归 bootMaps，boot 丢弃的快照键（配置已删）不激活。

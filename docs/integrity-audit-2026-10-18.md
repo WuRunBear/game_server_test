@@ -57,7 +57,7 @@
 
 ## 2. P1 —— 功能缺口（文档称完成但实际不全）
 
-### ☐ F-04 双时钟错位：离线补差只推 tick，不推 `timeOfDay`
+### ☑ F-04 双时钟错位：离线补差只推 tick，不推 `timeOfDay`
 - 位置：`framework/map/runtime/clock.ts:28-32`、`framework/systems/gameplay/dayNightCycleSystem.ts:36`、
   `framework/systems/gameplay/spawnConditions.ts:125-126`、`framework/simulation/GameSimulation.ts:330-332`
 - 问题：`tick` 离线跳 1.7M，`timeOfDay` 只按 dtMs 累加；`isNight/isDay` 与客户端
@@ -66,7 +66,7 @@
 - 修复方向：删除累积式 `timeOfDay`，`hour/phase = f(tick)`（与 worldClock 同一套纯函数）。
 - 验收：离线跨 N tick 后 timeOfDay 与逐 tick 推进一致；isNight 与 environmentAt 相位一致。
 
-### ☐ F-05 楼层无"支撑"判定：走出楼板边缘继续悬空
+### ☑ F-05 楼层无"支撑"判定：走出楼板边缘继续悬空
 - 位置：`framework/systems/core/entityLevelSystem.ts:148-177`、
   `framework/map/geometry/query.ts:82-84`
 - 问题：层号只在 slope/connector/跳崖时变化；没有"脚下无地形支撑且本层无楼板则下落"。
@@ -87,7 +87,7 @@
   `Structure.role/connectDir`、`Inventory.{i}.durability`、制作任务投影；配方解锁态可选。
 - 验收：快照含新字段；client-schema 副本结构一致测试；旧客户端问题在文档标注（协议变更）。
 
-### ☐ F-07 死亡容器 TTL 依赖瞬态 timer → 重启后尸体永久存在
+### ☑ F-07 死亡容器 TTL 依赖瞬态 timer → 重启后尸体永久存在
 - 位置：`framework/systems/gameplay/deathSystem.ts:101-104`、
   `framework/persistence/worldSerializer.ts:72-73`
 - 问题：容器到期靠一次性 `ExpiresAt`，manifest 为瞬态；重启后无重建路径。
@@ -173,14 +173,14 @@
 - 修复方向：跳下时校验 cliff 语义并按层差配伤害（`damage` 效果或直接 Health 结算）。
 - 验收：从 2 层以上跳下按配置扣血；slope 下行不扣血。
 
-### ☐ F-18 template 锚点跨区域计数缺陷（ROADMAP 164）
+### ☑ F-18 template 锚点跨区域计数缺陷（ROADMAP 164）
 - 位置：`framework/map/evolution/engine.ts:153-176`、`docs/ROADMAP.md:164`
 - 问题：`spawnTemplate` 只校验偏移格可放置，不校验锚点仍属于 `rule.region`；
   `countByKind` 按区域计数 → 锚点落出区域会跨调用无界补种。
 - 修复方向：`spawnTemplate` 增加"锚点与全部占用格仍属 rule.region"校验（或按锚点区域计数）。
 - 验收：构造边界区域模板规则，多次 evolve 后数量不超过 max；现有测试零回归。
 
-### ☐ F-19 采集溢出物掉到地图原点
+### ☑ F-19 采集溢出物掉到地图原点
 - 位置：`framework/systems/gameplay/gatheringSystem.ts:148-157`
 - 问题：部分入包后剩余用 `spawnDroppedItem(...,0,0,...)`，掉到 (0,0) 而非采集者/节点位置。
 - 修复方向：使用采集者或节点坐标；不可达格时选最近可走格。
@@ -216,7 +216,7 @@
 | F-29 | `navigate.ts:151-152` | 目标格抖动绕过节流；A* 无每帧预算 | 加目标稳定阈值 + 每帧预算上限 |
 | F-30 | `GameSimulation.ts:704-718` | 自动存档在 tick 线程同步序列化全图 | 记录；后续改增量/异步 |
 | F-31 | `populationSystem.ts:239-240` | 离线不实例化 spawnInstances | 当前全关，记录 |
-| F-32 | `deathSystem.ts:141-152` | 重启后 0 血玩家重复掉落/空尸体 | 与 F-07 一并修 |
+| F-32 | `deathSystem.ts:141-152` | 重启后 0 血玩家重复掉落/空尸体 | 已随 F-07 修复：恢复时补重生标记，deathSystem 跳过 |
 | F-33 | `game/rules/dialogue.json:2` vs `game.json:44` | `talkRange:48` 被 interaction.range 24 先筛 | 统一为一个半径来源 |
 | F-34 | `game/ecosystems.json:131-136` | rocky 夜狼 `every:155520000 + isNight` 永不触发 | 调整 every 或 condition 语义 |
 | F-35 | `game/entities/campfire.json:7`、`water_pool.json:7-8` | 魔法值 1e9 / 9999 表达"近似无限" | 显式配置语义（infinite 标记） |
@@ -306,3 +306,23 @@
 - 涉及协议的批次：client-schema 副本与服务端字段逐项一致（含结构测试）。
 - 每批完成后更新本文件对应 ☐ → ☑，并在提交信息引用 F-ID。
 - 对"已声明完成"的项（F-06/F-14/F-15 等），修复后同步更新两份设计文档的实施状态。
+
+---
+
+## 7. 实施记录
+
+### 批次 A（提交 `183c3fb`，86 文件 / 1073 用例）
+- F-01 offer 只允许双方均为在线 Player，发起者在条款中，另一方显式 accept；economy 原语保留。
+- F-02 lootContainerSlot 同图/同层/距离（place.json `containerRange` 64）；Dialogue 增运行时 `npcEid`，advance 每次重校验；对话半径统一 `dialogue.talkRange`。
+- F-03 `Offline` 入档（仅实际挂载实体写字段）；取消 orphan FIFO，按 networkId 严格复用；旧档玩家补标离线保留。存档格式变更（旧档不兼容）。
+- F-08 `flushSave` + `GameRoom.onDispose` + Colyseus gracefullyShutdown（SIGINT/SIGTERM）。
+- F-09 损坏档抛错保留原文件；写入临时文件+原子 rename。
+- F-43 seq/坐标数值校验；协议单位 px/s，故每轴安全上限 10000 而非 [-1,1]，速度上限仍由 maxMoveSpeed 负责。
+
+### 批次 B（提交见 git log，88 文件 / 1095 用例）
+- F-05 `supportLevelAt`：当前层无楼板/地形支撑时回落 `max(地形层, 可站楼板层)`，只向下不向上；连接器两端视为站立面；楼板索引与 walkableAtLevel 同源。
+- F-18 `spawnTemplate` 校验模板全部条目中心格仍属 `rule.region`，越界候选整组跳过。
+- F-19 采集溢出以节点为锚 + 确定性散布（4~12px），walkable 回退链，落在节点/采集者附近。
+- F-04 新增 `worldClock/dayNight.ts` 纯函数时钟（ticksPerDay = cycleLengthSec × tickRate；tick 0 锚定 8 时），dayNightCycleSystem 只做重算写入；advanceTickTo 后同步；离线补差改为先推 tick 再 evolve（按终点相位求值）；快照 hour/phase 同源。
+- F-07 新增持久 SoA `Lifetime.expiresTick`（入档），timer 系统清扫到期容器；TTL 配置语义不变。
+- F-32 恢复出的 0 血玩家直接补重生标记，deathSystem 跳过 → 不重复掉落/不生成空容器。

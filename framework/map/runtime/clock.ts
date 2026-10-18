@@ -6,12 +6,15 @@
  * 补差引擎的 fromTick/toTick、初始年龄、离线补差全部以它为准，本模块只提供
  * 三个纯函数：advanceTickTo / computeOfflineTicks / readTick。
  *
- * 已知近似：昼夜 timeOfDay 由 dayNightCycleSystem 按 dtMs 逐 tick 推进、
- * 随存档恢复（恢复接线属后续持久化切片）；离线补差期间按恢复后的相位
- * 求值条件，不做逐时段历史相位回放——真实需求出现时再改派生式时钟。
+ * 单一时钟：tick 是唯一时钟源，昼夜 hour/phase 由 tick 纯函数派生（见
+ * worldClock/dayNight）。advanceTickTo 推进 tick 的同时重算 timeOfDay，
+ * 因此离线补差/开机初始年龄跳到边界后昼夜状态立即正确——不按 dtMs 累积、
+ * 不需要额外快进代码。离线跨度内不做逐时段历史相位回放（演化条件在补差
+ * 终点相位求值一次）。
  */
 import type { GameWorld, Tick } from "framework/world";
 import { createLogger } from "framework/utils/logger";
+import { syncTimeOfDay } from "framework/simulation/worldClock/dayNight";
 
 /** 时钟日志器（游戏无关 scope），用于离线折算截断告警。 */
 const logger = createLogger("map-clock");
@@ -22,12 +25,16 @@ const logger = createLogger("map-clock");
  * tick 是纯单调计数器，直接跳进无副作用；target 不大于当前 tick 时
  * 不回退（no-op）——单调性是补差引擎分段推演等价性的前提。
  *
+ * 推进后立即从新 tick 重算 timeOfDay（有 daynight 规则时）：昼夜与 tick
+ * 恒一致，离线补差无需额外的时钟快进代码。
+ *
  * @param world 目标世界
  * @param target 目标 tick（大于当前值才产生推进）
  */
 export function advanceTickTo(world: GameWorld, target: Tick): void {
   if (target > world.time.tick) {
     world.time.tick = target;
+    syncTimeOfDay(world);
   }
 }
 

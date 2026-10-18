@@ -5,6 +5,7 @@ import { Player } from "components";
 import type { RegistrationMetadata } from "framework/registryMetadata";
 import { assertStrictConfigSchema } from "framework/registryMetadata";
 import { environmentAt } from "framework/simulation/worldClock";
+import { timeOfDayOf } from "framework/simulation/worldClock/dayNight";
 import { getFactionRep } from "framework/systems/gameplay/factions";
 
 /**
@@ -122,8 +123,11 @@ export function hasSpawnCondition(name: string): boolean {
 
 /** 注册内建刷怪条件。由 bootstrapFramework 调用。 */
 export function registerBuiltinSpawnConditions(): void {
-  registerSpawnCondition("isNight", (world) => world.time.timeOfDay.phase === PHASE_NIGHT);
-  registerSpawnCondition("isDay", (world) => world.time.timeOfDay.phase === PHASE_DAY);
+  // 昼夜条件与 environmentAt 同源：都从 world.time.tick 现场派生（有 daynight
+  // 规则时用派生小时/相位，无规则时回退缓存），因此离线补差跳到边界后
+  // isNight/isDay 与 inPhase/isWeather 看到的是同一时刻的相位。
+  registerSpawnCondition("isNight", (world) => timeOfDayOf(world).phase === PHASE_NIGHT);
+  registerSpawnCondition("isDay", (world) => timeOfDayOf(world).phase === PHASE_DAY);
 
   // 相位/天气条件（通用名；相位/天气 id 来自 game/ 配置）：
   // 从 tick 直接派生（读缓存无必要），离线补差与在线同值。

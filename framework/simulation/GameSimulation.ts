@@ -26,6 +26,7 @@ import { deconstructEntity } from "framework/systems/gameplay/deconstructSystem"
 import { advanceDialogue } from "framework/systems/gameplay/dialogueSystem";
 import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
 import { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
+import { timeOfDayOf } from "framework/simulation/worldClock/dayNight";
 import { evolve } from "map/evolution/engine";
 import { createMapEvolveDeps } from "map/runtime/evolveDeps";
 import { mapSeedOf } from "map/runtime/mapSeeds";
@@ -336,11 +337,12 @@ export class GameSimulation implements SimulationPort {
    * 离线补差（读档路径专用，构造期执行一次）：
    * 1. 墙钟只在此读一次，computeOfflineTicks 把离线时长折算为 tick 数
    *    （超 DEFAULT_MAX_OFFLINE_TICKS 截断并告警）；
-   * 2. 对全部激活图一次性 evolve(存档tick → 存档tick+离线ticks)——与开机
+   * 2. advanceTickTo 先把 world.time.tick 推到补差边界——timeOfDay（及
+   *    environment 等 tick 派生状态）随之自动正确，无需额外时钟快进代码；
+   * 3. 对全部激活图一次性 evolve(存档tick → 存档tick+离线ticks)——与开机
    *    初始演化、每 tick 增量共用同一 evolve（D6，唯一动作不变式）；
-   * 3. 燃料闭式快进：按离线 tick 数一次性扣减（与在线逐 tick 同语义，纯计算）；
-   * 4. advanceTickTo 把 world.time.tick 推到演化边界——否则下一运行 tick
-   *    会重走离线跨度；
+   *    条件（如 isNight）在补差终点相位求值一次；
+   * 4. 状态机/族群/燃料按同一跨度闭式快进（纯计算，非逐 tick）；
    * 5. 延时制作到点结算：世界时钟已到边界，stepCraftingJobs 与在线同款
    *    （到期任务产出；满包/站点失效则挂起保留）。
    */
@@ -354,16 +356,19 @@ export class GameSimulation implements SimulationPort {
     if (offlineTicks <= 0) return;
 
     const fromTick = record.tick;
-    this.evolveMaps(fromTick, fromTick + offlineTicks);
+    const toTick = fromTick + offlineTicks;
+    // 时钟先落到边界：hour/phase 是 tick 纯函数，派生状态（timeOfDay）自动一致，
+    // 也保证离线条件求值看到的是补差终点的相位而非存档旧相位。
+    advanceTickTo(this.world, toTick);
+    this.evolveMaps(fromTick, toTick);
     // 状态机离线快进：迁移步进（非逐 tick）把全部实体状态机推到演化边界，
     // 落地「读档后状态正确恢复 + 离线等价」——与逐 tick 推进最终状态一致。
-    fastForwardStateMachines(this.world, fromTick + offlineTicks);
+    fastForwardStateMachines(this.world, toTick);
     // 族群节点离线快进：槽步进（非逐 tick）把全部节点数量推到演化边界——
     // 与逐 tick 推进最终数量/上限/最后演进 tick 完全一致（核心断言）。
-    fastForwardPopulations(this.world, fromTick + offlineTicks);
+    fastForwardPopulations(this.world, toTick);
     // 燃料离线闭式快进：离线期间燃料真实消耗（耗尽的光源/站点按既有规则失效）
     fastForwardFuelBurn(this.world, offlineTicks);
-    advanceTickTo(this.world, fromTick + offlineTicks);
     // 延时制作到点结算：任务 finishTick 为绝对 tick，推进后与在线 tick 同款结算
     stepCraftingJobs(this.world);
     this.world.logger.info("offline catch-up complete", {
@@ -935,7 +940,7 @@ export class GameSimulation implements SimulationPort {
 
     // 无同步配置 → 空快照（客户端看不到实体）
     if (this.netSyncFields.length === 0) {
-      return { tick, entities, timeOfDay: { ...this.world.time.timeOfDay }, playerMaps };
+      return { tick, entities, timeOfDay: { ...timeOfDayOf(this.world) }, playerMaps };
     }
     for (const field of this.netSyncFields) {
       const comp = this.componentRegistry.get(field.component) as
@@ -992,7 +997,7 @@ export class GameSimulation implements SimulationPort {
     return {
       tick,
       entities,
-      timeOfDay: { ...this.world.time.timeOfDay },
+      timeOfDay: { ...timeOfDayOf(this.world) },
       playerMaps,
     };
   }

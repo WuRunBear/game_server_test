@@ -165,7 +165,7 @@ export interface TickSnapshot {
    */
   entities: Map<number, EntitySnapshot>;
   /**
-   * world 级昼夜状态（dayNightCycleSystem 推进）。
+   * world 级昼夜状态（从 world.time.tick 纯函数派生）。
    * 传输层可选消费（RoomState 的 hour/phase 字段）；无配置时为 undefined。
    */
   timeOfDay?: { hour: number; phase: number };

@@ -2,7 +2,8 @@
  * 时钟适配（framework/map/runtime/clock.ts）单元测试。
  *
  * 覆盖全局游戏时刻（复用 world.time.tick，无新增时钟字段）契约：
- * - advanceTickTo：精确推进到目标且不影响 timeOfDay；target ≤ 当前 tick 不回退。
+ * - advanceTickTo：精确推进到目标；target ≤ 当前 tick 不回退。有 daynight
+ *   规则时同步重算 timeOfDay（派生时钟），无规则裸 world 保持初始值。
  * - computeOfflineTicks：按时长与 tickRate 精确折算（向下取整）；now < savedAt
  *   返回 0；超过 maxOfflineTicks 截断到上限并 warn，未超限不告警。
  * - readTick：返回当前 world.time.tick。
@@ -27,7 +28,7 @@ vi.mock("framework/utils/logger", () => ({
 }));
 
 describe("advanceTickTo", () => {
-  it("精确推进到目标 tick，且不影响 timeOfDay", () => {
+  it("精确推进到目标 tick；无 daynight 规则时不改变 timeOfDay", () => {
     const world = createGameWorld(50);
     world.time.tick = 100;
 

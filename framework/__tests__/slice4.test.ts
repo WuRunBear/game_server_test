@@ -190,35 +190,76 @@ function fillInventory(inv: InventoryEntry, entries: { kind: string; count: numb
   }
 }
 
-// 昼夜系统：hour 按 cycleLengthSec 推进，跨 nightStart/nightEnd 边界切换相位（支持跨午夜）；无规则时冻结
-describe("Slice 4：dayNightCycleSystem", () => {
+// 昼夜系统：hour/phase 从 tick 纯函数派生（每天 cycleLengthSec × tickRate tick），
+// 跨 nightStart/nightEnd 边界切换相位（支持跨午夜）；无规则时冻结
+describe("Slice 4：dayNightCycleSystem（tick 派生）", () => {
+  // 20tps × 600s = 12000 tick/天；tick 0 锚定 8 时；1 tick = 0.002 小时
+  const TICKS_PER_DAY = 12000;
+  const tickAtHour = (hour: number): number =>
+    Math.round((((hour - 8 + 24) % 24) / 24) * TICKS_PER_DAY);
+
   it("初始状态：世界从 8 时白天开始", () => {
     const world = createBareWorld();
     expect(world.time.timeOfDay.hour).toBe(8);
     expect(world.time.timeOfDay.phase).toBe(PHASE_DAY);
   });
 
-  it("hour 按 cycleLengthSec 推进；跨 19 时切夜、跨 5 时切昼（支持跨午夜）", () => {
+  it("hour 由 tick 派生；跨 19 时切夜、跨 5 时切昼（支持跨午夜）", () => {
     const world = createBareWorld();
     setDayNightRule(world, { cycleLengthSec: 600, nightStartHour: 19, nightEndHour: 5 });
 
-    // 18.99 + 100 秒（≈4 小时）→ 22.99 → 夜
-    world.time.timeOfDay.hour = 18.99;
-    world.time.dtMs = 100_000;
+    // 18.998 时 → 夜边界前最后 tick；下一 tick 19 时 → 夜
+    world.time.tick = tickAtHour(19) - 1;
     dayNightCycleSystem(world);
-    expect(world.time.timeOfDay.phase).toBe(PHASE_NIGHT);
-    expect(world.time.timeOfDay.hour).toBeCloseTo(22.99, 5);
-
-    // 3.99 + 100 秒 → 7.99（跨过 5 时）→ 昼
-    world.time.timeOfDay.hour = 3.99;
-    dayNightCycleSystem(world);
+    expect(world.time.timeOfDay.hour).toBeCloseTo(18.998, 5);
     expect(world.time.timeOfDay.phase).toBe(PHASE_DAY);
 
-    // 小时跨日取模：22 + 4 → 2（仍在夜晚区间）
-    world.time.timeOfDay.hour = 22;
+    world.time.tick = tickAtHour(19);
     dayNightCycleSystem(world);
-    expect(world.time.timeOfDay.hour).toBeCloseTo(2, 5);
+    expect(world.time.timeOfDay.hour).toBeCloseTo(19, 5);
     expect(world.time.timeOfDay.phase).toBe(PHASE_NIGHT);
+
+    // 跨午夜：0 时仍在夜晚区间（19 → 5）
+    world.time.tick = tickAtHour(0);
+    dayNightCycleSystem(world);
+    expect(world.time.timeOfDay.hour).toBeCloseTo(0, 5);
+    expect(world.time.timeOfDay.phase).toBe(PHASE_NIGHT);
+
+    // 5 时 → 天亮
+    world.time.tick = tickAtHour(5);
+    dayNightCycleSystem(world);
+    expect(world.time.timeOfDay.hour).toBeCloseTo(5, 5);
+    expect(world.time.timeOfDay.phase).toBe(PHASE_DAY);
+
+    // 跨天取模：tick 12000 回到 8 时（无累积漂移）
+    world.time.tick = TICKS_PER_DAY;
+    dayNightCycleSystem(world);
+    expect(world.time.timeOfDay.hour).toBeCloseTo(8, 8);
+    expect(world.time.timeOfDay.phase).toBe(PHASE_DAY);
+  });
+
+  it("同 tick 的 hour/phase 恒等——与 dtMs 推进路径无关（不累积）", () => {
+    const world = createBareWorld();
+    setDayNightRule(world, { cycleLengthSec: 600, nightStartHour: 19, nightEndHour: 5 });
+
+    world.time.tick = 777;
+    world.time.dtMs = 50;
+    dayNightCycleSystem(world);
+    const fromFixedDt = { ...world.time.timeOfDay };
+
+    world.time.tick = 777;
+    world.time.dtMs = 100_000; // 大 dt 不再影响相位
+    dayNightCycleSystem(world);
+    expect(world.time.timeOfDay).toEqual(fromFixedDt);
+
+    // 逐 tick 推进到 777 与单步跳到 777 完全一致
+    const stepped = createBareWorld();
+    setDayNightRule(stepped, { cycleLengthSec: 600, nightStartHour: 19, nightEndHour: 5 });
+    for (let t = 0; t <= 777; t++) {
+      stepped.time.tick = t;
+      dayNightCycleSystem(stepped);
+    }
+    expect(stepped.time.timeOfDay).toEqual(fromFixedDt);
   });
 
   it("无 daynight 规则 → no-op（时间冻结）", () => {

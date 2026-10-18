@@ -1,7 +1,10 @@
 /**
- * timerSystem：定时器 tick 体——到期/到周期触发效果引用并清理。
+ * timerSystem：定时器 tick 体——到期/到周期触发效果引用并清理，
+ * 以及持久寿命（Lifetime）到期销毁。
  *
- * 每 tick 扫描 ExpiresAt / Interval 两个 AoS 组件：
+ * 每 tick：
+ * - Lifetime（持久绝对到期 tick，入档）：`tick ≥ expiresTick` → destroyEntity
+ *   （重启后仍按原到期 tick 生效，不依赖瞬态 timer 重建）；
  * - ExpiresAt：tick ≥ expiresTick → 评估 effect（effectRegistry 求值）
  *   → 发 on-timer 事件（类型化事件总线，phase="expired"）→ 清除条目（到期清理）；
  * - Interval：tick ≥ nextTick → 评估 effect → 发 on-timer 事件（phase="interval"）
@@ -11,7 +14,10 @@
  * 无效果引用时仅发事件（供 on-timer 触发器经 Triggers 组件声明效果）。
  * 游戏无关——效果引用与周期参数全为通用机制配置。
  */
+import { query } from "bitecs";
 import type { GameWorld } from "framework/world";
+import { Lifetime } from "framework/components/lifetime";
+import { destroyEntity } from "framework/entities/destroyEntity";
 import { ExpiresAt, Interval } from "framework/simulation/timer/timer";
 import { applyEffectSpecs } from "framework/simulation/effects/effectRegistry";
 import { queueEvent } from "framework/simulation/events/eventBus";
@@ -22,6 +28,13 @@ const MAX_CATCHUP_FIRES = 64;
 /** timerSystem tick 体：检查到期/到周期 → 触发效果 → 清理。 */
 export function timerSystem(world: GameWorld): GameWorld {
   const tick = world.time.tick;
+
+  // 持久寿命：到期即销毁实体（先展开快照，边查边删不安全）。
+  // 到期 tick 随实体入档，重启后仍按原值清扫——不依赖 ExpiresAt 重建。
+  for (const eid of [...query(world, [Lifetime])]) {
+    if (tick < Lifetime.expiresTick[eid]) continue;
+    destroyEntity(world, eid);
+  }
 
   // 一次性定时器：到期触发一次并清除
   for (let eid = 0; eid < ExpiresAt.length; eid++) {

@@ -55,6 +55,7 @@ import { Intent } from "framework/components/intent";
 import { NetworkId, LastSynced } from "framework/components/network";
 import { Offline } from "framework/components/offline";
 import { Cooldown, Duration } from "framework/components/timer";
+import { Lifetime } from "framework/components/lifetime";
 import { Ledger, initLedger } from "framework/components/ledger";
 import { Projectile } from "framework/components/projectile";
 import { Modifiers } from "framework/simulation/modifiers/modifiers";
@@ -372,6 +373,10 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   });
   registry.register("Duration", Duration, {
     description: "持续时间计时：剩余毫秒，由效果等系统在运行时递减。",
+  });
+  // 实体持久寿命（SoA，入档）：绝对到期 tick，到期由 timerSystem 销毁实体
+  registry.register("Lifetime", Lifetime, {
+    description: "实体寿命：持久化的绝对到期 tick（随存档跨重启有效），到期由 timerSystem 销毁实体；未挂载 = 永不过期。",
   });
   // 计数账本（AoS，持久化）/ 投射物（SoA，瞬态）
   registry.register("Ledger", Ledger, {

@@ -6,7 +6,7 @@ import { environmentAt } from "framework/simulation/worldClock";
  *
  * 每 tick 从 `world.time.tick` + environment 规则**重算**（纯函数，无累积状态）——
  * 在线推进与离线补差得到同一结果，无需重放。未配置 environment 规则时为中性视图。
- * 不触碰既有 timeOfDay 语义（dayNightCycleSystem 仍独立推进）。
+ * 与 timeOfDay（worldClock/dayNight，同为 tick 纯函数）同源，二者不会漂移。
  */
 export function environmentSystem(world: GameWorld): GameWorld {
   world.time.environment = environmentAt(world);

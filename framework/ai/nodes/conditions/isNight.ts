@@ -4,17 +4,19 @@
  */
 import { PHASE_NIGHT } from "framework/world";
 import type { BtContext } from "framework/ai/btRunner";
+import { timeOfDayOf } from "framework/simulation/worldClock/dayNight";
 
 /**
  * condition：当前是否为夜晚相位。
  *
- * 数据源：world.time.timeOfDay.phase（dayNightCycleSystem 推进），
+ * 数据源：与 dayNightCycleSystem / isNight 刷怪条件同一个 tick 派生时钟
+ * （worldClock/dayNight；无 daynight 规则时回退 timeOfDay 缓存），
  * 按通用相位编号（PHASE_NIGHT）比较，不含游戏语义。
  */
 export function createIsNightCondition(_args?: Record<string, unknown>): () => boolean {
   return function IsNight(this: { ctx: BtContext | null }): boolean {
     const ctx = this.ctx;
     if (!ctx) return false;
-    return ctx.world.time.timeOfDay.phase === PHASE_NIGHT;
+    return timeOfDayOf(ctx.world).phase === PHASE_NIGHT;
   };
 }

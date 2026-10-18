@@ -62,6 +62,8 @@ export {
   type ExpiresAtEntry, type IntervalEntry,
 } from "framework/simulation/timer/timer";
 export { timerSystem } from "framework/simulation/timer/timerSystem";
+// 实体持久寿命（SoA，绝对到期 tick，随实体入档）
+export { Lifetime } from "framework/components/lifetime";
 
 // 修饰符（AoS 组件 + 属性合成 + 过期清理系统）
 export {
@@ -118,9 +120,14 @@ export {
   getEnvironmentRule, NEUTRAL_ENVIRONMENT,
   type EnvironmentView, type PhaseView, type TileContext, type GroundDerivationFn,
 } from "framework/simulation/worldClock";
+// 昼夜时钟（hour/phase 同为 tick 纯函数派生，与 WorldClock 同源）
+export {
+  DEFAULT_DAYNIGHT_START_HOUR, dayTicks, getDayNightRule, phaseOfHour,
+  syncTimeOfDay, tickRateOf, timeOfDayAt, timeOfDayOf,
+} from "framework/simulation/worldClock/dayNight";
 export { registerPopulationModel, getPopulationModel, listPopulationModels, registerBuiltinPopulationModels, type PopulationModel, type PopulationModelContext } from "framework/map/evolution/populationModels";
 export { sameLevelDistance, isGameplayReachable, type GameplayEndpoint, type GameplayLosCheck } from "framework/utils/gameplayDistance";
-export { collectBuiltStructures, collectConnectorLookup, floodSameLevel, getBuiltStructuresEpoch, bumpBuiltStructuresEpoch, emptyBuiltStructuresIndex, type BuiltStructuresIndex, type StructureConnector } from "framework/map/runtime/builtStructures";
+export { collectBuiltStructures, collectBuiltStructuresByMap, collectConnectorLookup, floodSameLevel, getBuiltStructuresEpoch, bumpBuiltStructuresEpoch, emptyBuiltStructuresIndex, type BuiltStructuresIndex, type StructureConnector } from "framework/map/runtime/builtStructures";
 export { spaceExposureAt, isIndoors, entitySpaceExposure, entityIsIndoors, listIndoorEntities, type SpaceExposure, type IndoorsOptions, DEFAULT_MAX_ENCLOSED_AREA } from "framework/map/runtime/indoors";
 export { placeEntity } from "framework/systems/gameplay/placeableSystem";
 export { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";

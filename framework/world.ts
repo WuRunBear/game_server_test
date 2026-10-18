@@ -61,7 +61,7 @@ export interface GameTime {
   dtMs: number;
   /** 固定步长（毫秒），来自 tickRate；dtMs 异常（0/NaN/负数/过大）时的回退值。 */
   fixedDtMs: number;
-  /** 昼夜状态，由 dayNightCycleSystem 推进（缺省配置时保持初始值）。 */
+  /** 昼夜状态（tick 纯函数派生缓存，dayNightCycleSystem 每 tick 重算写入）。 */
   timeOfDay: TimeOfDay;
   /** 环境状态（相位/天气派生缓存），由 environmentSystem 每 tick 重算。 */
   environment: EnvironmentState;

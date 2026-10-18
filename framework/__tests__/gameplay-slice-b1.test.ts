@@ -4,7 +4,7 @@
  * 覆盖：
  * ① 玩家死亡生成死亡容器（corpse 原型，Container 标签）且背包整体转移（含装备槽引用的物品）；
  * ② keepOnDeath 物品不进容器、留在玩家身上；
- * ③ 容器超时销毁且内容物消失（ExpiresAt + despawn，ttlTicks 配置驱动，0 = 永不过期）；
+ * ③ 容器超时销毁且内容物消失（持久 Lifetime 到期 tick，ttlTicks 配置驱动，0 = 永不过期）；
  * ④ transfer + target 命令通道从容器取回物品（端到端：死亡 → 重生 → 取回）；
  * ⑤ 非玩家死亡不生成容器，LootTable 落地行为不变；
  * ⑥ respawn 后 keepOnDeath 物品仍在玩家背包；
@@ -12,7 +12,7 @@
  * ⑧ 真实配置 netSync：容器背包经 Container 标签对客户端可见。
  */
 import { describe, it, expect, beforeAll } from "vitest";
-import { addComponent, addEntity, query } from "bitecs";
+import { addComponent, addEntity, hasComponent, query } from "bitecs";
 import {
   bootstrapFramework,
   createGameInstance,
@@ -24,7 +24,7 @@ import type { SimulationPort } from "simulation";
 import { deathSystem } from "framework/systems/gameplay/deathSystem";
 import { respawnSystem } from "framework/systems/gameplay/respawnSystem";
 import { timerSystem } from "framework/simulation/timer/timerSystem";
-import { ExpiresAt } from "framework/simulation/timer/timer";
+import { Lifetime } from "framework/components/lifetime";
 import type { GameWorld } from "framework/world";
 import type { ItemKindSpec } from "framework/config/schema/ItemKindSchema";
 import { Transform } from "framework/components/transform";
@@ -192,9 +192,9 @@ describe("B1：物品保留标志（keepOnDeath）", () => {
   });
 });
 
-// ③ 超时销毁：ExpiresAt + despawn，配置驱动
+// ③ 超时销毁：持久 Lifetime 绝对到期 tick，配置驱动
 describe("B1：死亡容器超时销毁", () => {
-  it("ttlTicks 到期 → despawn 销毁容器，内容物随之消失", () => {
+  it("ttlTicks 到期 → Lifetime 到期销毁容器，内容物随之消失", () => {
     const world = createBareWorld();
     ensureCorpseArchetype(world);
     world.gameDef.resolvedRules["respawn"] = {
@@ -210,8 +210,9 @@ describe("B1：死亡容器超时销毁", () => {
 
     const corpse = query(world, [Container])[0];
     expect(Inventory[corpse]!.slots[0]).toEqual({ kind: "k1", count: 7 });
-    // 一次性定时器落位：到期 tick = 1 + 5
-    expect(ExpiresAt[corpse]!.expiresTick).toBe(6);
+    // 持久绝对到期 tick：1 + 5（随实体入档，不依赖瞬态 ExpiresAt）
+    expect(hasComponent(world, corpse, Lifetime)).toBe(true);
+    expect(Lifetime.expiresTick[corpse]).toBe(6);
 
     world.time.tick = 5;
     timerSystem(world);
@@ -223,7 +224,7 @@ describe("B1：死亡容器超时销毁", () => {
     expect(Inventory[corpse]).toBeUndefined(); // AoS 残留清理（内容物消失）
   });
 
-  it("ttlTicks = 0 → 永不过期", () => {
+  it("ttlTicks = 0 → 永不过期（不挂载 Lifetime）", () => {
     const world = createBareWorld();
     ensureCorpseArchetype(world);
     world.gameDef.resolvedRules["respawn"] = {
@@ -234,7 +235,7 @@ describe("B1：死亡容器超时销毁", () => {
     spawnTestPlayer(world, { hp: 0 });
     deathSystem(world);
     const corpse = query(world, [Container])[0];
-    expect(ExpiresAt[corpse]).toBeUndefined();
+    expect(hasComponent(world, corpse, Lifetime)).toBe(false);
     world.time.tick = 999;
     timerSystem(world);
     expect(query(world, [Container]).length).toBe(1);

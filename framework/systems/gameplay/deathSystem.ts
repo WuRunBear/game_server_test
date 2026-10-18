@@ -1,5 +1,6 @@
-import { hasComponent, query } from "bitecs";
+import { hasComponent, query, addComponent } from "bitecs";
 import { Health, Player, Transform, LootTable, Kind, Inventory, entityMapOf } from "components";
+import { Lifetime } from "framework/components/lifetime";
 import {
   spawnDroppedItem,
   addToInventory,
@@ -8,8 +9,6 @@ import { destroyEntity } from "framework/entities/destroyEntity";
 import { spawnEntity } from "framework/entities/spawn";
 import { rngFrom } from "framework/simulation/rng";
 import { queueEvent } from "framework/simulation/events/eventBus";
-import { setExpiresAt } from "framework/simulation/timer/timer";
-import type { EffectSpec } from "framework/simulation/effects/effectRegistry";
 import type { RespawnRule } from "framework/config/schema/RuleSchema";
 import type { EntityId, GameWorld } from "world";
 
@@ -23,8 +22,6 @@ const DEFAULT_RESPAWN_DELAY_MS = 2000;
 const LOOT_PICKUP_DELAY_MS = 300;
 /** 死亡容器缺省存活时限（tick）：6000 ≈ 5 分钟 @20tps（rules 的 deathContainer.ttlTicks 可覆盖）。 */
 const DEFAULT_DEATH_CONTAINER_TTL_TICKS = 6000;
-/** 容器到期效果：销毁容器实体（内容物作为其 AoS 数据一并清理）。 */
-const DESPAWN_EFFECT: EffectSpec = { name: "despawn" };
 
 /** 取（或惰性创建）重生标记表：eid → 重生截止时刻（world.systemRuntimes 持久）。 */
 export function getRespawnMarkers(world: GameWorld): Map<EntityId, RespawnMarker> {
@@ -45,9 +42,10 @@ function keepOnDeathOf(world: GameWorld, kind: string): boolean {
  *
  * rules.respawn.deathContainer 声明容器原型与存活时限；缺省段 = 不生成
  * （维持无惩罚旧行为）。生成后把玩家背包整体转入容器（keepOnDeath 物品
- * 留在原槽位，装备槽引用的物品即背包槽物品、随之进容器），并按时限挂
- * 一次性定时器到期 despawn（内容物随之消失）。容器不落 LootTable、
- * 不参与战斗——它没有 Health，deathSystem 的非玩家路径天然不会碰它。
+ * 留在原槽位，装备槽引用的物品即背包槽物品、随之进容器），并写入
+ * **持久绝对到期 tick**（Lifetime 组件，随实体入档）——timerSystem 到期
+ * 销毁容器，内容物随之消失；重启后仍按原到期 tick 生效。容器不落
+ * LootTable、不参与战斗——它没有 Health，deathSystem 的非玩家路径天然不会碰它。
  *
  * 转移失败兜底：容器装不下（容量不足）时剩余物留在玩家背包，不销毁不丢地。
  */
@@ -96,10 +94,13 @@ function spawnDeathContainer(world: GameWorld, playerEid: EntityId, rules: Respa
     // leftover === stack.count → 容器已满：整槽留在玩家
   }
 
-  // 存活时限：到期经 despawn 效果销毁（0 = 永不过期；定时器为运行时瞬态）
+  // 存活时限：写入**持久绝对到期 tick**（Lifetime 入档，重启后仍按原 tick
+  // 到期销毁；timerSystem 清扫）。0 = 永不过期（不挂载组件）。
+  // 不用瞬态 ExpiresAt 定时器——它不入档，重启会丢，容器变永久。
   const ttlTicks = cfg.ttlTicks ?? DEFAULT_DEATH_CONTAINER_TTL_TICKS;
   if (ttlTicks > 0) {
-    setExpiresAt(corpseEid, world.time.tick + ttlTicks, DESPAWN_EFFECT);
+    addComponent(world, corpseEid, Lifetime);
+    Lifetime.expiresTick[corpseEid] = world.time.tick + ttlTicks;
   }
 }
 

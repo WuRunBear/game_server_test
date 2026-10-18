@@ -20,16 +20,24 @@
  *    role=connector，楼梯把「连接器格」扩展到实体侧）时候选层按其方向
  *    重定向——上行连接器把 low 层实体的候选抬到 high，下行连接器把 high
  *    层实体的候选压到 low；两端之外的实体候选不变（仍取地形层）。
- * 2. 过渡校验（候选 ≠ 当前才判定）：
+ * 2. 支撑校验（**先于**过渡校验）：求有效格在当前层「脚下」（含当前层）的
+ *    最高站立面——当前层楼板、或服务当前层的连接器、或地形层、或当前层
+ *    下方最高楼板；若最高面严格低于当前层（当前层既无同层地形/楼板，也
+ *    无连接器支撑）→ 自然下落到该面（max(地形层, ≤当前层的最高楼板层)），
+ *    不做重力/坠落伤害。只向下落：当前层低于地形层（走向高台/坡道下沿）
+ *    不「向上掉」，仍交给过渡校验。
+ *    支撑数据来自与 walkableAtLevel 的 `built` 参数同一份 BuiltStructuresIndex
+ *    投影（collectBuiltStructuresByMap），楼板拆除后下一 tick 即失去支撑。
+ * 3. 过渡校验（候选 ≠ 当前才判定）：
  *    - |Δ| = 1：必须经 slope 语义格（目标格 tiles = slope 语义 id）**或**
  *      实体侧连接器（有效格上的连接器覆盖当前层与候选层的过渡）——
  *      坡道带/连接器格两侧层号连续变化，不瞬移坐标；
  *    - Δ ≤ -2（自上而下跨崖边界）：允许（跳下，前置修正 8 的有向语义）；
  *    - 其余（低→高跨崖、无坡道的 ±1）：拒绝，保持当前层号（碰撞层已把
  *      向上路径物理封死，此处是纯函数侧的一致性防线）。
- * 3. 写回：确立（无条目 → 地形层号，含 0）与校验通过的过渡都直接写
+ * 4. 写回：确立（无条目 → 地形层号，含 0）与校验通过的过渡都直接写
  *    EntityLevel[eid]；条目存在即「已确立」，0 是普通取值（"无条目回退 0"
- *   仅覆盖从未被本系统处理过的实体）。
+ *    仅覆盖从未被本系统处理过的实体）。
  *
  * **跳过名单**：投射物（生成时锁层）；挂 Structure（role ≠ 0）的建造实体
  * ——楼板悬空于地形层之上、墙/连接器的层号在放置/生成时显式写入，地形
@@ -53,8 +61,9 @@ import {
   STRUCTURE_ROLE_CONNECTOR,
   CONNECTOR_DIR_UP,
 } from "framework/components/structure";
-import { collectConnectorLookup, type StructureConnector } from "framework/map/runtime/builtStructures";
+import { collectBuiltStructuresByMap, type BuiltStructuresIndex, type StructureConnector } from "framework/map/runtime/builtStructures";
 import { Transform } from "components";
+import type { BuiltFloorsByLevel } from "map/geometry/query";
 import type { MapGeometry } from "map/geometry/types";
 import type { GameWorld } from "world";
 
@@ -133,16 +142,59 @@ export function connectorCandidate(
 }
 
 /**
- * 解析实体在 (x, y) 处应有的层号（(位置, 地图数据, 当前层, 连接器查找) 的纯函数）。
+ * 求有效格上「当前层脚下最高站立面」；当前层无支撑时返回下方最高面。
+ *
+ * 站立面候选：
+ * - 地形层（仅当不高于当前层——高于当前层是「迎面高台」，不属于脚下支撑；
+ *   实体本来就在地形层下方是非法几何，交给过渡校验拒绝上行）；
+ * - 当前层楼板（楼板 = 可站面，实体层号即楼板层）；
+ * - 当前层下方最高楼板（多层楼板中的中间层，从更高层落下停在最近楼板）；
+ * - 有效格上服务当前层的连接器（楼梯口在两端都提供站立面，否则刚上楼的
+ *   实体下一 tick 会从「连接器的高端无楼板」直接掉回地形层）。
+ *
+ * @param geometry 地图几何数据
+ * @param index 有效格线性索引
+ * @param currentLevel 实体当前层号
+ * @param connector 有效格上的连接器声明（无则 undefined）
+ * @param built 建造层索引（floors 与 walkableAtLevel 同源；缺省只看地形）
+ * @returns 站立面层号；当前层下方无任何面（当前层低于地形层）时 undefined
+ */
+function supportLevelAt(
+  geometry: MapGeometry,
+  index: number,
+  currentLevel: number,
+  connector: StructureConnector | undefined,
+  built?: BuiltFloorsByLevel,
+): number | undefined {
+  if (connector && (connector.low === currentLevel || connector.high === currentLevel)) {
+    return currentLevel;
+  }
+  const terrain = geometry.level[index] ?? 0;
+  let support: number | undefined = terrain <= currentLevel ? terrain : undefined;
+  if (built) {
+    for (const [level, tiles] of built.floors) {
+      if (level === currentLevel && tiles.has(index)) return currentLevel;
+      if (level < currentLevel && tiles.has(index) && (support === undefined || level > support)) {
+        support = level;
+      }
+    }
+  }
+  return support;
+}
+
+/**
+ * 解析实体在 (x, y) 处应有的层号（(位置, 地图数据, 当前层, 连接器查找, 建造索引) 的纯函数）。
  *
  * 判定算法见模块注释。拒绝过渡时返回当前层号（不抛错——层号稳定性优先，
- * 非法几何由生成期校验把守，运行期只保证不振荡）。
+ * 非法几何由生成期校验把守，运行期只保证不振荡）。当前层无支撑时直接返回
+ * 下方最高站立面（自然下落，不做重力/伤害）。
  *
  * @param geometry 地图几何数据
  * @param x 实体像素 x
  * @param y 实体像素 y
  * @param currentLevel 实体当前层号（EntityLevel 已建立条目）
  * @param connectorAt 有效格索引 → 连接器声明（实体侧连接器；缺省无连接器）
+ * @param built 建造层索引（楼板支撑判定；与 walkableAtLevel 的 `built` 同源）
  * @returns 校验后的层号
  */
 export function resolveEntityLevel(
@@ -151,12 +203,21 @@ export function resolveEntityLevel(
   y: number,
   currentLevel: number,
   connectorAt?: (index: number) => StructureConnector | undefined,
+  built?: BuiltFloorsByLevel,
 ): number {
   const { level: terrainCandidate, index } = candidateLevelAt(geometry, x, y);
+  const connector = connectorAt?.(index);
+
+  // 支撑判定先于过渡：走出楼板/楼板被拆后当前层无站立面 → 落到下方最高面。
+  // 只向下（support < currentLevel）：走向更高地形时不向上“掉”，上行仍须
+  // 经 slope/连接器/向下跳崖的既有过渡规则。
+  const support = supportLevelAt(geometry, index, currentLevel, connector, built);
+  if (support !== undefined && support < currentLevel) return support;
+
   // 实体侧连接器：候选层按连接器方向重定向（上行 low→high / 下行 high→low）。
   // 重定向发生即过渡合法性——连接器只在自身方向上、对服务范围内的层号给出
   // 另一端候选（下行连接器的目标层可能恰等于地形层，仍须经连接器达成）。
-  const redirected = connectorCandidate(connectorAt?.(index), currentLevel);
+  const redirected = connectorCandidate(connector, currentLevel);
   const candidate = redirected ?? terrainCandidate;
   const viaConnector = redirected !== undefined;
   if (candidate === currentLevel) return currentLevel;
@@ -186,13 +247,14 @@ export function resolveEntityLevel(
  *   归属；未知 mapId 由碰撞侧显式抛错，本系统不重复报错）；
  * - flat 图（level 全 0）候选恒为 0，与缺省层一致即零写入——现有图零开销
  *   零回归；
- * - 连接器查找表每 tick 构建一次（Structure 实体全扫，建造实体量小）。
+ * - 连接器/楼板查找表每 tick 构建一次（Structure 实体全扫，建造实体量小；
+ *   单次投影同时供支撑判定与连接器转移使用）。
  *
  * @param world ECS World
  * @returns 处理后的 World
  */
 export function entityLevelSystem(world: GameWorld): GameWorld {
-  const connectorLookup = collectConnectorLookup(world);
+  const builtByMap: Map<string, BuiltStructuresIndex> = collectBuiltStructuresByMap(world);
 
   for (const eid of query(world, [Transform])) {
     // 投射物锁单层（前置修正 5）：层号在生成时随主人定格，飞行中不随地形变化
@@ -206,9 +268,10 @@ export function entityLevelSystem(world: GameWorld): GameWorld {
     const geometry = world.maps[mapId];
     if (!geometry) continue;
 
-    const byTile = connectorLookup.get(mapId);
-    const connectorAt = byTile
-      ? (index: number): StructureConnector | undefined => byTile.get(index)
+    const built = builtByMap.get(mapId);
+    const connectors = built?.connectors;
+    const connectorAt = connectors
+      ? (index: number): StructureConnector | undefined => connectors.get(index)
       : undefined;
 
     const stored = EntityLevel[eid];
@@ -227,6 +290,7 @@ export function entityLevelSystem(world: GameWorld): GameWorld {
       Transform.y[eid],
       stored,
       connectorAt,
+      built,
     );
     if (next !== stored) EntityLevel[eid] = next;
   }

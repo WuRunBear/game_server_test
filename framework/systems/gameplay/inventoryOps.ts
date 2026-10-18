@@ -285,10 +285,22 @@ export function lootContainerSlot(
   return true;
 }
 
+/** spawnDroppedItem 的可选行为开关。 */
+export interface SpawnDroppedItemOptions {
+  /**
+   * 是否在给定坐标附近做 16~24px 的确定性散布（缺省 true——丢弃/死亡掉落
+   * 与丢弃者/尸体重叠时防瞬捡）。调用方已算好落点（并经可走性校验）时传
+   * false，保持给定坐标不被再次扰动。
+   */
+  scatter?: boolean;
+}
+
 /** 生成一个地面 item 实体并写 ItemMeta（供 drop 与 loot 共用）。
  *
  * `sourceEid` 是丢弃/死亡来源实体，用于派生确定性散布流（tick + 来源 eid）；
  * 缺省用 -1（无来源调用）——同 tick 同来源的多次掉落共享同一条流，仍确定。
+ * `options.scatter === false` 时跳过内部散布（坐标由调用方负责，确定性流
+ * 也不消耗，保持既有缺省调用的落点序列逐位不变）。
  */
 export function spawnDroppedItem(
   world: GameWorld,
@@ -298,6 +310,7 @@ export function spawnDroppedItem(
   pickupAfterMs: number,
   mapId: string,
   sourceEid?: number,
+  options?: SpawnDroppedItemOptions,
 ): number {
   const archetypeRegistry = world.archetypes as ArchetypeRegistry;
   const componentRegistry = world.components_registry as ComponentRegistry;
@@ -305,12 +318,18 @@ export function spawnDroppedItem(
 
   // 确定性地散布到 16~24px，避免与丢弃者重叠导致瞬捡回
   // （tick + 来源 eid 派生，同世界状态恒同落点）
-  const rng = rngFrom(world.time.tick, sourceEid ?? -1, "drop");
-  const angle = rng.next() * Math.PI * 2;
-  const dist = 16 + rng.next() * 8;
+  let dropX = x;
+  let dropY = y;
+  if (options?.scatter !== false) {
+    const rng = rngFrom(world.time.tick, sourceEid ?? -1, "drop");
+    const angle = rng.next() * Math.PI * 2;
+    const dist = 16 + rng.next() * 8;
+    dropX = x + Math.cos(angle) * dist;
+    dropY = y + Math.sin(angle) * dist;
+  }
   const eid = spawnEntity(world, archetype, componentRegistry, {
-    x: x + Math.cos(angle) * dist,
-    y: y + Math.sin(angle) * dist,
+    x: dropX,
+    y: dropY,
   });
 
   EntityMap[eid] = mapId;

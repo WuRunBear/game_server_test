@@ -20,6 +20,8 @@ export { ItemMeta, type ItemMetaEntry } from "components/itemMeta";
 export { NetworkId, LastSynced } from "components/network";
 // —— 计时 ——
 export { Cooldown, Duration } from "components/timer";
+// —— 实体寿命（SoA，持久绝对到期 tick）——
+export { Lifetime } from "components/lifetime";
 // —— 计数账本 / 投射物 ——
 export { Ledger, initLedger, type LedgerRecord } from "components/ledger";
 export { Progression, initProgression, type ProgressionState, type SkillProgress } from "components/progression";
