@@ -68,9 +68,12 @@ export type WorldConfig = z.infer<typeof WorldSchema>;
 /**
  * 网络同步字段条目（game.json 的 netSync.fields[] 元素）：
  * 声明把某组件（component）的若干字段（fields）同步给客户端。
+ *
+ * `component` 通常是已注册的 SoA/AoS 组件名；另有派生投影伪组件 `"Crafting"`
+ * （world.craftingJobs 不是 ECS 组件，由 buildSnapshot 直接展平制作进度）。
  */
 export const NetSyncFieldSchema = z.object({
-  /** 要同步的组件名（SoA 组件或 AoS 组件）。 */
+  /** 要同步的组件名（SoA 组件、AoS 组件，或派生投影伪组件 "Crafting"）。 */
   component: z.string(),
   /** 要同步的字段名列表（AoS 组件按字段展平为 numbers/strings）。 */
   fields: z.array(z.string()),

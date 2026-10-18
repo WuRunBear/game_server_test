@@ -394,7 +394,7 @@ describe("C/D. Progression 与 Achievements 同步", () => {
     expect(Achievements[later]).toEqual({ unlocked: { village_friend: 1 } });
   });
 
-  it("client-schema 手动副本：字段名/顺序/类型与服务端完全一致（无 schema 字段变更）", () => {
+  it("client-schema 副本：字段名/顺序/类型与服务端完全一致（F-06 协议变更含 level）", () => {
     const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), "utf8");
 
     /** 抽取某类块内按声明顺序的 `类型:字段名` 列表（只取 @type 修饰的字段）。 */
@@ -423,12 +423,13 @@ describe("C/D. Progression 与 Achievements 同步", () => {
       );
     }
 
-    // 成长/成就只扩展动态 values key，不新增 schema 字段：
-    // values/stringValues 仍在 EntityState 的既有索引位置上。
+    // 成长/成就只扩展动态 values key；F-06 在字段末尾新增 level（既有索引不变）
+    // ——values/stringValues 仍在 EntityState 的既有索引位置上。
     expect(schemaFields(client, "EntityState")).toEqual([
       '"uint32":id',
       '{ map: "number" }:values',
       '{ map: "string" }:stringValues',
+      '"int8":level',
     ]);
   });
 });

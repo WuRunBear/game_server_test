@@ -476,6 +476,8 @@ export class GameRoom extends Room<{ state: RoomState }> {
    */
   private writeEntityState(entityState: EntityState, networkId: number, snap: EntitySnapshot): void {
     entityState.id = networkId;
+    // 层号：快照构建期由 entityLevelOf 统一写入（所有实体类型同一路径）
+    entityState.level = snap.level;
 
     const nextNumberKeys = new Set<string>();
     for (const [fieldKey, value] of Object.entries(snap.values)) {

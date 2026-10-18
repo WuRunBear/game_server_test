@@ -44,4 +44,14 @@ export class EntityState extends Schema {
    */
   @type({ map: "string" })
   stringValues = new MapSchema<string>();
+
+  /**
+   * 实体所在离散层号（来自仿真快照 EntitySnapshot.level，缺省 0）。
+   *
+   * 与 ECS `EntityLevel` 同源：多层建筑/地形上的实体（玩家、建造物、生物）
+   * 都带该值，客户端据此选择渲染层与碰撞层。字段追加在末尾，避免已有
+   * 字段索引位移（协议变更记录见 client-schema/schema.ts）。
+   */
+  @type("int8")
+  level: number = 0;
 }

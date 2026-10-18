@@ -65,14 +65,15 @@
       { "component": "Collider", "fields": ["shape", "radius"] },
       { "component": "Size", "fields": ["w", "h"] },
       { "component": "Needs", "tags": ["Player"], "fields": ["name", "current", "max"] },
-      { "component": "Inventory", "tags": ["Player"], "fields": ["slots"] },
-      { "component": "Inventory", "tags": ["Container"], "fields": ["slots"] },
-      { "component": "ItemMeta", "tags": ["Item"], "fields": ["kind", "count"] },
+      { "component": "Inventory", "tags": ["Player"], "fields": ["slots", "durability"] },
+      { "component": "Inventory", "tags": ["Container"], "fields": ["slots", "durability"] },
+      { "component": "ItemMeta", "tags": ["Item"], "fields": ["kind", "count", "durability"] },
       { "component": "ResourceNode", "tags": ["Resource"], "fields": ["remaining"] },
       { "component": "Equipment", "fields": ["weaponSlot", "toolSlot", "armorSlot"] },
       { "component": "CraftingStation", "fields": ["stationType"] },
       { "component": "LightSource", "fields": ["radius", "fuelRemainingMs"] },
       { "component": "Placeable", "fields": ["footprintW", "footprintH", "canCollide"] },
+      { "component": "Structure", "fields": ["role", "connectLow", "connectHigh", "connectDir"] },
       { "component": "GridOccupancy", "fields": ["cellX", "cellY", "cellW", "cellH"] },
       { "component": "Portal", "fields": ["targetMap", "x", "y"] },
       { "component": "Dialogue", "tags": ["Player"], "fields": ["npcId", "treeId", "nodeId", "options"] },
@@ -80,7 +81,8 @@
       { "component": "Quest", "tags": ["Player"], "fields": ["questId", "state", "count"] },
       { "component": "Relation", "tags": ["Player"], "fields": ["npcKind", "value"] },
       { "component": "Progression", "tags": ["Player"], "fields": ["totalXp", "level", "skills"] },
-      { "component": "Achievements", "tags": ["Player"], "fields": ["unlocked"] }
+      { "component": "Achievements", "tags": ["Player"], "fields": ["unlocked"] },
+      { "component": "Crafting", "tags": ["Player"], "fields": ["jobs"] }
     ]
   }
 }

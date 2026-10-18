@@ -74,7 +74,7 @@ registerAosSyncAdapter("Needs", (_world, eid, fields) => {
   return out;
 });
 
-/** 内建适配器：Inventory（按槽索引展开 kind/count，空槽占位）。 */
+/** 内建适配器：Inventory（按槽索引展开 kind/count，空槽占位；耐久按需）。 */
 registerAosSyncAdapter("Inventory", (_world, eid, fields) => {
   const out = empty();
   const inv = Inventory[eid];
@@ -85,13 +85,19 @@ registerAosSyncAdapter("Inventory", (_world, eid, fields) => {
       if (f === "slots") {
         out.strings[`Inventory.${i}.kind`] = slot ? slot.kind : "";
         out.numbers[`Inventory.${i}.count`] = slot ? slot.count : 0;
+      } else if (f === "durability") {
+        // 仅逐实例有耐久的槽位写键（无耐久的物品不增加载荷）；
+        // 空槽/无耐久槽不写 → GameRoom 的 key diff 会清掉上一帧残留
+        if (slot && typeof slot.durability === "number") {
+          out.numbers[`Inventory.${i}.durability`] = slot.durability;
+        }
       }
     }
   }
   return out;
 });
 
-/** 内建适配器：ItemMeta（地面 item 实体的 kind/count）。 */
+/** 内建适配器：ItemMeta（地面 item 实体的 kind/count/耐久）。 */
 registerAosSyncAdapter("ItemMeta", (_world, eid, fields) => {
   const out = empty();
   const meta = ItemMeta[eid];
@@ -99,6 +105,12 @@ registerAosSyncAdapter("ItemMeta", (_world, eid, fields) => {
   for (const f of fields) {
     if (f === "kind") out.strings["ItemMeta.kind"] = meta.kind;
     else if (f === "count") out.numbers["ItemMeta.count"] = meta.count;
+    else if (f === "durability") {
+      // 无耐久掉落物不写该键（与 Inventory 槽位同一最载荷规则）
+      if (typeof meta.durability === "number") {
+        out.numbers["ItemMeta.durability"] = meta.durability;
+      }
+    }
   }
   return out;
 });

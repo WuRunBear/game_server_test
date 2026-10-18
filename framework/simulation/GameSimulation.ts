@@ -19,7 +19,7 @@ import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import type { EntityId, GameWorld } from "world";
 import { consumeSlot, dropSlot, transferSlot, lootContainerSlot } from "framework/systems/gameplay/inventoryOps";
 import { equipSlot } from "framework/systems/gameplay/equipmentSystem";
-import { craftRecipe, stepCraftingJobs, cancelCrafting, validateCraftingRules } from "framework/systems/gameplay/craftingSystem";
+import { craftRecipe, stepCraftingJobs, cancelCrafting, craftingProgressOf, validateCraftingRules } from "framework/systems/gameplay/craftingSystem";
 import { stepFuelBurn, refuelStation, validateFuelRules, fastForwardFuelBurn } from "framework/systems/gameplay/fuelSystem";
 import { placeEntity } from "framework/systems/gameplay/placeableSystem";
 import { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";
@@ -38,6 +38,7 @@ import type { Repository, WorldRecord } from "framework/repository";
 import type { ServerRule } from "framework/config/schema/RuleSchema";
 import { computeInterest } from "./interest";
 import { createInputGuard, type InputGuard } from "./inputValidation";
+import { CRAFTING_SYNC_COMPONENT } from "./netSyncDerived";
 import { openOffer, acceptOffer, cancelOffer, isValidSettleTerms } from "framework/economy/offer";
 import { queueEvent } from "framework/simulation/events/eventBus";
 import { mixSeed } from "framework/simulation/rng";
@@ -943,12 +944,6 @@ export class GameSimulation implements SimulationPort {
       return { tick, entities, timeOfDay: { ...timeOfDayOf(this.world) }, playerMaps };
     }
     for (const field of this.netSyncFields) {
-      const comp = this.componentRegistry.get(field.component) as
-        | Record<string, unknown>
-        | unknown[]
-        | undefined;
-      if (!comp) continue;
-
       const ensure = (id: number, eid: number): EntitySnapshot => {
         let snap = entities.get(id);
         if (!snap) {
@@ -962,6 +957,18 @@ export class GameSimulation implements SimulationPort {
         }
         return snap;
       };
+
+      // 派生投影（非 ECS 组件）：制作进度直接从 world.craftingJobs 展平
+      if (field.component === CRAFTING_SYNC_COMPONENT) {
+        this.writeCraftingProjection(field, ensure);
+        continue;
+      }
+
+      const comp = this.componentRegistry.get(field.component) as
+        | Record<string, unknown>
+        | unknown[]
+        | undefined;
+      if (!comp) continue;
 
       if (Array.isArray(comp)) {
         // AoS 组件：通过 tags 限定查询范围，再交适配器展平为 numbers/strings
@@ -1000,6 +1007,41 @@ export class GameSimulation implements SimulationPort {
       timeOfDay: { ...timeOfDayOf(this.world) },
       playerMaps,
     };
+  }
+
+  /**
+   * 制作进度派生投影（`component: "Crafting"` netSync 条目）。
+   *
+   * `world.craftingJobs` 是运行时任务表（非 ECS 组件），这里按玩家展平为
+   * EntityState 动态 key（客户端只读，按前缀分组）：
+   * - `Crafting.<i>.recipeId`（stringValues）——配方 id
+   * - `Crafting.<i>.remainingTicks`（values）——距完成剩余 tick（0 = 到点）
+   * - `Crafting.<i>.progress`（values）——时间进度 [0,1]，挂起中恒 1
+   * - `Crafting.<i>.suspended`（values）——1 = 到点但产出条件未满足（站点
+   *   失效/满包），0 = 正常倒计时
+   *
+   * 索引 `i` 是任务表顺序（0..n-1 连续）；任务完成/取消后该条目整体消失，
+   * GameRoom 的 key diff 会清除旧键。条目命中即让实体进快照（OR 语义），
+   * 与 SoA/AoS 条目一致地受 isOfflineRetained 门控。
+   */
+  private writeCraftingProjection(
+    field: { fields: string[]; tags?: string[] },
+    ensure: (id: number, eid: number) => EntitySnapshot,
+  ): void {
+    if (!field.fields.includes("jobs")) return;
+    for (const eid of this.queryByTags(field.tags)) {
+      // 断线保留期实体不进快照（与 AoI/SoA 路径同一门控）
+      if (isOfflineRetained(this.world, eid)) continue;
+      const snap = ensure(NetworkId.value[eid], eid);
+      const jobs = craftingProgressOf(this.world, eid);
+      for (let i = 0; i < jobs.length; i++) {
+        const job = jobs[i]!;
+        snap.strings[`Crafting.${i}.recipeId`] = job.recipeId;
+        snap.values[`Crafting.${i}.remainingTicks`] = job.remainingTicks;
+        snap.values[`Crafting.${i}.progress`] = job.progress;
+        snap.values[`Crafting.${i}.suspended`] = job.remainingTicks === 0 ? 1 : 0;
+      }
+    }
   }
 
   /**

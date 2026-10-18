@@ -23,7 +23,8 @@ export interface ItemStack {
    * 当前耐久（逐实例状态）：入包时由 kind.maxDurability 初始化，装备使用磨损。
    * 仅 maxDurability 物品（加载期要求 maxStack 1，故无堆叠合并歧义）携带；
    * 缺省 = 无耐久（历史行为）或旧存档待首次磨损时按 kind 补齐。
-   * 服务端权威，不参与 Inventory 的 netSync 字段（客户端可据 kind 推断上限）。
+   * netSync 经 Inventory 适配器按槽展开为 `Inventory.<i>.durability`（仅
+   * 有耐久的槽位写键）；上限仍由客户端按 kind 推断。
    */
   durability?: number;
 }

@@ -76,7 +76,7 @@
   `max(地形层, 最高有楼板层)`；不做完整重力系统。
 - 验收：新增测试——从 L1 楼板边缘走出后落到地形层；无楼板区域不可站立；现有楼层测试零回归。
 
-### ☐ F-06 玩家可见状态未进协议
+### ☑ F-06 玩家可见状态未进协议
 - 位置：`framework/net/colyseus/state/EntityState.ts:34-49`、
   `framework/simulation/aosSyncAdapters.ts:78-92`、`game/game.json`（netSync）、
   `framework/systems/gameplay/craftingSystem.ts:476-500`
@@ -217,7 +217,7 @@
 | F-30 | `GameSimulation.ts:704-718` | 自动存档在 tick 线程同步序列化全图 | 记录；后续改增量/异步 |
 | F-31 | `populationSystem.ts:239-240` | 离线不实例化 spawnInstances | 当前全关，记录 |
 | F-32 | `deathSystem.ts:141-152` | 重启后 0 血玩家重复掉落/空尸体 | 已随 F-07 修复：恢复时补重生标记，deathSystem 跳过 |
-| F-33 | `game/rules/dialogue.json:2` vs `game.json:44` | `talkRange:48` 被 interaction.range 24 先筛 | 统一为一个半径来源 |
+| F-33 | `game/rules/dialogue.json:2` vs `game.json:44` | `talkRange:48` 被 interaction.range 24 先筛 | 已在批次 A 修复：talk 分支读 dialogue.talkRange，interaction.range 只约束 interact/attack |
 | F-34 | `game/ecosystems.json:131-136` | rocky 夜狼 `every:155520000 + isNight` 永不触发 | 调整 every 或 condition 语义 |
 | F-35 | `game/entities/campfire.json:7`、`water_pool.json:7-8` | 魔法值 1e9 / 9999 表达"近似无限" | 显式配置语义（infinite 标记） |
 | F-36 | `tools/validate.ts:26` | 打印的 12 条不是运行时规则总数（生态展开在 boot） | 文案修正或纳入展开计数 |
@@ -252,7 +252,7 @@
 - `initialAgeTicks/every=155520000/51840000`、campfire 1e9、water_pool 9999、
   `building-demo initialAgeTicks:1`——统一注释"语义=近似无限/只刷一次"，或改为显式字段。
 
-### ☐ F-42 客户端 schema 维护方式过时
+### ☑ F-42 客户端 schema 维护方式过时
 - `src/network/colyseus/client-schema/schema.ts:1-9` 称"仓库无 codegen"，实际
   `node_modules/.bin/schema-codegen` 可用。处理：接 codegen 或改注释 + CI 校验生成物一致。
 
@@ -326,3 +326,13 @@
 - F-04 新增 `worldClock/dayNight.ts` 纯函数时钟（ticksPerDay = cycleLengthSec × tickRate；tick 0 锚定 8 时），dayNightCycleSystem 只做重算写入；advanceTickTo 后同步；离线补差改为先推 tick 再 evolve（按终点相位求值）；快照 hour/phase 同源。
 - F-07 新增持久 SoA `Lifetime.expiresTick`（入档），timer 系统清扫到期容器；TTL 配置语义不变。
 - F-32 恢复出的 0 血玩家直接补重生标记，deathSystem 跳过 → 不重复掉落/不生成空容器。
+
+### 批次 C（90 文件 / 1105 用例）
+- F-06 协议补全：`EntityState` 末尾新增 `level:int8`（字段索引 3；协议变更，需升级客户端）；
+  动态 key 增补 `Structure.role/connectLow/connectHigh/connectDir`、
+  `Inventory.<i>.durability`（无耐久不写键）、`ItemMeta.durability`、
+  `Crafting.<i>.{recipeId,remainingTicks,progress,suspended}`（复用 values/stringValues，
+  不新增 PlayerState 字段；Crafting 为派生伪组件，netSyncDerived 单一名单同时服务校验与快照）。
+- F-42 schema 维护：确认 `schema-codegen RoomState.ts --ts --bundle` 可用；client-schema 副本
+  改为 codegen 产物（保留手写头），新增 `pnpm schema:gen` / `pnpm schema:check`（临时生成→
+  逐字段比较，含 CI 友好退出码）与一致性测试；移除"仓库无 codegen"的错误注释。

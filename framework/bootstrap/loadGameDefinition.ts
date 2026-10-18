@@ -37,6 +37,7 @@ import {
 import type { PlayerRule } from "framework/config/schema/PlayerRuleSchema";
 import { getRuleSchema } from "framework/config/schema/ruleSchemas";
 import { hasSpawnCondition } from "framework/systems/gameplay/spawnConditions";
+import { isDerivedNetSyncComponent } from "framework/simulation/netSyncDerived";
 import { validateProgressionConfig } from "framework/systems/gameplay/progression";
 import { compileStateMachine } from "framework/simulation/stateMachine/stateMachine";
 import { WILDERNESS } from "map/generate/blocks/climateRegions";
@@ -630,7 +631,9 @@ function validateIntegrity(data: LoadedGameDefinition): void {
     }
 
     for (const field of data.netSync?.fields ?? []) {
-      if (!componentRegistry.has(field.component)) {
+      // 派生投影伪组件（如 Crafting：world.craftingJobs 无 ECS 组件）
+      // 只校验 tags，不要求组件注册
+      if (!isDerivedNetSyncComponent(field.component) && !componentRegistry.has(field.component)) {
         throw new Error(`Component "${field.component}" referenced in netSync is not registered`);
       }
       for (const tag of field.tags ?? []) {
