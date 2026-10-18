@@ -25,6 +25,7 @@ import { NetworkId } from "framework/components/network";
 import { Kind } from "framework/components/kind";
 import { Health } from "framework/components/combat";
 import { Offline } from "framework/components/offline";
+import { Passage } from "framework/components/passage";
 import { Lifetime } from "framework/components/lifetime";
 import { Player } from "framework/components/tags";
 import { getRespawnMarkers } from "framework/systems/gameplay/deathSystem";
@@ -109,6 +110,9 @@ function serializeEntity(
     // Lifetime 同理：只有真正挂载了持久寿命的实体（死亡容器等）才写入档，
     // 避免给所有实体塞一个 expiresTick:0（恢复时缺 hasComponent 也会被丢弃）。
     if (name === "Lifetime" && !hasComponent(world, eid, Lifetime)) continue;
+    // Passage 同理：只有真正挂载的可开合屏障才写开合状态，避免给所有实体
+    // 塞一个 open:0。
+    if (name === "Passage" && !hasComponent(world, eid, Passage)) continue;
     const values: Record<string, number> = {};
     for (const field of Object.keys(compObj)) {
       const arr = compObj[field];

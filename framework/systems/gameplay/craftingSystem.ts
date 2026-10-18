@@ -22,7 +22,8 @@ import type { CraftingRecipe, EnvironmentRule } from "framework/config/schema/Ru
  *    条件不满足即拒（季节配方 = 带参条件 inPhase/isWeather 的直接消费点）
  * 3. 合成者有背包
  * 4. 站点：recipe.stationType ≠ 0 时，须在 stationRange 内有匹配类型的 CraftingStation；
- *    带 LightSource 的站点（燃料型站点）fuelRemainingMs ≤ 0 视为熄火不可用
+ *    带 LightSource 的站点（燃料型站点）在非无限燃料且 fuelRemainingMs ≤ 0
+ *    时视为熄火不可用（fuelInfinite=1 恒可用）
  * 5. 缺料：背包中每种 input 的合计数量 ≥ 需求
  * 6. 满包：dry-run 克隆槽位模拟 addToInventory，全部 output 能完整放入才继续
  *
@@ -203,11 +204,15 @@ export function craftingStationRange(world: GameWorld): number {
 /* ------------------------------------------------------------------ */
 
 /**
- * 站点是否可用：带 LightSource 的站点（燃料型站点）fuelRemainingMs ≤ 0
- * 视为熄火——不可作为合成站点，也不再是加油目标判定外的合成依据。
+ * 站点是否可用：带 LightSource 的站点（燃料型站点）在非无限燃料
+ * （fuelInfinite=0）且 fuelRemainingMs ≤ 0 时视为熄火——不可作为合成站点。
  */
 function stationUsable(world: GameWorld, eid: number): boolean {
-  if (hasComponent(world, eid, LightSource) && (LightSource.fuelRemainingMs[eid] ?? 0) <= 0) {
+  if (
+    hasComponent(world, eid, LightSource) &&
+    !LightSource.fuelInfinite[eid] &&
+    (LightSource.fuelRemainingMs[eid] ?? 0) <= 0
+  ) {
     return false;
   }
   return true;

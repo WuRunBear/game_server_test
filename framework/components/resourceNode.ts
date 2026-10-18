@@ -11,6 +11,12 @@ export interface ResourceNodeState {
   remaining: number;
   /** 上限（remaining 回满到此值）。 */
   max: number;
+  /**
+   * 无限采集语义（显式配置，替代「remaining 填极大值」的魔法值）：
+   * true 时采集不扣 remaining、不进入枯竭状态，remaining/max 仅作展示值。
+   * 缺省/未声明 = 历史有限次数语义。随 AoS 组件整体入档。
+   */
+  infinite?: boolean;
   /** 每次采集产出数量（仅单产物回退路径使用；配置 lootTable 时不参与）。 */
   amountPerHit: number;
   /** 枯竭后回满所需毫秒；0 表示不自动回满（一次性 / 常驻）。 */
@@ -49,6 +55,7 @@ export const ResourceNode = [] as (ResourceNodeState | undefined)[];
 interface ResourceNodeConfig {
   remaining?: number;
   max?: number;
+  infinite?: boolean;
   amountPerHit?: number;
   regenMs?: number;
   yieldsKind?: string;
@@ -70,6 +77,7 @@ export function initResourceNode(
   ResourceNode[eid] = {
     remaining: typeof cfg.remaining === "number" ? cfg.remaining : max,
     max,
+    infinite: cfg.infinite === true,
     amountPerHit: typeof cfg.amountPerHit === "number" && cfg.amountPerHit > 0 ? cfg.amountPerHit : 1,
     regenMs: typeof cfg.regenMs === "number" ? cfg.regenMs : 0,
     yieldsKind: String(cfg.yieldsKind ?? ""),

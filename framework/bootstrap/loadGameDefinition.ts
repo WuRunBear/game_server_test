@@ -670,8 +670,9 @@ function validateIntegrity(data: LoadedGameDefinition): void {
       }
     }
 
-    // 成长规则与经验来源引用校验（rules/progression.json 尚未注册 RuleSchema，
-    // 参数形状由 progression 模块 fail-fast；schema 形式化后置）。
+    // 成长规则与经验来源引用校验（rules/progression.json 的结构/约束已由
+    // ProgressionRuleSchema 在规则加载时校验；此处校验跨文件引用：xpValue/
+    // xpSkill 所指技能须在 skills 表中登记）。
     validateProgressionConfig(data.resolvedRules["progression"], data.resolvedEntities);
 
     // 对话树引用校验：DialogueSource 组件 treeId → 树存在；树效果 questId → 任务存在

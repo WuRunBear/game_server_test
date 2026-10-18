@@ -10,8 +10,9 @@
  *    事件——不消费，避免抢走 questSystem 的同批事件）与采集（interactionSystem
  *    在 harvest 成功后调 `awardHarvestXp`，读 ResourceNode 的 `xpValue`/`xpSkill`）。
  *
- * 规则来自 `rules/progression.json`（本 lane 未注册 RuleSchema，模块内 fail-fast
- * 校验；schema 形式化后置）：
+ * 规则来自 `rules/progression.json`（结构由 RuleSchema 的
+ * ProgressionRuleSchema 校验，见 config/schema/RuleSchema.ts；本模块负责
+ * 补缺省值与运行期解析）：
  * ```
  * {
  *   "curve": { "baseXp": 100, "growth": 1.5, "maxLevel": 20 },
@@ -27,6 +28,7 @@
  */
 import { ResourceNode, type ResourceNodeState } from "framework/components/resourceNode";
 import { Progression, type SkillProgress } from "framework/components/progression";
+import { ProgressionRuleSchema } from "framework/config/schema/RuleSchema";
 import type { ArchetypeSpec } from "framework/entities/archetypeRegistry";
 import type { GameWorld } from "framework/world";
 
@@ -89,60 +91,29 @@ export function parseProgressionRules(raw: unknown): ProgressionRules {
     progressionFail("rule document must be an object");
   }
 
-  const curveRaw = raw.curve;
-  const curve: ProgressionCurve = { ...DEFAULT_PROGRESSION_CURVE };
-  if (curveRaw !== undefined) {
-    if (!isPlainObject(curveRaw)) progressionFail("curve must be an object");
-    if (curveRaw.baseXp !== undefined) {
-      const value = curveRaw.baseXp;
-      if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-        progressionFail(`curve.baseXp must be a positive finite number, got ${String(value)}`);
-      }
-      curve.baseXp = value;
-    }
-    if (curveRaw.growth !== undefined) {
-      const value = curveRaw.growth;
-      if (typeof value !== "number" || !Number.isFinite(value) || value < 1) {
-        progressionFail(`curve.growth must be a finite number >= 1, got ${String(value)}`);
-      }
-      curve.growth = value;
-    }
-    if (curveRaw.maxLevel !== undefined) {
-      const value = curveRaw.maxLevel;
-      if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 10000) {
-        progressionFail(`curve.maxLevel must be an integer in [1, 10000], got ${String(value)}`);
-      }
-      curve.maxLevel = value;
-    }
+  // 结构/数值约束的唯一事实来源 = RuleSchema 的 ProgressionRuleSchema
+  // （validate 阶段与本模块 fail-fast 共用同一份 schema）；本函数只补缺省值。
+  const parsed = ProgressionRuleSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const path = issue.path.length > 0 ? issue.path.map(String).join(".") : "rule document";
+    progressionFail(`${path}: ${issue.message}`);
   }
 
+  const curveRaw = parsed.data.curve ?? {};
+  const curve: ProgressionCurve = {
+    baseXp: curveRaw.baseXp ?? DEFAULT_PROGRESSION_CURVE.baseXp,
+    growth: curveRaw.growth ?? DEFAULT_PROGRESSION_CURVE.growth,
+    maxLevel: curveRaw.maxLevel ?? DEFAULT_PROGRESSION_CURVE.maxLevel,
+  };
+
   const skills: Record<string, SkillBonusRule> = {};
-  const skillsRaw = raw.skills;
-  if (skillsRaw !== undefined) {
-    if (!isPlainObject(skillsRaw)) progressionFail("skills must be an object keyed by skill id");
-    for (const [skillId, ruleRaw] of Object.entries(skillsRaw)) {
-      if (skillId.length === 0) progressionFail("skills contains an empty skill id");
-      if (!isPlainObject(ruleRaw)) {
-        progressionFail(`skills.${skillId} must be an object`);
-      }
-      const stat = ruleRaw.stat;
-      if (typeof stat !== "string" || stat.length === 0) {
-        progressionFail(`skills.${skillId}.stat must be a non-empty string`);
-      }
-      const perLevel = ruleRaw.perLevel;
-      if (typeof perLevel !== "number" || !Number.isFinite(perLevel) || perLevel < 0) {
-        progressionFail(`skills.${skillId}.perLevel must be a finite number >= 0`);
-      }
-      const modeRaw = ruleRaw.mode;
-      if (modeRaw !== undefined && modeRaw !== "add" && modeRaw !== "mul") {
-        progressionFail(`skills.${skillId}.mode must be "add" or "mul"`);
-      }
-      skills[skillId] = {
-        stat,
-        perLevel,
-        mode: modeRaw === "add" ? "add" : modeRaw === "mul" ? "mul" : "add",
-      };
-    }
+  for (const [skillId, skillRaw] of Object.entries(parsed.data.skills ?? {})) {
+    skills[skillId] = {
+      stat: skillRaw.stat,
+      perLevel: skillRaw.perLevel,
+      mode: skillRaw.mode ?? "add",
+    };
   }
 
   return { curve, skills };

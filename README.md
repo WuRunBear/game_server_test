@@ -20,7 +20,7 @@ pnpm test     # 运行测试（vitest）
 
 ```bash
 pnpm tools validate                    # 校验 game/ 配置（含每图管道链与实体规则数）
-pnpm tools new-game --id my-game       # 生成 game/ + src/ 骨架
+pnpm tools new-game --id my-game       # 生成 game/ + src/ 骨架（含可通过 validate 的 pipeline 地图与出生规则）
 pnpm tools list-registries             # 列出已注册的原型/动作/系统/生成积木
 pnpm tools gen-map <mapKey> --out out/            # 生成地图（key 见 game/maps/registry.json）
 pnpm tools export-map <mapKey> --out out/ [--palette <file>]  # 导出 JSON+PNG（色表为工具参数）

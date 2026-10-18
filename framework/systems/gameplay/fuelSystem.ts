@@ -18,7 +18,9 @@ import type { GameWorld } from "world";
  * 燃料承载在既有 LightSource.fuelRemainingMs 上（字段已存在无消费者）：
  * fuelRemainingMs ≤ 0 视为熄灭——光照判定（utils/light）天然失效，
  * craftingSystem 的站点匹配将燃料型站点（带 LightSource 的 CraftingStation）
- * 视为不可用。消费闭环由此打通。
+ * 视为不可用。消费闭环由此打通。`fuelInfinite=1` 的光源显式声明无限燃料：
+ * 燃烧/离线快进均跳过（不消耗），且燃料值不影响点亮/站点可用判定；加油仍
+ * 允许（写入值不影响无限语义，保持交互入口一致）。
  *
  * 游戏无关——kind/毫秒均为通用机制词，具体燃料物与数值由 game/ 配置约定。
  * 注：燃烧在线由 GameSimulation beforeSystems 逐 tick 推进；离线补差经
@@ -81,13 +83,15 @@ export function validateFuelRules(world: GameWorld): void {
 }
 
 /**
- * 每 tick 燃烧：对全部点亮（fuelRemainingMs > 0）的 LightSource 扣除
- * burnMsPerTick（下限 0，熄灭后不再变化）。未配置 fuel 段时空转。
+ * 每 tick 燃烧：对全部点亮（fuelRemainingMs > 0）且非无限燃料
+ * （fuelInfinite=0）的 LightSource 扣除 burnMsPerTick（下限 0，熄灭后不再
+ * 变化）。未配置 fuel 段时空转。
  */
 export function stepFuelBurn(world: GameWorld): void {
   const config = resolveFuelConfig(world);
   if (!config) return;
   for (const eid of query(world, [LightSource])) {
+    if (LightSource.fuelInfinite[eid]) continue; // 无限燃料：不消耗
     const current = LightSource.fuelRemainingMs[eid] ?? 0;
     if (current <= 0) continue;
     LightSource.fuelRemainingMs[eid] = Math.max(0, current - config.burnMsPerTick);
@@ -111,6 +115,7 @@ export function fastForwardFuelBurn(world: GameWorld, elapsedTicks: number): voi
 
   const burnMs = config.burnMsPerTick * elapsedTicks;
   for (const eid of query(world, [LightSource])) {
+    if (LightSource.fuelInfinite[eid]) continue; // 无限燃料：离线也不消耗
     const current = LightSource.fuelRemainingMs[eid] ?? 0;
     if (current <= 0) continue;
     LightSource.fuelRemainingMs[eid] = Math.max(0, current - burnMs);

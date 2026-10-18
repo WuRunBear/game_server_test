@@ -128,7 +128,7 @@
   (map,rule,reason) 去重。
 - 验收：构造不可落位规则，离线补差耗时有上界、日志条数有上界。
 
-### ☐ F-12 栅栏/门不被视为 Structure：袭击免疫 + 寻路磨墙
+### ☑ F-12 栅栏/门不被视为 Structure：袭击免疫 + 寻路磨墙
 - 位置：`game/entities/fence.json`、`game/entities/door.json`、
   `framework/ai/pathfinding/astar.ts:270-275`、`framework/systems/gameplay/raidSystem.ts:163-166`
 - 问题：fence/door 有 Collider 但无 `Structure(role=wall)`、无 `Health`；A* 认为可通行，
@@ -138,7 +138,7 @@
   "有 Collider 的建造实体"。
 - 验收：袭击可破坏栅栏/门；A* 绕行不再穿栅栏；玩家可正常通行门（若保留门交互）。
 
-### ☐ F-13 多层建造内容不可达
+### ☑ F-13 多层建造内容不可达
 - 位置：`game/items/stairs_up_kit.json`、`stairs_down_kit.json`（无配方/掉落）、
   `game/entities/door.json`（无交互）、`game/entities/wall_upper.json`（零引用）
 - 问题：框架层楼层建造完成，但楼梯 kit 无获取途径；门无开关；上层墙原型未使用。
@@ -146,7 +146,7 @@
   `wall_upper`。
 - 验收：玩家可从零制作并搭出可上下的二层；门可开合（若保留）。
 
-### ☐ F-14 projectile 未启用（文档虚报"投掷矛 demo 完成"）
+### ☑ F-14 projectile 未启用（文档虚报"投掷矛 demo 完成"）
 - 位置：`framework/systems/registerBuiltinSystems.ts:216-221`、`game/game.json`、
   `docs/gameplay-v2-design.md:90,155`
 - 问题：系统已注册但未启用；无 `spawn-projectile` 引用、无投掷武器。
@@ -186,14 +186,14 @@
 - 修复方向：使用采集者或节点坐标；不可达格时选最近可走格。
 - 验收：满包采集时掉落物出现在节点附近；不再出现 (0,0) 物品。
 
-### ☐ F-20 `new-game` 脚手架产物无法通过 validate
+### ☑ F-20 `new-game` 脚手架产物无法通过 validate
 - 位置：`tools/new-game.ts:83-97`、`framework/config/schema/MapRegistrySchema.ts:51-54`、
   `README.md:23`
 - 问题：生成 `kind:"generated"/generatorId:"simple"`，schema 只接受 `pipeline|tiled`。
 - 修复方向：脚手架改为生成合法 pipeline（或 schema 支持该 kind）；README 标注状态。
 - 验收：`pnpm tools new-game` 产物 `pnpm tools validate` 通过；README 与行为一致。
 
-### ☐ F-21 规则 schema 缺口：place / progression
+### ☑ F-21 规则 schema 缺口：place / progression
 - 位置：`framework/config/schema/ruleSchemas.ts:52-64`、`game/rules/place.json`、
   `game/rules/progression.json`
 - 问题：两条规则 raw 透传无校验（progression 仅工厂期 fail-fast；place 完全无）。
@@ -218,9 +218,9 @@
 | F-31 | `populationSystem.ts:239-240` | 离线不实例化 spawnInstances | 当前全关，记录 |
 | F-32 | `deathSystem.ts:141-152` | 重启后 0 血玩家重复掉落/空尸体 | 已随 F-07 修复：恢复时补重生标记，deathSystem 跳过 |
 | F-33 | `game/rules/dialogue.json:2` vs `game.json:44` | `talkRange:48` 被 interaction.range 24 先筛 | 已在批次 A 修复：talk 分支读 dialogue.talkRange，interaction.range 只约束 interact/attack |
-| F-34 | `game/ecosystems.json:131-136` | rocky 夜狼 `every:155520000 + isNight` 永不触发 | 调整 every 或 condition 语义 |
-| F-35 | `game/entities/campfire.json:7`、`water_pool.json:7-8` | 魔法值 1e9 / 9999 表达"近似无限" | 显式配置语义（infinite 标记） |
-| F-36 | `tools/validate.ts:26` | 打印的 12 条不是运行时规则总数（生态展开在 boot） | 文案修正或纳入展开计数 |
+| F-34 | `game/ecosystems.json:131-136` | rocky 夜狼 `every:155520000 + isNight` 永不触发 | 已修：every→900，保留 max 1 + isNight |
+| F-35 | `game/entities/campfire.json:7`、`water_pool.json:7-8` | 魔法值 1e9 / 9999 表达"近似无限" | 已修：ResourceNode.infinite + LightSource.fuelInfinite |
+| F-36 | `tools/validate.ts:26` | 打印的 12 条不是运行时规则总数（生态展开在 boot） | 已修：文案标注"配置规则，运行时另展开" |
 
 ---
 
@@ -336,3 +336,23 @@
 - F-42 schema 维护：确认 `schema-codegen RoomState.ts --ts --bundle` 可用；client-schema 副本
   改为 codegen 产物（保留手写头），新增 `pnpm schema:gen` / `pnpm schema:check`（临时生成→
   逐字段比较，含 CI 友好退出码）与一致性测试；移除"仓库无 codegen"的错误注释。
+
+### 批次 D（92 文件 / 1133 用例）
+- F-13 内容可达：stairs_up/down_kit 配方（plank+stone）；门开合 = 新通用 SoA `Passage{open}`
+  + interaction 切换 + 碰撞/A*/视线/投射物同源跳过；`Passage.open` 入档并进 netSync 动态 key；
+  wall_upper 接入 building-demo 并补 Health。
+- F-12 防御结构：fence/door 加 Health + Structure(role=wall)；A* 阻挡索引纳入
+  Structure 墙与 Placeable.canCollide+Collider 的建造物；raid 结构目标自然覆盖；开门跳过。
+- F-14 projectile：game.json 启用 projectile（排在 collision 后）；新增 throwing_spear
+  物品（ItemKind.throw 档案：speed/lifeMs/radius/cooldown/damage）与配方；`throwWeapon`
+  原子（冷却/方向解析/生成/磨损），命中按标准公式扣血并发 on-hit/killed/on-contact；
+  方向复用 PlayerCommand 的 x/y 世界坐标（新命令 "throw"，无 schema 断代）；顺带兑现
+  投射物被建造墙阻挡（built.walls）。
+- F-20 new-game 生成合法 pipeline（noise-terrain→climate-regions→region-stats）+ 出生规则，
+  临时目录实测 validate 通过；README 同步。
+- F-21 PlaceRuleSchema / ProgressionRuleSchema 注册；progression 运行时解析改为复用
+  schema（单一事实来源）。
+- F-34 rocky wolf every→900（保留 max 1 + isNight），测试证明夜间产出 1 只且不超上限。
+- F-35 ResourceNode.infinite（采集不扣减、不枯竭）替代 water_pool 9999；
+  LightSource.fuelInfinite（在线/离线不燃烧、站点可用）替代 campfire 1e9。
+- F-36 validate 文案改为"实体演化规则（配置）…运行时另按 ecosystems 展开追加"。

@@ -23,7 +23,9 @@ export function validate(argv: string[]): void {
     for (const config of configs) {
       console.log(`    ${config.key}: ${config.pipeline.map((step) => step.generator).join(" → ")}`);
     }
-    console.log(`  实体演化规则: ${gameDef.resolvedEntityRules.length} 条`);
+    console.log(
+      `  实体演化规则（配置）: ${gameDef.resolvedEntityRules.length} 条（运行时另按 game/ecosystems.json 展开追加）`,
+    );
     const spawn = gameDef.resolvedPlayerRule?.spawn;
     const spawnDesc = spawn
       ? `${spawn.mode}${spawn.region ? ` (region: ${spawn.region})` : ""}`

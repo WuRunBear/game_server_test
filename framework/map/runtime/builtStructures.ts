@@ -17,11 +17,14 @@
  * 确定性：同一 ECS 状态恒投影出同一索引（query 顺序 = eid 序，仅影响同格
  * 多连接器时的取者，取首个、结果确定）。
  */
-import { query } from "bitecs";
+import { hasComponent, query } from "bitecs";
 
 import { Transform } from "framework/components/transform";
 import { entityMapOf } from "framework/components/entityMap";
 import { entityLevelOf } from "framework/components/entityLevel";
+import { Placeable } from "framework/components/placeable";
+import { Collider } from "framework/components/physics";
+import { isPassageOpen } from "framework/components/passage";
 import {
   Structure,
   STRUCTURE_ROLE_NONE,
@@ -119,6 +122,8 @@ export function collectBuiltStructures(world: GameWorld, mapId: string): BuiltSt
 
   for (const eid of query(world, [Structure])) {
     if (entityMapOf(world, eid) !== mapId) continue;
+    // 打开的通行口不进入建造阻挡索引（碰撞/寻路/视线一致放行）
+    if (isPassageOpen(world, eid)) continue;
     const role = Structure.role[eid] ?? STRUCTURE_ROLE_NONE;
     if (role === STRUCTURE_ROLE_NONE) continue;
     const level = entityLevelOf(eid);
@@ -133,6 +138,33 @@ export function collectBuiltStructures(world: GameWorld, mapId: string): BuiltSt
       Structure.connectLow[eid] ?? 0,
       Structure.connectHigh[eid] ?? 0,
       Structure.connectDir[eid] ?? CONNECTOR_DIR_UP,
+      eid,
+    );
+  }
+
+  // 有 Collider 且参与碰撞的放置物（未声明 Structure 角色，如设施/障碍物）也是
+  // 寻路/视线的实体侧障碍：投影为墙位。数据源与 Structure 墙相同（同索引、
+  // 同 walkableAtLevel 消费方），不另造索引；打开的通行口同样跳过。
+  for (const eid of query(world, [Placeable, Collider])) {
+    if (entityMapOf(world, eid) !== mapId) continue;
+    if (hasComponent(world, eid, Structure)) {
+      const role = Structure.role[eid] ?? STRUCTURE_ROLE_NONE;
+      if (role !== STRUCTURE_ROLE_NONE) continue;
+    }
+    if ((Placeable.canCollide[eid] ?? 0) !== 1) continue;
+    if (isPassageOpen(world, eid)) continue;
+    const level = entityLevelOf(eid);
+    const tx = Math.floor(Transform.x[eid] / tileWidth);
+    const ty = Math.floor(Transform.y[eid] / tileHeight);
+    if (tx < 0 || ty < 0 || tx >= width || ty >= height) continue;
+    projectStructure(
+      index,
+      STRUCTURE_ROLE_WALL,
+      level,
+      ty * width + tx,
+      0,
+      0,
+      CONNECTOR_DIR_UP,
       eid,
     );
   }
@@ -152,6 +184,7 @@ export function collectBuiltStructures(world: GameWorld, mapId: string): BuiltSt
 export function collectBuiltStructuresByMap(world: GameWorld): Map<string, BuiltStructuresIndex> {
   const byMap = new Map<string, BuiltStructuresIndex>();
   for (const eid of query(world, [Structure])) {
+    if (isPassageOpen(world, eid)) continue;
     const role = Structure.role[eid] ?? STRUCTURE_ROLE_NONE;
     if (role === STRUCTURE_ROLE_NONE) continue;
     const mapId = entityMapOf(world, eid);
@@ -176,6 +209,40 @@ export function collectBuiltStructuresByMap(world: GameWorld): Map<string, Built
       Structure.connectLow[eid] ?? 0,
       Structure.connectHigh[eid] ?? 0,
       Structure.connectDir[eid] ?? CONNECTOR_DIR_UP,
+      eid,
+    );
+  }
+
+  // 非 Structure 的碰撞放置物（见 collectBuiltStructures 注释）同样投影为墙位。
+  for (const eid of query(world, [Placeable, Collider])) {
+    if (hasComponent(world, eid, Structure)) {
+      const role = Structure.role[eid] ?? STRUCTURE_ROLE_NONE;
+      if (role !== STRUCTURE_ROLE_NONE) continue;
+    }
+    if ((Placeable.canCollide[eid] ?? 0) !== 1) continue;
+    if (isPassageOpen(world, eid)) continue;
+    const mapId = entityMapOf(world, eid);
+    if (mapId === "") continue;
+    const geometry = world.maps[mapId];
+    if (!geometry) continue;
+    const { width, height, tileWidth, tileHeight } = geometry.grid;
+    const tx = Math.floor(Transform.x[eid] / tileWidth);
+    const ty = Math.floor(Transform.y[eid] / tileHeight);
+    if (tx < 0 || ty < 0 || tx >= width || ty >= height) continue;
+
+    let index = byMap.get(mapId);
+    if (!index) {
+      index = emptyBuiltStructuresIndex();
+      byMap.set(mapId, index);
+    }
+    projectStructure(
+      index,
+      STRUCTURE_ROLE_WALL,
+      entityLevelOf(eid),
+      ty * width + tx,
+      0,
+      0,
+      CONNECTOR_DIR_UP,
       eid,
     );
   }

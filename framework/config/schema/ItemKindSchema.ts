@@ -50,6 +50,24 @@ const PlaceEffectSchema = z.object({
 });
 
 /**
+ * 投掷档案（通用机制）：装备在 weapon 槽的物品声明本段后，玩家 `throw`
+ * 命令会发射直线投射物（deterministic：速度/寿命/半径/伤害全配置）。
+ * 射程 = speed × lifeMs / 1000（像素）；冷却写入 Cooldown.remainingMs。
+ */
+const ThrowProfileSchema = z.object({
+  /** 投掷速度（像素/秒，> 0；投射物速度向量长度）。 */
+  speed: z.number().positive(),
+  /** 投射物寿命（毫秒，正整数）；归零销毁。 */
+  lifeMs: z.number().int().positive(),
+  /** 接触半径（像素）；缺省 4。 */
+  radius: z.number().nonnegative().optional(),
+  /** 投掷冷却（毫秒）；缺省取 rules/combat.json 的 attackCooldownMs。 */
+  cooldownMs: z.number().int().nonnegative().optional(),
+  /** 命中伤害（攻击力口径，命中时按目标防御结算）；缺省取投掷者当前攻击力。 */
+  damage: z.number().nonnegative().optional(),
+});
+
+/**
  * item kind 定义——item 是数据（由 game/items/*.json 声明），不是实体原型。
  * 字段名与语义保持游戏无关（need/maxStack/amount/slot/archetype 皆为通用机制词）。
  */
@@ -76,6 +94,11 @@ export const ItemKindSchema = z.object({
   toolType: z.string().optional(),
   /** 可放置声明（目标 archetype）；缺省表示不可放置。 */
   place: PlaceEffectSchema.optional(),
+  /**
+   * 投掷档案（装备在 weapon 槽且声明本段时可经 PlayerCommand `throw` 发射
+   * 直线投射物）；缺省表示该武器不可投掷。
+   */
+  throw: ThrowProfileSchema.optional(),
   /**
    * 死亡保留标志：true = 持有者死亡时该物品留在身上（不转入死亡容器）。
    * 缺省 false = 随背包整体转入死亡容器。仅对持有者（玩家）死亡路径生效，
@@ -143,5 +166,7 @@ export type ItemEffectSpec = z.infer<typeof EffectSpecSchema>;
 export type EquipEffect = z.infer<typeof EquipEffectSchema>;
 /** 放置效果的类型推断。 */
 export type PlaceEffect = z.infer<typeof PlaceEffectSchema>;
+/** 投掷档案的类型推断（结构对齐 projectileSystem.throwWeapon）。 */
+export type ThrowProfile = z.infer<typeof ThrowProfileSchema>;
 /** item kind 定义的类型推断（即 game/items/*.json 数组元素类型）。 */
 export type ItemKindSpec = z.infer<typeof ItemKindSchema>;

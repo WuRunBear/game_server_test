@@ -46,6 +46,7 @@ import {
   CONNECTOR_DIR_UP,
   CONNECTOR_DIR_DOWN,
 } from "framework/components/structure";
+import { Passage, PASSAGE_CLOSED, PASSAGE_OPEN } from "framework/components/passage";
 import { Portal, initPortal } from "framework/components/portal";
 import { Dialogue } from "framework/components/dialogue";
 import { DialogueSource, initDialogueSource } from "framework/components/dialogueSource";
@@ -180,10 +181,12 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("ResourceNode", ResourceNode, {
     description: "可采集资源节点：剩余次数、每次产出与枯竭再生，采集系统按此结算。",
     configSchema: z.object({
-      /** 剩余可采集次数；缺省回退到 max。 */
+      /** 剩余可采集次数；缺省回退到 max。infinite=true 时仅作展示值。 */
       remaining: z.number().optional(),
       /** 上限（remaining 回满到此值）；缺省回退到 remaining 或 1。 */
       max: z.number().positive().optional(),
+      /** 无限采集：true 时采集不扣 remaining、不枯竭；缺省 false。 */
+      infinite: z.boolean().default(false),
       /** 每次采集产出数量。 */
       amountPerHit: z.number().positive().default(1),
       /** 枯竭后回满所需毫秒；0 表示不自动回满。 */
@@ -280,6 +283,8 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
       radius: z.number().nonnegative().optional(),
       /** 剩余燃料（毫秒）；≤ 0 视为熄灭。 */
       fuelRemainingMs: z.number().optional(),
+      /** 燃料无限：true 时不消耗且恒点亮；缺省 false。 */
+      fuelInfinite: z.boolean().default(false),
     }),
   });
   registry.register("Placeable", Placeable, {
@@ -310,6 +315,14 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
       connectHigh: z.number().int().min(-128).max(127).optional(),
       /** 连接器方向：0=上行（low→high） 1=下行（high→low）。 */
       connectDir: z.union([z.literal(0), z.literal(1)]).optional(),
+    }),
+  });
+  registry.register("Passage", Passage, {
+    description:
+      "可开合通行口状态：open=0 时屏障生效（碰撞/寻路/视线/袭击目标），open=1 时放行；由玩家交互切换并随存档持久。",
+    configSchema: z.object({
+      /** 开合状态：0=关闭（屏障生效） 1=打开（放行）；缺省关闭。 */
+      open: z.union([z.literal(PASSAGE_CLOSED), z.literal(PASSAGE_OPEN)]).optional(),
     }),
   });
   // 传送/对话/任务/好感/意图（AoS）

@@ -12,6 +12,8 @@ import {
   DisasterRuleSchema,
   FactionRuleSchema,
   AchievementRuleSchema,
+  PlaceRuleSchema,
+  ProgressionRuleSchema,
 } from "framework/config/schema/RuleSchema";
 import { PlayerRuleSchema } from "framework/config/schema/PlayerRuleSchema";
 
@@ -62,4 +64,6 @@ export function registerBuiltinRuleSchemas(): void {
   registerRuleSchema("disasters", DisasterRuleSchema);
   registerRuleSchema("factions", FactionRuleSchema);
   registerRuleSchema("achievements", AchievementRuleSchema);
+  registerRuleSchema("place", PlaceRuleSchema);
+  registerRuleSchema("progression", ProgressionRuleSchema);
 }

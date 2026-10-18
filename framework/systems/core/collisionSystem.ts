@@ -15,6 +15,7 @@ import {
   type BuiltStructuresIndex,
 } from "framework/map/runtime/builtStructures";
 import { getTerrainEpoch } from "framework/map/runtime/terrainWriteback";
+import { isPassageOpen } from "framework/components/passage";
 import type { MapGeometry } from "map/geometry/types";
 import type { EntityId, GameWorld } from "world";
 
@@ -500,6 +501,8 @@ function syncMapEntityBodies(
   for (const eid of query(world, [Transform, Collider])) {
     if (entityMapOf(world, eid) !== mapId) continue;
     if (entityLevelOf(eid) !== level) continue;
+    // 打开的通行口不参与碰撞（实体体不创建/已创建的由下方 alive 清理移除）
+    if (isPassageOpen(world, eid)) continue;
     alive.add(eid);
 
     let body = runtime.entityBodies.get(eid);
@@ -666,6 +669,9 @@ export function collisionSystem(world: GameWorld): GameWorld {
   for (const eid of query(world, [Transform, Collider])) {
     const mapId = entityMapOf(world, eid);
     const level = entityLevelOf(eid);
+    // 打开的通行口不参与碰撞：不登记实体体（旧体由下方清理循环移除），
+    // 玩家/AI 可直接穿过；关闭后下一 tick 重新登记。
+    if (isPassageOpen(world, eid)) continue;
     const runtime = ensureCollisionRuntime(world, mapId, level);
 
     let body = runtime.entityBodies.get(eid);

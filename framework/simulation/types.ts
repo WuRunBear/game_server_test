@@ -73,16 +73,16 @@ export interface TradeParty {
  * craft/equip/place/deconstruct/dialogue/offer），不含游戏语义。
  */
 export interface PlayerCommand {
-  type: "consume" | "drop" | "transfer" | "craft" | "craft-cancel" | "refuel" | "equip" | "place" | "deconstruct" | "dialogue" | "offer" | "offer-accept" | "offer-cancel";
+  type: "consume" | "drop" | "transfer" | "craft" | "craft-cancel" | "refuel" | "equip" | "place" | "deconstruct" | "throw" | "dialogue" | "offer" | "offer-accept" | "offer-cancel";
   /** 目标槽索引（consume/drop/equip/place 用）；transfer 的源槽。 */
   slot?: number;
   /** transfer 目标槽。 */
   toSlot?: number;
   /** 合成配方 id（craft 用，引用 rules/crafting.json 的 recipes[].id）。 */
   recipe?: string;
-  /** 放置目标坐标（place 用，世界坐标，服务端校验距离/重叠/阻挡）。 */
+  /** 放置目标坐标（place 用，世界坐标，服务端校验距离/重叠/阻挡）；throw 时为投掷瞄准点（世界坐标）。 */
   x?: number;
-  /** 放置目标坐标（place 用，世界坐标）。 */
+  /** 放置目标坐标（place 用，世界坐标）；throw 时为投掷瞄准点（世界坐标）。 */
   y?: number;
   /** 目标实体 networkId（deconstruct 拆除用；refuel 加燃料指定站点用；transfer + target 时为容器实体——从其槽位取回物品）。 */
   target?: number;

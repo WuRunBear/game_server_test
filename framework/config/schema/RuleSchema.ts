@@ -28,6 +28,66 @@ export const CombatRuleSchema = z.object({
 export type CombatRule = z.infer<typeof CombatRuleSchema>;
 
 /**
+ * 放置/拆除/容器取回全局规则（game/rules/place.json）。
+ *
+ * 三个距离/网格参数都被 placeableSystem / deconstructSystem / inventoryOps
+ * 直接消费；缺省值与此前的模块内兜底常量保持一致（64 / 64 / false），
+ * 因此旧配置（只写其中一部分字段）行为不变。
+ */
+export const PlaceRuleSchema = z.object({
+  /** 放置/拆除距离（像素）；缺省 64。 */
+  placeRange: z.number().nonnegative().default(64),
+  /** 容器取回距离（像素，同图同层约束之外的距离上限）；缺省 64。 */
+  containerRange: z.number().nonnegative().default(64),
+  /** 是否把放置坐标对齐到 tile 格线中心并写入网格占用；缺省 false。 */
+  gridSnap: z.boolean().default(false),
+}).passthrough();
+
+/** 放置规则的类型推断（即 game/rules/place.json）。 */
+export type PlaceRule = z.infer<typeof PlaceRuleSchema>;
+
+/**
+ * 成长曲线子规则（progression.curve）：等级 L → L+1 所需经验 =
+ * `round(baseXp × growth^(L-1))`。字段均可缺省，缺省值由 progression 模块
+ * 的 DEFAULT_PROGRESSION_CURVE 提供（100 / 2 / 99）。
+ */
+export const ProgressionCurveSchema = z.object({
+  /** 1 → 2 级所需经验（正有限数）。 */
+  baseXp: z.number().finite().positive().optional(),
+  /** 每级阈值增长倍率（有限数 ≥ 1）。 */
+  growth: z.number().finite().min(1).optional(),
+  /** 等级上限（含，1..10000 的整数）。 */
+  maxLevel: z.number().int().min(1).max(10000).optional(),
+}).passthrough();
+
+/** 单技能加成子规则：stat 为消费方约定名，框架只透传。 */
+export const ProgressionSkillRuleSchema = z.object({
+  /** 目标属性名（非空字符串；语义由 game/ 配置约定）。 */
+  stat: z.string().min(1),
+  /** 每级（高于 1 级的部分）提供的加成量（有限数 ≥ 0）。 */
+  perLevel: z.number().finite().nonnegative(),
+  /** 加成方式：add = 加到基础值；mul = 乘在基础值上；缺省 add。 */
+  mode: z.enum(["add", "mul"]).optional(),
+}).passthrough();
+
+/**
+ * 成长全局规则（game/rules/progression.json）。
+ *
+ * 运行时解析（framework/systems/gameplay/progression.ts 的 parseProgressionRules）
+ * 直接复用本 schema 做结构校验，再补上曲线/模式缺省值——约束只在本处声明一次，
+ * 避免 validate 阶段与系统 fail-fast 漂移。
+ */
+export const ProgressionRuleSchema = z.object({
+  /** 等级曲线；缺省用 DEFAULT_PROGRESSION_CURVE。 */
+  curve: ProgressionCurveSchema.optional(),
+  /** 技能 id → 属性加成映射；缺省空表。 */
+  skills: z.record(z.string().min(1), ProgressionSkillRuleSchema).optional(),
+}).passthrough();
+
+/** 成长规则的类型推断（即 game/rules/progression.json；字段可缺省）。 */
+export type ProgressionRule = z.infer<typeof ProgressionRuleSchema>;
+
+/**
  * Needs 全局规则：作用于 needDecaySystem 的衰减倍率与环境调制。
  *
  * 每个 Need 自身的 decayPerSec/depletionDmg 仍在实体 archetype 的 Needs 数组里声明，

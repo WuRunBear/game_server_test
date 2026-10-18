@@ -102,7 +102,9 @@ export {
 export { computeStandardDamage } from "framework/systems/gameplay/damageFormula";
 
 // 投射物（组件 + 系统 + 生成原子）
-export { projectileSystem, spawnProjectile } from "framework/systems/gameplay/projectileSystem";
+export { projectileSystem, spawnProjectile, throwWeapon } from "framework/systems/gameplay/projectileSystem";
+// 可开合通行口（组件 + 状态助手）
+export { Passage, PASSAGE_CLOSED, PASSAGE_OPEN, isPassageOpen, togglePassage } from "framework/components/passage";
 
 export { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
 export { createFileRepository } from "framework/persistence/fileRepository";
@@ -139,9 +141,9 @@ export { overlapsAnyEntity, overlapsMapBlocked, overlapsOccupiedGrid, snapToGrid
 
 export { GameDefinitionSchema, WorldTileSchema, WorldSchema, type GameDefinition, type WorldTile, type WorldConfig, type LoadedGameDefinition, type BehaviorDefinition, type SystemEnableEntry, type NetSyncField } from "framework/config/schema/GameDefinitionSchema";
 export { normalizeTileUnits } from "framework/config/tileUnits";
-export { ItemKindSchema, type ItemKindSpec, type ConsumeEffect, type ItemEffectSpec, type EquipEffect, type PlaceEffect } from "framework/config/schema/ItemKindSchema";
+export { ItemKindSchema, type ItemKindSpec, type ConsumeEffect, type ItemEffectSpec, type EquipEffect, type PlaceEffect, type ThrowProfile } from "framework/config/schema/ItemKindSchema";
 export { registerRuleSchema, getRuleSchema, hasRuleSchema, registerBuiltinRuleSchemas } from "framework/config/schema/ruleSchemas";
-export { CombatRuleSchema, NeedsRuleSchema, CraftingRuleSchema, DayNightRuleSchema, EnvironmentRuleSchema, ServerRuleSchema, RespawnRuleSchema, RaidRuleSchema, DisasterRuleSchema, WildfireRuleSchema, StormRuleSchema, DialogueRuleSchema, DialogueTradeRuleSchema, DialogueSupplyDemandRuleSchema, FactionDefinitionSchema, FactionRuleSchema, AchievementRewardSchema, AchievementDefinitionSchema, AchievementRuleSchema, EnvironmentModifierSchema, EnvironmentPhaseSchema, PhaseWeatherOptionSchema, type CombatRule, type NeedsRule, type CraftingRule, type CraftingRecipe, type DayNightRule, type EnvironmentRule, type EnvironmentPhase, type EnvironmentModifier, type PhaseWeatherOption, type ServerRule, type RespawnRule, type RaidRule, type DisasterRule, type WildfireRule, type StormRule, type DialogueRule, type DialogueTradeRule, type DialogueSupplyDemandRule, type FactionDefinition, type FactionRule, type AchievementReward, type AchievementDefinition, type AchievementRule } from "framework/config/schema/RuleSchema";
+export { CombatRuleSchema, NeedsRuleSchema, CraftingRuleSchema, DayNightRuleSchema, EnvironmentRuleSchema, ServerRuleSchema, RespawnRuleSchema, RaidRuleSchema, DisasterRuleSchema, WildfireRuleSchema, StormRuleSchema, DialogueRuleSchema, DialogueTradeRuleSchema, DialogueSupplyDemandRuleSchema, FactionDefinitionSchema, FactionRuleSchema, AchievementRewardSchema, AchievementDefinitionSchema, AchievementRuleSchema, EnvironmentModifierSchema, EnvironmentPhaseSchema, PhaseWeatherOptionSchema, PlaceRuleSchema, ProgressionRuleSchema, ProgressionCurveSchema, ProgressionSkillRuleSchema, type CombatRule, type NeedsRule, type CraftingRule, type CraftingRecipe, type DayNightRule, type EnvironmentRule, type EnvironmentPhase, type EnvironmentModifier, type PhaseWeatherOption, type ServerRule, type RespawnRule, type RaidRule, type DisasterRule, type WildfireRule, type StormRule, type DialogueRule, type DialogueTradeRule, type DialogueSupplyDemandRule, type FactionDefinition, type FactionRule, type AchievementReward, type AchievementDefinition, type AchievementRule, type PlaceRule, type ProgressionRule } from "framework/config/schema/RuleSchema";
 export { FACTION_RELATION_PREFIX, factionRelationKey, getFactionRule, getFactionDefinition, factionOfNpcKind, getFactionRep, addFactionRep, creditFactionForNpcKind, creditTradeFactionRep } from "framework/systems/gameplay/factions";
 export { DEFAULT_TRADE_VOLUME_PREFIX, tradeVolumeKey, tradeVolumeTickKey, tradeVolumePrefix, decayedTradeVolume, recordTradeVolume, tradeUnitPrice, type TradePriceInput } from "framework/systems/gameplay/pricing";
 export { ACHIEVEMENT_PROGRESS_PREFIX, DEFAULT_ACHIEVEMENT_CHECK_INTERVAL, achievementProgressKey, isAchievementUnlocked, getAchievementRule, createAchievementSystem, achievementSystem, type AchievementSystemConfig } from "framework/systems/gameplay/achievementSystem";

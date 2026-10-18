@@ -131,7 +131,7 @@
         {
           "kind": "wolf",
           "max": 1,
-          "every": 155520000,
+          "every": 900,
           "condition": "isNight"
         }
       ]

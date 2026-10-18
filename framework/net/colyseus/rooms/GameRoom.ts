@@ -107,6 +107,7 @@ function isPlayerCommand(message: unknown): message is PlayerCommand {
       obj.type === "equip" ||
       obj.type === "place" ||
       obj.type === "deconstruct" ||
+      obj.type === "throw" ||
       obj.type === "dialogue" ||
       obj.type === "offer" ||
       obj.type === "offer-accept" ||

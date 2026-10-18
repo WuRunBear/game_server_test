@@ -46,8 +46,7 @@ function equippedItemKind(
   world: GameWorld,
   eid: number,
   slot: EquipEffect["slot"],
-): ItemKindSpec | undefined {
-  const inv = Inventory[eid];
+): ItemKindSpec | undefined {  const inv = Inventory[eid];
   if (!inv) return undefined;
   const field =
     slot === "weapon" ? Equipment.weaponSlot : slot === "tool" ? Equipment.toolSlot : Equipment.armorSlot;
@@ -58,6 +57,18 @@ function equippedItemKind(
   const item = world.gameDef.itemsByKind?.get(stack.kind);
   if (!item?.equip || item.equip.slot !== slot) return undefined;
   return item;
+}
+
+/**
+ * 公开的装备槽物品解析（同上内部规则的导出形态）：供投射物投掷等需要读取
+ * 装备物品配置（而非仅数值加成）的框架机制复用，避免重复实现槽位自愈。
+ */
+export function getEquippedItemKind(
+  world: GameWorld,
+  eid: number,
+  slot: EquipEffect["slot"],
+): ItemKindSpec | undefined {
+  return equippedItemKind(world, eid, slot);
 }
 
 /** 攻击方 weapon 槽物品提供的暴击 / 伤害类型档案（无武器时全缺省）。 */

@@ -1,0 +1,18 @@
+{
+  "kind": "throwing_spear",
+  "maxStack": 1,
+  "value": 10,
+  "maxDurability": 30,
+  "wearPerUse": 1,
+  "equip": { "slot": "weapon", "attackBonus": 4 },
+  "throw": {
+    "speed": 320,
+    "lifeMs": 1000,
+    "radius": 5,
+    "cooldownMs": 900,
+    "damage": 16
+  },
+  "critChance": 0.1,
+  "critMultiplier": 2,
+  "damageType": "pierce"
+}

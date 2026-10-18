@@ -7,6 +7,7 @@ import { harvest, hasRequiredTool } from "framework/systems/gameplay/gatheringSy
 import { attackTarget } from "framework/systems/gameplay/combatSystem";
 import { startDialogue, dialogueTalkRange } from "framework/systems/gameplay/dialogueSystem";
 import { awardHarvestXp } from "framework/systems/gameplay/progression";
+import { Passage, togglePassage } from "framework/components/passage";
 
 interface SystemConfig {
   range?: number;
@@ -63,8 +64,29 @@ export function createInteractionSystem(config?: Record<string, unknown>) {
       const py = Transform.y[playerEid];
 
       if (intent === "interact") {
+        // 可开合通行口（Passage）：与资源节点共用 interact 意图与 range，
+        // 取最近的交互目标——资源更近则采集，否则切换通行口开合。
+        let nearestPassageEid = -1;
+        let nearestPassageDist = Infinity;
+        for (const passageEid of query(world, [Passage, Transform])) {
+          if (effectiveMapOf(world, passageEid) !== effectiveMapOf(world, playerEid)) continue;
+          const d = sameLevelDistance(
+            px,
+            py,
+            entityLevelOf(playerEid),
+            Transform.x[passageEid],
+            Transform.y[passageEid],
+            entityLevelOf(passageEid),
+          );
+          if (d === undefined) continue;
+          if (d <= range && d < nearestPassageDist) {
+            nearestPassageEid = passageEid;
+            nearestPassageDist = d;
+          }
+        }
+
         let nearestEid = -1;
-        let nearestDist = Infinity;
+        let nearestDist = nearestPassageDist;
         for (const nodeEid of query(world, [Resource, Transform])) {
           if (effectiveMapOf(world, nodeEid) !== effectiveMapOf(world, playerEid)) continue;
           // 工具门槛不满足的节点不参与最近目标选择：否则「最近节点采不了」会
@@ -91,6 +113,8 @@ export function createInteractionSystem(config?: Record<string, unknown>) {
           if (harvest(world, playerEid, nearestEid)) {
             awardHarvestXp(world, playerEid, nearestEid);
           }
+        } else if (nearestPassageEid >= 0) {
+          togglePassage(world, nearestPassageEid);
         }
       } else if (intent === "attack") {
         let nearestEid = -1;

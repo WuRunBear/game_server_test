@@ -380,6 +380,126 @@
           "dy": 5
         },
         {
+          "kind": "wall_upper",
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 0,
+          "dy": 6
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 1,
+          "dy": 0
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 1,
+          "dy": 6
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 2,
+          "dy": 0
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 2,
+          "dy": 6
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 3,
+          "dy": 0
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 3,
+          "dy": 6
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 4,
+          "dy": 0
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 4,
+          "dy": 6
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 5,
+          "dy": 0
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 5,
+          "dy": 6
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 6,
+          "dy": 0
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 6,
+          "dy": 6
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 0,
+          "dy": 1
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 6,
+          "dy": 1
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 0,
+          "dy": 2
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 6,
+          "dy": 2
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 0,
+          "dy": 3
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 6,
+          "dy": 3
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 0,
+          "dy": 4
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 6,
+          "dy": 4
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 0,
+          "dy": 5
+        },
+        {
+          "kind": "wall_upper",
+          "dx": 6,
+          "dy": 5
+        },
+        {
           "kind": "stairs_up",
           "dx": 3,
           "dy": 5

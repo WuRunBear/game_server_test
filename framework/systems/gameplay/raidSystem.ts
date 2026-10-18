@@ -34,6 +34,7 @@
 import { hasComponent, query } from "bitecs";
 import { Player, Transform, Attack, Health, Structure, STRUCTURE_ROLE_NONE, entityMapOf } from "components";
 import { isOfflineRetained } from "components/offline";
+import { isPassageOpen } from "components/passage";
 import { attemptRng } from "framework/simulation/rng";
 import { getRuleModule } from "framework/api";
 import { queueEvent } from "framework/simulation/events/eventBus";
@@ -164,6 +165,8 @@ function assignStructureTargets(
     if (entityMapOf(world, eid) !== center.mapId) continue;
     if ((Structure.role[eid] ?? STRUCTURE_ROLE_NONE) === STRUCTURE_ROLE_NONE) continue;
     if (!hasComponent(world, eid, Health) || (Health.current[eid] ?? 0) <= 0) continue;
+    // 打开的通行口不再阻挡，也不作为袭击目标（与寻路/碰撞放行语义一致）
+    if (isPassageOpen(world, eid)) continue;
     const tx = Math.floor(Transform.x[eid] / tileWidth);
     const ty = Math.floor(Transform.y[eid] / tileHeight);
     if (Math.max(Math.abs(tx - ptx), Math.abs(ty - pty)) > radius) continue;
@@ -201,7 +204,8 @@ function attackStructuresStep(world: GameWorld): void {
     const structureAlive =
       hasComponent(world, structure, Transform) &&
       hasComponent(world, structure, Health) &&
-      (Health.current[structure] ?? 0) > 0;
+      (Health.current[structure] ?? 0) > 0 &&
+      !isPassageOpen(world, structure);
     if (!structureAlive) {
       targets.delete(member);
       continue;

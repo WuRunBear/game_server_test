@@ -208,7 +208,10 @@ export function harvestDropPosition(
 /** 对资源节点采集一次。返回是否成功（成功才扣 remaining）。 */
 export function harvest(world: GameWorld, actorEid: number, nodeEid: number): boolean {
   const nodeState = ResourceNode[nodeEid];
-  if (!nodeState || nodeState.remaining <= 0) return false;
+  if (!nodeState) return false;
+  // 无限节点（infinite=true）不因 remaining 归零而拒绝采集：remaining 仅是
+  // 展示值，采集不消耗（见下方扣减段）。
+  if (!nodeState.infinite && nodeState.remaining <= 0) return false;
 
   // 工具门槛：与产出效率（gatherMult）正交——门槛只决定能否采，倍率只放大产出
   if (!hasRequiredTool(world, actorEid, nodeEid)) return false;
@@ -275,10 +278,13 @@ export function harvest(world: GameWorld, actorEid: number, nodeEid: number): bo
   // 命中了却一点也没落地（满包/未知 kind）= 拒绝，不动节点（历史满包语义）。
   if (products.length > 0 && applied === 0) return false;
 
-  nodeState.remaining -= 1;
-  if (nodeState.remaining <= 0) {
-    nodeState.remaining = 0;
-    nodeState.depletedSinceMs = world.time.tick * world.time.fixedDtMs;
+  // 无限节点：remaining / depletedSinceMs 均不变（不产生枯竭状态与 Depleted 信号）。
+  if (!nodeState.infinite) {
+    nodeState.remaining -= 1;
+    if (nodeState.remaining <= 0) {
+      nodeState.remaining = 0;
+      nodeState.depletedSinceMs = world.time.tick * world.time.fixedDtMs;
+    }
   }
 
   // 工具磨损：仅手持（tool 槽）且声明 maxDurability 的工具；采集动作成立即耗一次。
@@ -292,7 +298,7 @@ export function harvest(world: GameWorld, actorEid: number, nodeEid: number): bo
   // 框架不解释信号语义——具体迁移由 game/ 配置按同名 `on` 声明。
   if (StateMachine[nodeEid]) {
     signalStateMachine(world, nodeEid, FSM_SIGNAL_HARVESTED);
-    if (nodeState.remaining <= 0) {
+    if (!nodeState.infinite && nodeState.remaining <= 0) {
       signalStateMachine(world, nodeEid, FSM_SIGNAL_DEPLETED);
     }
   }

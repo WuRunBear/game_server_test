@@ -81,19 +81,38 @@ export function newGame(argv: string[]): void {
   });
 
   writeJson(join(baseDir, "maps", "registry.json"), {
-    default: `${opts.id}-map`,
     maps: {
       [`${opts.id}-map`]: {
-        kind: "generated",
-        generatorId: "simple",
-        name: opts.name,
+        kind: "pipeline",
         seed: 1,
-        width: 64,
-        height: 64,
-        tileWidth: 16,
-        tileHeight: 16,
+        initialAgeTicks: 0,
+        pipeline: [
+          {
+            // 基础地形：单带全可走平地（干净起点；后续可按需加水面/山脉带）
+            generator: "noise-terrain",
+            params: {
+              width: 64,
+              height: 64,
+              tileWidth: 16,
+              tileHeight: 16,
+              bandLevel: 1,
+              groundPalette: { "1": 1 },
+              nonWalkableSemantics: [],
+            },
+          },
+          {
+            // 命名区域（生态/出生规则按 region 引用；未覆盖格自动归属 wilderness）
+            generator: "climate-regions",
+            params: { names: ["meadow"], style: "noise", minArea: 200 },
+          },
+          { generator: "region-stats", params: {} },
+        ],
       },
     },
+  });
+
+  writeJson(join(baseDir, "rules", "player.json"), {
+    spawn: { mode: "random" },
   });
 
   const registerPath = join(srcDir, "register.ts");

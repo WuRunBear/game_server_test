@@ -18,7 +18,8 @@
 // - 动态 key 空间扩展（不改变 schema 字段索引，旧客户端结构上可解码，
 //   但需补渲染才可见）：
 //   EntityState.values：`Structure.role|connectLow|connectHigh|connectDir`
-//     （建造角色/连接器，整数）、`Inventory.<i>.durability`（仅带耐久的
+//     （建造角色/连接器，整数）、`Passage.open`（可开合屏障状态，0/1）、
+//     `Inventory.<i>.durability`（仅带耐久的
 //     槽位写键）、`ItemMeta.durability`、`Crafting.<i>.remainingTicks` /
 //     `.progress` / `.suspended`（进行中制作）、`Progression.*`、`Achievements.*`；
 //   EntityState.stringValues：`Inventory.<i>.kind`、`ItemMeta.kind`、

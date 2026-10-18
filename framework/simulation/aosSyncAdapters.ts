@@ -124,6 +124,7 @@ registerAosSyncAdapter("ResourceNode", (_world, eid, fields) => {
     if (f === "remaining") out.numbers["ResourceNode.remaining"] = state.remaining;
     else if (f === "max") out.numbers["ResourceNode.max"] = state.max;
     else if (f === "yieldsKind") out.strings["ResourceNode.yieldsKind"] = state.yieldsKind;
+    else if (f === "infinite") out.numbers["ResourceNode.infinite"] = state.infinite ? 1 : 0;
   }
   return out;
 });

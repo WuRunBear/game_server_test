@@ -19,4 +19,6 @@ export const Projectile = defineComponent({
   lifeMs: Types.f32,
   /** 接触判定半径（像素），与目标距离 <= 半径 + 系统垫片即接触。 */
   radius: Types.f32,
+  /** 命中伤害（攻击力口径，防御减免在命中时结算）；0 = 只发接触事件不扣血。 */
+  damage: Types.f32,
 });

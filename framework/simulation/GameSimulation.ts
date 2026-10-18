@@ -23,6 +23,7 @@ import { craftRecipe, stepCraftingJobs, cancelCrafting, craftingProgressOf, vali
 import { stepFuelBurn, refuelStation, validateFuelRules, fastForwardFuelBurn } from "framework/systems/gameplay/fuelSystem";
 import { placeEntity } from "framework/systems/gameplay/placeableSystem";
 import { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";
+import { throwWeapon } from "framework/systems/gameplay/projectileSystem";
 import { advanceDialogue } from "framework/systems/gameplay/dialogueSystem";
 import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
 import { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
@@ -709,6 +710,14 @@ export class GameSimulation implements SimulationPort {
         return this.finishCommand(eid, command.type, placeEntity(this.world, eid, command.slot ?? -1, command.x ?? 0, command.y ?? 0));
       case "deconstruct":
         return this.finishCommand(eid, command.type, deconstructEntity(this.world, eid, command.target ?? -1));
+      case "throw":
+        // 投掷：装备 weapon 槽物品需声明 throw 档案；方向优先取瞄准点 x/y，
+        // 缺省按最近敌人/移动朝向回退（见 projectileSystem.throwWeapon）。
+        return this.finishCommand(
+          eid,
+          command.type,
+          throwWeapon(this.world, eid, command.x, command.y),
+        );
       case "dialogue":
         return this.finishCommand(eid, command.type, advanceDialogue(this.world, eid, command.option ?? -1));
       case "offer": {
