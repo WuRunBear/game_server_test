@@ -20,6 +20,8 @@
  *
  * - `afterTicks`：进入当前状态后经过 N tick（绝对 `enteredTick + afterTicks`
  *   到点）——**定时迁移**。绝对对齐派生保证离线快进与逐 tick 等价。
+ *   可选 `scale: "<modifierKey>"` 声明环境倍率（如 `growthScale`）：等待时间
+ *   改按该 environment 修饰值的区间积分缩放（见 scaledDue.ts），缺省不缩放。
  * - `on`：外部**即时信号** id（采集等动作经 `signalStateMachine` 发出）。
  * - `condition`：`spawnConditions` 注册表条件名（每 tick 求值）——**条件迁移**。
  *
@@ -68,6 +70,11 @@ export interface CompiledTransition {
   kind: TransitionKind;
   /** 定时迁移的延迟 tick（kind === "timed"）。 */
   afterTicks?: number;
+  /**
+   * 定时迁移的环境倍率修饰键（kind === "timed"，可选）：等待时间按该 environment
+   * 修饰值的区间积分缩放（见 scaledDue.ts）。缺省 = 固定 afterTicks（历史语义）。
+   */
+  scale?: string;
   /** 即时信号 id（kind === "signal"）。 */
   signal?: string;
   /** 条件名（kind === "condition"；spawnConditions 注册表引用）。 */
@@ -205,7 +212,23 @@ function compileTransition(stateId: string, index: number, raw: unknown): Compil
     }
     transition.kind = "timed";
     transition.afterTicks = afterTicks;
+
+    const scale = obj.scale;
+    if (scale !== undefined) {
+      if (typeof scale !== "string" || scale === "") {
+        throw new Error(
+          `StateMachine config: ${where} "scale" must be a non-empty modifier key string`,
+        );
+      }
+      transition.scale = scale;
+    }
     return transition;
+  }
+
+  if (obj.scale !== undefined) {
+    throw new Error(
+      `StateMachine config: ${where} "scale" is only allowed on timed transitions (afterTicks)`,
+    );
   }
 
   if (hasSignal) {

@@ -22,6 +22,7 @@
           "transitions": [
             {
               "afterTicks": 1200,
+              "scale": "growthScale",
               "to": "ready",
               "effects": [{ "name": "restore-resource" }]
             }

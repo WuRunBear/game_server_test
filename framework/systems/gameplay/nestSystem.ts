@@ -13,6 +13,14 @@
  * - 生成走 spawnEntity（AoS 初始化钩子照常）；spawnKind 原型缺失记 warn
  *   （每 kind 一次）并跳过该巢——配置错误可见但不砸 tick
  *
+ * ## 与族群节点（Population）双通路的收敛（F-10）
+ *
+ * 来源实体同时携带 Population 节点时（节点产出的物种 = spawnKind），该处
+ * 实体生产**只由演化引擎的 node 模式负责**（目标 = 节点记账 count）：
+ * nestSystem 照常镜像 current，但不再按 capacity 自行补足。否则两条通路各自
+ * 补足（巢按 capacity、引擎按节点 count），击杀后 Nest 会绕过节点记账瞬满。
+ * 仅带 Nest、无 Population 的巢保持既有 capacity 语义（纯巢穴生产）。
+ *
  * 确定性：每次尝试的随机流由 (tick, eid, attempt) 经统一随机服务派生——
  * 不用 Math.random，同世界状态恒产生同落点序列，测试可精确断言。
  * 巢（实体）被摧毁即 AoS 条目消失 → 自然停产，无独立生命周期代码。
@@ -20,6 +28,7 @@
 import { query } from "bitecs";
 import { Nest, Kind, Transform, entityMapOf } from "components";
 import { attemptRng } from "framework/simulation/rng";
+import { Population } from "framework/simulation/population/population";
 import {
   PLACEMENT_MAX_ATTEMPTS,
   DEFAULT_SPAWN_RADIUS_TILES,
@@ -87,6 +96,10 @@ export function createNestSystem(config?: Record<string, unknown>) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) <= radiusTiles) alive += 1;
       }
       nest.current = alive;
+
+      // 双通路收敛：来源实体挂着族群节点 → 生产归 node 演化（单一来源），
+      // 本系统只镜像存活数。仅带 Nest 的巢照旧补足到 capacity。
+      if (Population[nestEid]) continue;
 
       // 补足至容量：半径内随机 tile + 可走/占位合法性，尝试数有界
       for (let attempt = 0; attempt < maxAttempts && alive < nest.capacity; attempt += 1) {

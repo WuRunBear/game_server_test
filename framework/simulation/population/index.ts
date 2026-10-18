@@ -20,6 +20,7 @@ export {
   populationSystem,
   createPopulationSystem,
   advancePopulation,
+  recordPopulationDeath,
   fastForwardPopulations,
   materializePopulation,
   populationSpawnBudget,

@@ -388,7 +388,48 @@ export const PhaseWeatherOptionSchema = z.object({
   weight: z.number().positive(),
 });
 
-/** 单个相位：id + 时长（tick）+ 天气候选 + 通用修饰数值。 */
+/**
+ * 派生地面覆盖规则：把底板语义在当前相位下映射为「有效语义」（如积雪/湿地）。
+ *
+ * 只描述**派生视图**（服务端权威、查询期求值），不写回 MapGeometry：
+ * 底板 tiles 恒定不变，有效语义由 (相位, 相位进度, 层号, 区域, 格坐标 hash)
+ * 纯函数派生。匹配顺序 = 数组顺序，后一条规则以前一条的输出为输入（可链式）。
+ */
+export const GroundOverrideSchema = z.object({
+  /** 生效相位 id（必须已在 phases 中声明）。 */
+  phaseId: z.string().min(1),
+  /** 底板（或前序规则输出）语义 id。 */
+  fromSemantic: z.number().int().min(0).max(255),
+  /** 派生后的有效语义 id。 */
+  toSemantic: z.number().int().min(0).max(255),
+  /** 层号下界（含；缺省不限）。用于「雪线随海拔」类规则。 */
+  minLevel: z.number().int().optional(),
+  /** 层号上界（含；缺省不限）。 */
+  maxLevel: z.number().int().optional(),
+  /** 相位进度下界 [0,1]（含；缺省 0）。用于随进度推进/消融的窗口。 */
+  minProgress: z.number().min(0).max(1).optional(),
+  /** 相位进度上界 [0,1]（含；缺省 1）。 */
+  maxProgress: z.number().min(0).max(1).optional(),
+  /**
+   * 覆盖率 [0,1]（常量或随进度线性 `{ from, to }`）：格坐标 hash 落在阈值内
+   * 才应用本条（斑驳覆盖）。缺省 1 = 全格覆盖。相位 id + 坐标参与 hash，
+   * 因此同一年同一批格子先/后变化，且不会逐 tick 闪烁。
+   */
+  coverage: z
+    .union([
+      z.number().min(0).max(1),
+      z.object({ from: z.number().min(0).max(1), to: z.number().min(0).max(1) }),
+    ])
+    .optional(),
+  /** 仅在这些区域生效（缺省不限）。空白数组等价于不限制。 */
+  regions: z.array(z.string()).optional(),
+  /** 在这些区域内不生效（优先级高于 regions）。 */
+  excludeRegions: z.array(z.string()).optional(),
+});
+
+/**
+ * 单个相位：id + 时长（tick）+ 天气候选 + 通用修饰数值。
+ */
 export const EnvironmentPhaseSchema = z.object({
   /** 相位 id（game/ 提供的配置字符串；框架只当不透明标识）。 */
   id: z.string(),
@@ -418,6 +459,12 @@ export const EnvironmentRuleSchema = z
     weatherSlotTicks: z.number().int().positive(),
     /** 相位程序（按数组顺序循环；一周期 = 各相位时长之和）。 */
     phases: z.array(EnvironmentPhaseSchema).min(1),
+    /**
+     * 派生地面覆盖（查询期派生，不写回底板）：按相位把某些地面语义映射为
+     * 另一种「有效语义」，支持层号/相位进度/区域/坐标 hash 斑驳条件。
+     * 缺省 = 无派生（effectiveGround 恒等于底板语义）。
+     */
+    groundOverrides: z.array(GroundOverrideSchema).optional(),
   })
   .passthrough()
   .superRefine((rule, ctx) => {
@@ -432,10 +479,44 @@ export const EnvironmentRuleSchema = z
       }
       seen.add(phase.id);
     });
+
+    (rule.groundOverrides ?? []).forEach((override, index) => {
+      if (!seen.has(override.phaseId)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `groundOverrides[${index}] references unknown phase id "${override.phaseId}"`,
+          path: ["groundOverrides", index, "phaseId"],
+        });
+      }
+      if (
+        override.minLevel !== undefined &&
+        override.maxLevel !== undefined &&
+        override.minLevel > override.maxLevel
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          message: `groundOverrides[${index}] minLevel (${override.minLevel}) > maxLevel (${override.maxLevel})`,
+          path: ["groundOverrides", index, "minLevel"],
+        });
+      }
+      if (
+        override.minProgress !== undefined &&
+        override.maxProgress !== undefined &&
+        override.minProgress > override.maxProgress
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          message: `groundOverrides[${index}] minProgress (${override.minProgress}) > maxProgress (${override.maxProgress})`,
+          path: ["groundOverrides", index, "minProgress"],
+        });
+      }
+    });
   });
 
 /** 相位修饰数值类型推断（即 environment.json 的 modifiers 值）。 */
 export type EnvironmentModifier = z.infer<typeof EnvironmentModifierSchema>;
+/** 派生地面覆盖规则类型推断。 */
+export type GroundOverride = z.infer<typeof GroundOverrideSchema>;
 /** 相位天气候选类型推断。 */
 export type PhaseWeatherOption = z.infer<typeof PhaseWeatherOptionSchema>;
 /** 单相位类型推断。 */

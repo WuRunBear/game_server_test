@@ -49,5 +49,22 @@
         { "id": "rain", "weight": 3 }
       ]
     }
+  ],
+  "groundOverrides": [
+    { "phaseId": "dry", "fromSemantic": 3, "toSemantic": 12, "coverage": { "from": 0.2, "to": 0.55 } },
+    { "phaseId": "wet", "fromSemantic": 3, "toSemantic": 11, "coverage": { "from": 0.15, "to": 0.5 } },
+    { "phaseId": "wet", "fromSemantic": 2, "toSemantic": 11, "coverage": 0.2 },
+    { "phaseId": "storm", "fromSemantic": 3, "toSemantic": 10, "coverage": { "from": 0.5, "to": 1 } },
+    { "phaseId": "storm", "fromSemantic": 4, "toSemantic": 10, "coverage": { "from": 0.6, "to": 1 } },
+    { "phaseId": "mild", "fromSemantic": 3, "toSemantic": 10, "coverage": { "from": 0.5, "to": 0 } },
+    { "phaseId": "mild", "fromSemantic": 4, "toSemantic": 10, "coverage": { "from": 0.6, "to": 0 } },
+
+    { "phaseId": "storm", "fromSemantic": 2, "toSemantic": 10, "minLevel": 2 },
+    { "phaseId": "storm", "fromSemantic": 2, "toSemantic": 10, "minLevel": 1, "minProgress": 0.5 },
+    { "phaseId": "storm", "fromSemantic": 2, "toSemantic": 10, "minLevel": 0, "minProgress": 0.85 },
+
+    { "phaseId": "mild", "fromSemantic": 2, "toSemantic": 10, "minLevel": 2 },
+    { "phaseId": "mild", "fromSemantic": 2, "toSemantic": 10, "minLevel": 1, "maxProgress": 0.6 },
+    { "phaseId": "mild", "fromSemantic": 2, "toSemantic": 10, "minLevel": 0, "maxProgress": 0.3 }
   ]
 }

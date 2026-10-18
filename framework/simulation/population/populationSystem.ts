@@ -27,6 +27,20 @@
  * 调用（与 fastForwardStateMachines 并列）。注意：本函数只推进节点数值，
  * 不做实体实例化（实例化是可选生产通路，非节点状态，见下）。
  *
+ * ## 死亡回写（生态反馈）
+ *
+ * `recordPopulationDeath(world, deadEid)` 是 deathSystem 的死亡钩子：非玩家
+ * 物种实体被销毁前，按 **species + 所属图 + 所属区域** 定位最近的族群节点并
+ * `count = max(0, count − 1)`。节点 count 是「目标数量」，存活实体被杀后目标
+ * 随之下降 → 演化引擎的 deficit（目标 − 存活）保持为 0，不会下一槽瞬满；
+ * 之后每个增长槽按 growthRate 回补（见 advancePopulation）。匹配规则：
+ * - species = 死亡实体的 Kind；玩家、无 Kind 实体、来源实体（自身携带
+ *   Population 节点，如巢穴）都不参与回写；
+ * - 图 = 死亡实体 EntityMap；区域 = 死亡实体所在 tile 的 regionOf，与节点
+ *   homeRegion（空串惰性解析）严格相等；
+ * - 同 species/图/区域有多个节点时选 tile 切比雪夫距离最近者（同距取 eid
+ *   最小）——确定性，不随机；count 已为 0 的节点不吸收击杀。
+ *
  * ## 最小生产通路
  *
  * `materializePopulation(world, eid)` 为 `spawnInstances === true` 的节点在
@@ -39,6 +53,7 @@ import { query } from "bitecs";
 import { Kind, Transform, entityMapOf } from "framework/components";
 import { mapSeedOf } from "map/runtime/mapSeeds";
 import { rngFrom } from "framework/simulation/rng";
+import { regionOf } from "map/geometry/query";
 import {
   DEFAULT_SPAWN_RADIUS_TILES,
   PLACEMENT_MAX_ATTEMPTS,
@@ -115,6 +130,57 @@ export function advancePopulation(world: GameWorld, eid: number, targetTick: num
     slot += interval;
   }
   node.count = count;
+}
+
+/**
+ * 死亡回写：非玩家物种实体死亡时，把击杀记到匹配的族群节点上
+ * （species + 所属图 + 所属区域；最近节点，确定性）。返回是否写回。
+ *
+ * 语义：节点 count 是目标数量而非存活计数；被杀后目标下降 N，演化引擎的
+ * deficit（目标 − 存活）保持 0 → 不会下一槽瞬满，之后按 growthRate 回补。
+ * 玩家、无 Kind 实体、来源实体（自身带 Population 节点）不参与；找不到
+ * 匹配节点时静默忽略（Nest 独有的产出没有节点记账，本就不该扣账）。
+ */
+export function recordPopulationDeath(world: GameWorld, deadEid: number): boolean {
+  const species = Kind[deadEid] ?? "";
+  if (species === "") return false;
+  // 来源实体（巢穴/兽群本体）自带节点：被拆 = 节点消失（永久停产），不是减员。
+  if (Population[deadEid]) return false;
+
+  const mapKey = entityMapOf(world, deadEid);
+  if (mapKey === "") return false;
+  const geometry = world.maps[mapKey];
+  if (!geometry) return false;
+
+  const { tileWidth, tileHeight } = geometry.grid;
+  const tx = Math.floor(Transform.x[deadEid] / tileWidth);
+  const ty = Math.floor(Transform.y[deadEid] / tileHeight);
+  const region = regionOf(geometry, tx, ty);
+  if (region === undefined || region === "") return false;
+
+  // 同 species/图/区域可能有多处节点（多个巢）：取最近者，同距取 eid 最小。
+  let chosen: number | undefined;
+  let chosenDistance = Infinity;
+  for (let eid = 0; eid < Population.length; eid++) {
+    const node = Population[eid];
+    if (!node) continue;
+    if (eid === deadEid) continue;
+    if (node.species !== species || node.count <= 0) continue;
+    if (entityMapOf(world, eid) !== mapKey) continue;
+    if (resolveHomeRegion(world, eid, geometry) !== region) continue;
+    const dx = Math.floor(Transform.x[eid] / tileWidth) - tx;
+    const dy = Math.floor(Transform.y[eid] / tileHeight) - ty;
+    const distance = Math.max(Math.abs(dx), Math.abs(dy));
+    if (distance < chosenDistance || (distance === chosenDistance && eid < (chosen ?? Infinity))) {
+      chosen = eid;
+      chosenDistance = distance;
+    }
+  }
+  if (chosen === undefined) return false;
+
+  const node = Population[chosen]!;
+  node.count = Math.max(0, node.count - 1);
+  return true;
 }
 
 /**

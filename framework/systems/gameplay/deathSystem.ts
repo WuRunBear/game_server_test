@@ -7,6 +7,7 @@ import {
 } from "framework/systems/gameplay/inventoryOps";
 import { destroyEntity } from "framework/entities/destroyEntity";
 import { spawnEntity } from "framework/entities/spawn";
+import { recordPopulationDeath } from "framework/simulation/population/populationSystem";
 import { rngFrom } from "framework/simulation/rng";
 import { queueEvent } from "framework/simulation/events/eventBus";
 import type { RespawnRule } from "framework/config/schema/RuleSchema";
@@ -115,7 +116,8 @@ function spawnDeathContainer(world: GameWorld, playerEid: EntityId, rules: Respa
  *   同 networkId 免会话重绑；由 respawnSystem 重置并传送回出生点）；
  *   规则配置了 deathContainer 时，死亡当帧生成容器并整体转入背包
  *   （keepOnDeath 物品除外）——事件时序不受影响
- * - 其他 → destroyEntity
+ * - 其他 → 先做族群节点死亡回写（F-10：species + 图 + 区域匹配的 Population
+ *   节点 count−1，下限 0；玩家与自身携带节点的来源实体不参与）再 destroyEntity
  *
  * 游戏无关——掉落内容由 LootTable 的 kind 字符串决定，容器行为由 rules 配置。
  */
@@ -166,6 +168,10 @@ export function deathSystem(world: GameWorld): GameWorld {
       continue;
     }
 
+    // 生态回写（F-10）：击杀从匹配族群节点记账中扣除，目标不再瞬满；
+    // 必须在 destroyEntity 前（Kind/EntityMap/Transform 仍可读）。玩家与
+    // 携带节点的来源实体在上方/函数内排除。
+    recordPopulationDeath(world, eid);
     destroyEntity(world, eid);
   }
 

@@ -111,7 +111,7 @@
   写盘使用临时文件+原子 rename。
 - 验收：损坏档启动报错并保留原文件；正常无档仍可新建。
 
-### ☐ F-10 生态 node 模式无死亡回写："杀多了不会变少"
+### ☑ F-10 生态 node 模式无死亡回写："杀多了不会变少"
 - 位置：`framework/simulation/population/populationSystem.ts:91-117`、
   `framework/map/evolution/engine.ts:17-19,259-262`
 - 问题：`Population.count` 是目标数，没有死亡反馈；杀光后下一槽补满。
@@ -119,7 +119,7 @@
   同时评估 `Nest` 与 `Population` 双通路并存的重复生产风险。
 - 验收：杀 N 只后节点 count 下降且下一槽不立即补满；长期死亡率与增长率可收敛。
 
-### ☐ F-11 离线补差的成本与告警缺陷
+### ☑ F-11 离线补差的成本与告警缺陷
 - 位置：`framework/map/evolution/engine.ts:134-141,239-266`、
   `framework/map/evolution/placement.ts:20,87-118`
 - 问题：低于上限但补不上时每槽 32 次尝试 → 24h 离线数百万次判定；`spawnExact` 非法落点
@@ -153,7 +153,7 @@
 - 修复方向：启用 projectile 系统 + 投掷武器配置 + 瞄准输入；或从文档删除"已完成"声明。
 - 验收：投掷武器可按输入方向发射并命中结算；文档与实现一致。
 
-### ☐ F-15 季节派生视图与 `growthScale` 未实现
+### ☑ F-15 季节派生视图与 `growthScale` 未实现
 - 位置：`framework/simulation/worldClock/index.ts:48-69`、`game/rules/environment.json:8,20,32,45`
 - 问题：只有 `GroundDerivationFn` 类型；`growthScale` 零消费方；积雪/湿地面未实现。
 - 修复方向：实现 `effectiveGround` 纯函数（底板语义+相位+进度+level+区域+hash→有效语义）
@@ -356,3 +356,18 @@
 - F-35 ResourceNode.infinite（采集不扣减、不枯竭）替代 water_pool 9999；
   LightSource.fuelInfinite（在线/离线不燃烧、站点可用）替代 campfire 1e9。
 - F-36 validate 文案改为"实体演化规则（配置）…运行时另按 ecosystems 展开追加"。
+
+### 批次 E（96 文件 / 1176 用例）
+- F-10 死亡回写：deathSystem 非玩家死亡、destroyEntity 之前调 `recordPopulationDeath`——
+  species + EntityMap + homeRegion 严格匹配，多节点取最近（同距取最小 eid），count−1
+  下限 0；玩家/来源实体自身/无 Kind 不参与。node 模型目标随 count 下降，下一槽按
+  growthRate 回补（不再瞬满）。Nest/Population 双通路收敛为「node 优先」：同时挂载时
+  nestSystem 只镜像 current、不补足；纯 Nest 物种保持原语义。
+- F-11 离线成本：每规则连续失败槽上限 64（可覆盖），达到即跳到区间末尾；`need≤0`
+  不计失败；spawnExact 告警按 map+rule+kind+落点+reason 每进程去重。证据：24h 离线、
+  every=20、不可落位规则的 canPlace 调用从约 276 万降到 2,048（64×32）。
+- F-15 季节派生：`effectiveGroundAt/deriveEffectiveGround` 纯函数（底板语义+相位/进度+
+  level+区域+hash→有效语义），`groundOverrides` 配置支持雪线（minLevel/进度窗口）、
+  斑驳（coverage+hash）、区域包含/排除，链式顺序；不写回/不落盘/确定性。StateMachine
+  定时迁移支持 `scale:"growthScale"`（区间积分，跨相位连续；未声明零变化），
+  berry_bush 再生接入；离线快进与逐 tick 同一函数（等价断言）。

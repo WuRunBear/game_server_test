@@ -27,6 +27,20 @@
  * footprint 展开整矩形逐格检查（界内 + 可走 + 未占用）——多格放置物
  * 不再只查中心格。
  *
+ * ## 离线成本上界（F-11）
+ *
+ * 「低于上限但落位失败」的规则若在长跨度内每槽都重试，代价 = 槽数 × 32 次
+ * 候选判定（24h 离线可达数百万次）。引擎为每条规则维护**连续无产出槽**
+ * 计数：某槽确实尝试了落位（need > 0）却一个都没产出时 +1，一旦达到
+ * EVOLUTION_MAX_CONSECUTIVE_FAILURE_SLOTS（默认 64，可经 deps 覆盖）即把
+ * 该规则剩余槽全部跳过（跳到本调用区间末尾）。有产出的槽计数归零；
+ * need ≤ 0（目标已满足/无目标）不算失败——节点记账可能在跨度内后续增长，
+ * 跳槽会丢真实产出。因此本上限**只压缩“持续失败”的近零产出规则**，有产出
+ * 时的槽语义（选点流、槽对齐、产出量）逐点不变。
+ *
+ * exact 落点非法告警按 (map, rule, 落点, reason) 去重（每进程一次）：
+ * 野火后 portal 落点长期不可走时不再每槽刷一条日志；在线行为其余不变。
+ *
  * 产出量决策可插拔（种群模型，populationModels.ts）：每槽先经 mode 名查
  * 注册表得到本槽**目标数量**（内置 density/exact/template 恒返回 rule.max，
  * node 返回族群节点记账和），引擎统一以 rule.max 封顶后补差
@@ -50,6 +64,18 @@ import { ruleIdentity } from "map/evolution/schema";
 /** 演化日志器（游戏无关 scope）。 */
 const logger = createLogger("map-evolution");
 
+/**
+ * 每规则连续无产出槽上限（默认）：长跨度离线补差时，持续落位失败的规则
+ * 达到该槽数即跳过本调用剩余槽（见文件头「离线成本上界」）。
+ */
+export const EVOLUTION_MAX_CONSECUTIVE_FAILURE_SLOTS = 64;
+
+/** exact 落点非法告警去重集合：`map\0ruleId\0x,y\0reason`（每进程一次）。 */
+const warnedExactFailures = new Set<string>();
+
+/** exact 落点非法的告警原因（canPlace 只有单一失败语义，留字段供去重键）。 */
+const EXACT_FAILURE_REASON = "landing-illegal";
+
 /** 实体写入通道：在 mapKey 图的 (x, y) tile 生成一个 kind 实体。 */
 export type SpawnFn = (kind: string, mapKey: string, x: number, y: number) => void;
 
@@ -67,6 +93,11 @@ export interface EvolutionDeps {
   canPlace(mapKey: string, kind: string, x: number, y: number): boolean;
   /** 实体写入通道；缺省实现 = spawnEntity（overrides.mapId → EntityMap[eid]=mapKey）。 */
   spawn?: SpawnFn;
+  /**
+   * 每规则连续无产出槽上限（缺省 EVOLUTION_MAX_CONSECUTIVE_FAILURE_SLOTS）。
+   * 供测试/特殊场景覆盖；≤0 或非有限值按缺省处理。
+   */
+  failureSlotLimit?: number;
 }
 
 /** 模式分派辅助函数的共享上下文（单次 evolve 调用内不变；mapKey 已绑定）。 */
@@ -88,6 +119,8 @@ interface RuleCursor {
   model: PopulationModel;
   /** 区域内 kind 实体数；null = 尚未查询（惰性到首个槽）。 */
   count: number | null;
+  /** 连续「尝试了落位但零产出」的槽数（达到上限即早退，见文件头）。 */
+  failureStreak: number;
   /** 下一个待处理槽（绝对对齐）；Infinity = 已早退/耗尽。 */
   nextSlot: number;
 }
@@ -124,7 +157,8 @@ function spawnDensity(rule: DensityRule | NodeRule, need: number, ctx: Evolution
  * exact 补足：固定落点 at，每 timeSlot 至多尝试一次（同一落点单槽内至多
  * 合法容纳一个实体）。落点非法（按 kind footprint 整矩形：任一覆盖格越界/
  * 不可走/被占用）→ 跳过并 warn；静态 exact 项的落点合法性由开机校验兜底
- * （见计划 todo 9/11）。
+ * （见计划 todo 9/11）。告警按 (map, rule, 落点, reason) 每进程去重（F-11）：
+ * 长跨度离线补差不会为同一失效落点刷出成千上万条日志。
  */
 function spawnExact(rule: ExactRule, ctx: EvolutionContext, slot: number): number {
   const { x, y } = rule.at;
@@ -132,14 +166,19 @@ function spawnExact(rule: ExactRule, ctx: EvolutionContext, slot: number): numbe
     ctx.spawn(rule.kind, ctx.mapKey, x, y);
     return 1;
   }
-  logger.warn("evolution: exact landing illegal, placement skipped", {
-    map: ctx.mapKey,
-    rule: ctx.ruleId,
-    kind: rule.kind,
-    x,
-    y,
-    tick: slot,
-  });
+  const key = `${ctx.mapKey}\u0000${ctx.ruleId}\u0000${rule.kind}\u0000${x},${y}\u0000${EXACT_FAILURE_REASON}`;
+  if (!warnedExactFailures.has(key)) {
+    warnedExactFailures.add(key);
+    logger.warn("evolution: exact landing illegal, placement skipped", {
+      map: ctx.mapKey,
+      rule: ctx.ruleId,
+      kind: rule.kind,
+      x,
+      y,
+      tick: slot,
+      reason: EXACT_FAILURE_REASON,
+    });
+  }
   return 0;
 }
 
@@ -212,6 +251,12 @@ export function evolve(
   const mapKey = geometry.key;
   const spawn = deps.spawn ?? createDefaultSpawn(world);
   const canPlace = (kind: string, x: number, y: number): boolean => deps.canPlace(mapKey, kind, x, y);
+  const failureSlotLimit =
+    typeof deps.failureSlotLimit === "number" &&
+    Number.isFinite(deps.failureSlotLimit) &&
+    deps.failureSlotLimit > 0
+      ? Math.floor(deps.failureSlotLimit)
+      : EVOLUTION_MAX_CONSECUTIVE_FAILURE_SLOTS;
 
   // 本图规则预过滤：map 归属 → condition 一次性门控 → template 锚可满足性
   const cursors: RuleCursor[] = [];
@@ -230,6 +275,7 @@ export function evolve(
       rule,
       model: getPopulationModel(rule.mode),
       count: null,
+      failureStreak: 0,
       nextSlot: Math.floor(fromTick / rule.every) * rule.every + rule.every,
     });
   }
@@ -269,6 +315,9 @@ export function evolve(
       );
       const need = target - cursor.count;
       if (need <= 0) {
+        // 目标已满足/无目标：本槽不尝试落位，不算失败（节点记账可能在
+        // 本跨度内后续增长，跳槽会丢掉真实产出）。
+        cursor.failureStreak = 0;
         cursor.nextSlot += cursor.rule.every;
         continue;
       }
@@ -294,6 +343,12 @@ export function evolve(
       }
       cursor.count += added;
       cursor.nextSlot += cursor.rule.every;
+      if (added > 0) {
+        cursor.failureStreak = 0;
+      } else if (++cursor.failureStreak >= failureSlotLimit) {
+        // 连续失败上限：本调用剩余槽全部跳过（离线长跨度成本有界）。
+        cursor.nextSlot = Infinity;
+      }
     }
   }
 }

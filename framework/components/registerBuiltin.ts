@@ -434,6 +434,11 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
                 to: z.string(),
                 /** 定时迁移：进入本状态后经过的 tick 数（≥0）。 */
                 afterTicks: z.number().int().nonnegative().optional(),
+                /**
+                 * 定时迁移的环境倍率修饰键（可选，如 growthScale）：等待时间按
+                 * environment 修饰值的区间积分缩放；缺省 = 固定 afterTicks。
+                 */
+                scale: z.string().min(1).optional(),
                 /** 即时信号迁移：外部信号 id。 */
                 on: z.string().optional(),
                 /** 条件迁移：spawnConditions 注册表条件名。 */

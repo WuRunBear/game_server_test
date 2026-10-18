@@ -45,8 +45,8 @@ export interface EnvironmentView extends PhaseView {
 }
 
 /**
- * 派生地形视图的查询输入契约（后续切片实现 effectiveGround / 积雪等派生，
- * 本切片只定义接口，不做任何地形派生）。输入：底板语义 + 所在区域/层 + tick。
+ * 派生地形视图的查询输入契约（具体派生见 `effectiveGround.ts`）。
+ * 输入：底板语义 + 所在区域/层（格坐标由查询入口补充）。
  */
 export interface TileContext {
   /** 底板语义（tile 地面类型编号）。 */
@@ -58,9 +58,9 @@ export interface TileContext {
 }
 
 /**
- * 派生地形视图求值器契约（后续切片的扩展点，本切片不实现）：
- * `effectiveGround = f(底板语义, 相位/进度/天气, 层, 区域, tick)`。本切片只
- * 把输入形状与时钟查询固定下来，具体派生逻辑（积雪线、湿地面等）属后续切片。
+ * 派生地形视图求值器契约（历史类型，保持向后兼容）：
+ * `effectiveGround = f(底板语义, 相位/进度/天气, 层, 区域, tick)`。
+ * 现实现见 `effectiveGround.ts` 的 `deriveEffectiveGround` / `effectiveGroundAt`。
  */
 export type GroundDerivationFn = (
   tick: Tick,
@@ -185,6 +185,17 @@ export function environmentAt(world: GameWorld): EnvironmentView {
     modifiers: resolveModifiers(rule.phases[phase.phaseIndex], phase.progress),
   };
 }
+
+// 派生地面视图（底板语义 + 相位/进度/层号/区域/坐标 hash → 有效语义；纯函数）
+export {
+  deriveEffectiveGround,
+  effectiveGroundAt,
+  effectiveGroundAtPixel,
+  effectiveGroundViewAt,
+  groundCoverageHash,
+  type EffectiveGroundView,
+  type GroundQuery,
+} from "framework/simulation/worldClock/effectiveGround";
 
 // 昼夜时钟（hour/phase 同为 tick 纯函数派生，与上面的相位/天气共用同一时钟源）
 export {

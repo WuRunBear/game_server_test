@@ -8,7 +8,9 @@
  * world.time.tick)`，循环（步数上限 = 状态数 + 8，自动边无环保证收敛）：
  * 1. **定时迁移优先**：取当前状态中「到期 tick ≤ 目标 tick」且最早到期的
  *    `afterTicks` 迁移；迁移后 `enteredTick` = 精确到期 tick（不是当前 tick），
- *    故长跨度快进与逐 tick 推进产生完全相同的状态与计时。
+ *    故长跨度快进与逐 tick 推进产生完全相同的状态与计时。迁移声明
+ *    `scale: "<modifierKey>"` 时，到期 tick 由 `scaledDueTick` 按 environment
+ *    修饰值的区间积分缩放（缺省仍为固定 `afterTicks`）。
  * 2. 其次**条件迁移**：按声明顺序取首个求值为真的 `condition` 迁移（在目标
  *    tick 求值；与 worldClock/演化引擎的离线近似语义一致）。
  * 3. 无可用迁移则停。
@@ -34,6 +36,7 @@ import {
   type CompiledStateMachine,
   type CompiledTransition,
 } from "framework/simulation/stateMachine/stateMachine";
+import { scaledDueTick } from "framework/simulation/stateMachine/scaledDue";
 
 /** 单步推进的步数上限（自动边无环 ⇒ 真实上限 = 状态数；+8 为条件重入留裕量）。 */
 function stepBudget(def: CompiledStateMachine): number {
@@ -84,11 +87,17 @@ export function advanceStateMachine(world: GameWorld, eid: number, targetTick: n
     }
 
     // 1) 定时迁移：到期 tick ≤ target 且最早到期者
+    //    （声明 scale 时到期 tick 按环境倍率区间积分缩放；两条路径同一函数）
     let timed: CompiledTransition | undefined;
     let timedDue = Infinity;
     for (const transition of state.transitions) {
       if (transition.kind !== "timed") continue;
-      const due = entry.enteredTick + (transition.afterTicks ?? 0);
+      const due = scaledDueTick(
+        world,
+        entry.enteredTick,
+        transition.afterTicks ?? 0,
+        transition.scale,
+      );
       if (due <= targetTick && due < timedDue) {
         timedDue = due;
         timed = transition;
