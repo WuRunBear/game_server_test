@@ -196,12 +196,18 @@ describe("Slice A1：timer/trigger 配置驱动闭环（持续伤害）", () => 
     const triggers = playerArch.components.Triggers as { trigger: string; effects: EffectSpec[] }[];
     expect(triggers[0].trigger).toBe("on-timer");
     expect(triggers[0].effects[0]).toEqual({ name: "damage", params: { amount: 3 } });
+    // F-39：真实配置还声明了 on-item-break（装备破碎记账）与 on-achievement（成就回血）
+    expect(triggers.map((entry) => entry.trigger)).toEqual([
+      "on-timer",
+      "on-item-break",
+      "on-achievement",
+    ]);
 
     // 用真实配置的效果/触发器在受控世界中复现（确定性，无 AI/敌人干扰）
     const world = createBareWorld();
     const eid = spawnTestEntity(world, { hp: 100, defense: 0 });
     initTriggers(world, eid, triggers);
-    expect(Triggers[eid]!.length).toBe(1);
+    expect(Triggers[eid]!.length).toBe(3);
 
     applyEffectSpecs(world, eid, [eid], rawMeat.effects as EffectSpec[]);
 

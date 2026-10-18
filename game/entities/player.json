@@ -21,6 +21,14 @@
       {
         "trigger": "on-timer",
         "effects": [{ "name": "damage", "params": { "amount": 3 } }]
+      },
+      {
+        "trigger": "on-item-break",
+        "effects": [{ "name": "ledger", "params": { "op": "credit", "kind": "broken_gear", "count": 1 } }]
+      },
+      {
+        "trigger": "on-achievement",
+        "effects": [{ "name": "heal", "params": { "amount": 5 } }]
       }
     ]
   },

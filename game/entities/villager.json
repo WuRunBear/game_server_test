@@ -6,7 +6,14 @@
     "Velocity": {},
     "Collider": { "shape": 1, "halfW": 8, "halfH": 8 },
     "Health": { "current": 50, "max": 50 },
-    "DialogueSource": { "treeId": "villager-main" }
+    "DialogueSource": { "treeId": "villager-main" },
+    "Ledger": {
+      "entries": {
+        "shell": 100,
+        "shell_spear": 6,
+        "axe": 6
+      }
+    }
   },
   "behavior": "wander-default",
   "team": 0

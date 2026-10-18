@@ -140,8 +140,8 @@
 > - **重生规则**：`game/rules/respawn.json`（delayMs/resetNeeds）
 > - BT 行为 JSON 用 mistreevous JSON 形态（selector/sequence/condition/action），
 >   计划文中的 MDSL（`seq[...] else ...`）仅示意
-> - `Perception` 按计划含 visionRadius + hostilityRange 双字段（hostilityRange
->   当前无消费方，字段先占位）
+> - `Perception` 按计划含 visionRadius + hostilityRange 双字段；**后续对账**：
+>   hostilityRange 始终无消费方，已在批次 F2（F-38）删除，现仅 visionRadius
 >
 > **S2 审查修复（第二轮，写回此计划）**：
 > - `IsTargetInVision` 必须 `!= null` 判定：perception 无目标时**写 null 而非不写 key**，
@@ -160,7 +160,7 @@
 | 组件 | 形态 | 字段 |
 |------|------|------|
 | `LootTable` | AoS `(LootEntry[] \| undefined)[]` + 初始化钩子 | `LootEntry={kind, qty, chance}` |
-| `Perception` | SoA | `visionRadius, hostilityRange` |
+| `Perception` | SoA | `visionRadius`（原计划的 `hostilityRange` 已删，F-38） |
 
 ### 新增/扩展框架系统
 
@@ -360,16 +360,17 @@
 > - **antiCheatSystem 不做成 tick 系统**：输入校验必须在入口（submitInput/submitCommand，tick 前）
 >   ——实现为 `inputValidation` 模块：`maxMoveSpeed` 超速拒（不推进 seq）+ `maxCommandsPerSec`
 >   命令频率按 tick 滑动窗口限流（确定性，与真实时钟解耦）
-> - **interestManagementSystem 分两段**：仿真层 `computeInterest`（viewRadius 裁剪，own 恒可见）
->   → TickResult.interest；传输层双路径——有规则写 per-client `PlayerState.visibleEntities`
->   （Colyseus 按连接分别增量同步），无规则保留 `RoomState.entities` 全量广播（兼容旧协议/旧客户端）
+> - **interestManagementSystem 分两段**（后续协议断代后已收敛为单路径）：仿真层 `computeInterest`
+>   （先按玩家地图过滤，再按 viewRadius 裁剪，own 恒可见）→ TickResult.interest；传输层恒写
+>   per-client `PlayerState.visibleEntities`（`RoomState.entities` 已删除，旧客户端不兼容）
 > - **Repository 接口替换**：旧 PlayerRecord/MapInstanceRecord（无消费方）→ WorldRecord（世界快照，
->   id/tick/nextNetworkId/timeOfDay/entities）；postgres/redis 因无驱动依赖留 stub 适配新接口，
->   `createFileRepository`（JSON 文件，原子写）为默认真实现（记录不修：外部 DB 等真实部署需求）
+>   id/tick/nextNetworkId/timeOfDay/entities）；**无外部数据库后端（仅文件仓储）**——
+>   `createFileRepository`（JSON 文件，原子写）是唯一实现，postgres/redis 桩已删除（F-37）
 > - **玩家实体恢复语义**：读档恢复的玩家实体进复用队列，`addPlayer` 优先绑定（networkId 保留、
 >   背包保留）；`removePlayer` 仍删除实体——断线后进度以最近一次存档为准
-> - **serialize 瞬态组件跳过**：Velocity/Target/AIState/BlackboardRef/Cooldown/Duration/Intent/
->   LastSynced/Kind（恢复后由系统与输入自然重建，eid 跨存档不保真）
+> - **serialize 瞬态组件跳过**：Velocity/Cooldown/Intent/Kind/NetworkId/Dialogue/ExpiresAt/
+>   Interval/Projectile（恢复后由系统与输入自然重建，eid 跨存档不保真；AIState/Target/
+>   BlackboardRef/Duration/LastSynced 组件已在 F-38 删除）
 
 ### 新增/落地框架系统
 
@@ -387,7 +388,7 @@
 
 ### 扩展点
 
-- `repository.ts` / `postgres.ts` / `redis.ts`：补真实现
+- `repository.ts`：如需外部数据库后端再补实现；当前仅 `createFileRepository`（postgres/redis 桩已删除）
 - `game/rules/server.json`：存档间隔、视野半径、速率上限
 
 ### 测试点

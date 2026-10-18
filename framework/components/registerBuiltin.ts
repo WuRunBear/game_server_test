@@ -21,7 +21,6 @@ import { Transform } from "framework/components/transform";
 import { Size } from "framework/components/size";
 import { Velocity, Acceleration, Collider, ColliderShape } from "framework/components/physics";
 import { Health, Attack, Defense, Team } from "framework/components/combat";
-import { AIState, Target, BlackboardRef } from "framework/components/ai";
 import { Inventory, initInventory } from "framework/components/inventory";
 import { ItemMeta } from "framework/components/itemMeta";
 import { EntityMap } from "framework/components/entityMap";
@@ -53,9 +52,9 @@ import { DialogueSource, initDialogueSource } from "framework/components/dialogu
 import { Quest } from "framework/components/quest";
 import { Relation } from "framework/components/relation";
 import { Intent } from "framework/components/intent";
-import { NetworkId, LastSynced } from "framework/components/network";
+import { NetworkId } from "framework/components/network";
 import { Offline } from "framework/components/offline";
-import { Cooldown, Duration } from "framework/components/timer";
+import { Cooldown } from "framework/components/timer";
 import { Lifetime } from "framework/components/lifetime";
 import { Ledger, initLedger } from "framework/components/ledger";
 import { Projectile } from "framework/components/projectile";
@@ -138,16 +137,6 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
       /** 阵营/队伍编号。 */
       id: z.number().int().nonnegative().optional(),
     }),
-  });
-  // AI 状态/目标/黑板引用
-  registry.register("AIState", AIState, {
-    description: "AI 状态：存放有限状态机状态值，由行为树/系统在运行时推进。",
-  });
-  registry.register("Target", Target, {
-    description: "锁定目标：存放目标实体 eid，由感知/战斗系统在运行时写入。",
-  });
-  registry.register("BlackboardRef", BlackboardRef, {
-    description: "黑板引用：存放行为树黑板数据标识，由 AI 在运行时维护。",
   });
   // 物品/背包（AoS）
   registry.register("Inventory", Inventory, {
@@ -249,12 +238,10 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   });
   // 感知
   registry.register("Perception", Perception, {
-    description: "感知：声明视觉半径与敌对反应半径（像素），供感知系统筛选目标。",
+    description: "感知：声明视觉半径（像素），供感知系统筛选目标。",
     configSchema: z.object({
       /** 感知半径（像素）。 */
       visionRadius: z.number().nonnegative().optional(),
-      /** 敌对反应半径（像素）。 */
-      hostilityRange: z.number().nonnegative().optional(),
     }),
   });
   // 装备/合成/光源/放置/网格占用
@@ -361,8 +348,8 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
     description: "地图归属：实体所属地图 id，由生成链路在运行时写入，无条目回退默认地图。",
   });
   // 离散层号（AoS）：实体所在层（0=地面，负层地下预留），无条目视为第 0 层。
-  // 载体先行：无 archetype initializer（运行时层号依赖几何/连接器查询）、
-  // 无 netSync 适配器（跨层移动切片接线）——写入方与消费方在后续切片落地。
+  // 无 archetype initializer（运行时层号依赖几何/连接器查询）；不注册 netSync
+  // AoS 适配器——层号经 EntitySnapshot.level / EntityState.level 同步。
   registry.register("EntityLevel", EntityLevel, {
     description: "离散层号：实体所在整数层级（0=地面基准层，负层为地下预留），由跨层移动链路在运行时写入，无条目视为第 0 层。",
   });
@@ -374,18 +361,12 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("NetworkId", NetworkId, {
     description: "网络标识：稳定网络 id（不等于 eid），由生成/恢复链路在运行时分配。",
   });
-  registry.register("LastSynced", LastSynced, {
-    description: "同步帧：记录最近一次被同步的逻辑帧，供增量同步使用。",
-  });
   // 断线保留标记（SoA，入档——保留语义跨重启有效）
   registry.register("Offline", Offline, {
     description: "断线保留标记：会话断开后实体保留至到期 tick，期间对同步与玩法系统不可见；重连复用时摘除，到期由仿真层清扫销毁。",
   });
   registry.register("Cooldown", Cooldown, {
     description: "冷却计时：剩余冷却毫秒，由战斗等系统在运行时递减。",
-  });
-  registry.register("Duration", Duration, {
-    description: "持续时间计时：剩余毫秒，由效果等系统在运行时递减。",
   });
   // 实体持久寿命（SoA，入档）：绝对到期 tick，到期由 timerSystem 销毁实体
   registry.register("Lifetime", Lifetime, {

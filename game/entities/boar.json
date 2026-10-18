@@ -8,7 +8,7 @@
     "Health": { "current": 60, "max": 60 },
     "Attack": { "value": 8, "range": 32 },
     "Cooldown": {},
-    "Perception": { "visionRadius": 160, "hostilityRange": 80 },
+    "Perception": { "visionRadius": 160 },
     "LootTable": [{ "kind": "raw_meat", "qty": 1, "chance": 1.0 }]
   },
   "behavior": "boar-hostile",

@@ -4,7 +4,8 @@ import { z } from "zod";
  * 玩家规则配置 schema（game/rules/player.json）。
  *
  * 声明玩家出生规则（spawn）——出生点选取模式与限定区域。
- * 消费方为出生服务（后续 todo 接线）；本 schema 只负责加载期校验。
+ * 消费方为 `GameSimulation.addPlayer`（经 `map/runtime/spawn.pickSpawnPosition`
+ * 选点）与 `tools/validate`；本 schema 只负责加载期校验。
  */
 
 /** 玩家出生规则：选取模式 + 可选区域限定 + exact 落点。 */

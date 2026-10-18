@@ -2,9 +2,9 @@
  * 地形写回入口（framework/map/runtime/terrainWriteback.ts）。
  *
  * 运行期修改底板的**唯一合法通道**（docs/map-system-v2-design.md §3.2）：
- * 任何代码绕过本入口直接改 MapGeometry 的 tiles/walkable 数组视为架构违规。
+ * 任何代码绕过本入口直接改 MapGeometry 的 tiles/walkable/level 数组视为架构违规。
  * 入口内部依次完成四件事：
- * 1. 原地改数组（level 写回暂不开放——设计 §3.4 决策：层号改动后置）；
+ * 1. 原地改数组（tiles / walkable / level 三路；level 经 F-16 的 setLevel 开放）；
  * 2. 重算该图 version 内容指纹（computeGeometryVersion 通道复用，同内容恒定）；
  * 3. 递增该图**地形纪元**——按层碰撞运行时据此失效/重建静态体（模式同
  *    builtStructures 的建造纪元：地形与建造楼板是碰撞静态体的两路独立输入，
@@ -178,8 +178,14 @@ function writeTile(
   if (field === "walkable" && value !== 0 && value !== 1) {
     throw new Error(`terrain writeback: walkable value must be 0 or 1 (got ${value}) on map "${mapKey}"`);
   }
+  if (field === "level" && (!Number.isInteger(value) || value < -128 || value > 127)) {
+    throw new Error(
+      `terrain writeback: level ${value} out of Int8 range (-128..127) on map "${mapKey}"`,
+    );
+  }
 
-  const array = field === "tiles" ? geometry.tiles : geometry.walkable;
+  const array =
+    field === "tiles" ? geometry.tiles : field === "walkable" ? geometry.walkable : geometry.level;
   if (array[tileIndex] === value) {
     return false; // 同值写回：内容无变化，不动指纹/纪元/脏格
   }
@@ -242,4 +248,35 @@ export function setWalkable(
   callerTick?: number,
 ): boolean {
   return writeTile(world, mapKey, tileIndex, "walkable", walkable, callerTick);
+}
+
+/**
+ * 写回某格离散层号（设计概念名 setLevel；F-16 补齐）。
+ *
+ * 调用纪律与 callerTick 语义同 setGround。层号写回的影响面：
+ * - **碰撞**：地形纪元递增 → 按层碰撞静态体在该图下次访问时按新层号重建
+ *   （cliff/slope 语义仍以 geometry.levelSemantics 为准，本入口不推断语义）；
+ * - **实体层号**：entityLevelSystem 下一 tick 读新地形层，按既有过渡规则
+ *   （slope/连接器/cliff 单向）决定是否跟随——本入口不改实体层号；
+ * - **持久化**：随增量存档写入 `field:"level"` 修改项（Int8 值域）。
+ * - **结构一致性由调用方负责**：层号改动若形成可通行区 ≥2 层差且无 cliff
+ *   语义格，读档时的 validateMapGeometry 会拒绝该图（与生成期同一约束）。
+ *   需要大幅改层的调用方应同时写回 tiles/walkable（cliff 带）。
+ *
+ * @param world ECS 世界
+ * @param mapKey 地图 registry key
+ * @param tileIndex tile 线性索引（行主序）
+ * @param level 新层号（Int8，-128..127 整数；负层为地下预留）
+ * @param callerTick 调用方 tick（缺省 world.time.tick）
+ * @returns 是否真的改动了内容
+ * @throws Error 地图不存在 / 索引越界 / 值域非法
+ */
+export function setLevel(
+  world: GameWorld,
+  mapKey: string,
+  tileIndex: number,
+  level: number,
+  callerTick?: number,
+): boolean {
+  return writeTile(world, mapKey, tileIndex, "level", level, callerTick);
 }

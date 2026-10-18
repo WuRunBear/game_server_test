@@ -6,10 +6,13 @@
  * `eid`）与可选目标（字段 `target`），求值器据此确定效果来源与缺省目标。
  *
  * 内建求值器采用统一的「实体事件」实现：owner = 载荷 eid、target = 载荷
- * target（缺省 owner），效果列表经 effectRegistry 依次求值。本阶段闭环：
- * on-timer（timerSystem 供事件）与 on-command（GameSimulation 供事件）；
- * on-hit / on-contact / on-region-* 的产生方接线留配方切片（on-contact 已有
- * projectileSystem 供事件，可直接消费）。
+ * target（缺省 owner），效果列表经 effectRegistry 依次求值。已有产生方的
+ * 事件（配置可直接声明消费）：on-timer（timerSystem）、on-command
+ * （GameSimulation）、on-hit（combatSystem/projectileSystem）、on-contact
+ * （projectileSystem）、on-death（deathSystem）、on-item-break
+ * （durability 磨损点）、on-achievement（achievementSystem）、
+ * on-raid-warning（raidSystem）。on-region-enter / on-region-clear 仅有
+ * 求值器、暂无产生方（区域进出事件留待真实需求）。
  */
 import type { GameWorld, EntityId } from "framework/world";
 import { applyEffectSpecs, positionOfEntity } from "framework/simulation/effects/effectRegistry";
@@ -94,6 +97,8 @@ const BUILTIN_TRIGGER_NAMES = [
   "on-hit",
   "on-contact",
   "on-death",
+  "on-item-break",
+  "on-achievement",
   "on-region-enter",
   "on-region-clear",
   "on-raid-warning",

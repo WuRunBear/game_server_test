@@ -6,7 +6,6 @@
  * 从而维持「tools/src → framework」的单向依赖。新增框架模块时在此补充导出。
  */
 export { createLogger, type Logger } from "framework/utils/logger";
-export { clampMs } from "framework/utils/timer";
 export { createMetrics, recordTick, type Metrics } from "framework/metrics";
 export { createGameWorld, type GameWorld, type EntityId, type Tick, type System, type GameTime, type TimeOfDay, type EnvironmentState, PHASE_DAY, PHASE_NIGHT } from "framework/world";
 
@@ -43,10 +42,10 @@ export { registerAosSyncAdapter, getAosSyncAdapter, type AosSyncAdapter, type Ao
 export { computeInterest } from "framework/simulation/interest";
 export { createInputGuard, type InputGuard } from "framework/simulation/inputValidation";
 
-// 类型化事件总线（tick 内排队、固定阶段消费）
+// 类型化事件总线（tick 内排队、固定阶段 drain 消费）
 export {
-  queueEvent, subscribeEvent, drainEvents, dispatchEvents,
-  type QueuedEvent, type TypedEventPayloads, type TypedEventName, type EventHandler,
+  queueEvent, drainEvents,
+  type QueuedEvent, type TypedEventPayloads, type TypedEventName,
 } from "framework/simulation/events/eventBus";
 
 // 效果系统（注册表 + 内置效果）
@@ -58,7 +57,7 @@ export { registerBuiltinEffects } from "framework/simulation/effects/builtinEffe
 
 // 定时器（AoS 组件 + 系统）
 export {
-  ExpiresAt, Interval, setExpiresAt, setIntervalTimer, clearTimers,
+  ExpiresAt, Interval, setExpiresAt, setIntervalTimer,
   type ExpiresAtEntry, type IntervalEntry,
 } from "framework/simulation/timer/timer";
 export { timerSystem } from "framework/simulation/timer/timerSystem";
@@ -74,7 +73,7 @@ export {
 export { modifierSystem } from "framework/simulation/modifiers/modifierSystem";
 
 // 触发器（AoS 组件 + 注册表 + 系统）
-export { Triggers, addTrigger, initTriggers, type TriggerEntry } from "framework/simulation/triggers/triggers";
+export { Triggers, initTriggers, type TriggerEntry } from "framework/simulation/triggers/triggers";
 export {
   registerTrigger, getTrigger, hasTrigger, listTriggers, listTriggerEntries, registerBuiltinTriggers,
   type TriggerContext, type TriggerEvaluator, type TriggerEvaluatorEntry,
@@ -133,7 +132,8 @@ export {
 export { registerPopulationModel, getPopulationModel, listPopulationModels, registerBuiltinPopulationModels, type PopulationModel, type PopulationModelContext } from "framework/map/evolution/populationModels";
 export { sameLevelDistance, isGameplayReachable, type GameplayEndpoint, type GameplayLosCheck } from "framework/utils/gameplayDistance";
 export { collectBuiltStructures, collectBuiltStructuresByMap, collectConnectorLookup, floodSameLevel, getBuiltStructuresEpoch, bumpBuiltStructuresEpoch, emptyBuiltStructuresIndex, type BuiltStructuresIndex, type StructureConnector } from "framework/map/runtime/builtStructures";
-export { spaceExposureAt, isIndoors, entitySpaceExposure, entityIsIndoors, listIndoorEntities, type SpaceExposure, type IndoorsOptions, DEFAULT_MAX_ENCLOSED_AREA } from "framework/map/runtime/indoors";
+export { setGround, setWalkable, setLevel, drainDirtyTiles, terrainBaselineOf, getTerrainEpoch, type TerrainChangeRecord } from "framework/map/runtime/terrainWriteback";
+export { spaceExposureAt, isIndoors, entitySpaceExposure, entityIsIndoors, type SpaceExposure, type IndoorsOptions, DEFAULT_MAX_ENCLOSED_AREA } from "framework/map/runtime/indoors";
 export { placeEntity } from "framework/systems/gameplay/placeableSystem";
 export { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";
 export { startDialogue, advanceDialogue, applyDialogueEffect, END_DIALOGUE } from "framework/systems/gameplay/dialogueSystem";
@@ -146,10 +146,10 @@ export { GameDefinitionSchema, WorldTileSchema, WorldSchema, type GameDefinition
 export { normalizeTileUnits } from "framework/config/tileUnits";
 export { ItemKindSchema, type ItemKindSpec, type ConsumeEffect, type ItemEffectSpec, type EquipEffect, type PlaceEffect, type ThrowProfile } from "framework/config/schema/ItemKindSchema";
 export { registerRuleSchema, getRuleSchema, hasRuleSchema, registerBuiltinRuleSchemas } from "framework/config/schema/ruleSchemas";
-export { CombatRuleSchema, NeedsRuleSchema, CraftingRuleSchema, DayNightRuleSchema, EnvironmentRuleSchema, ServerRuleSchema, RespawnRuleSchema, RaidRuleSchema, DisasterRuleSchema, WildfireRuleSchema, StormRuleSchema, DialogueRuleSchema, DialogueTradeRuleSchema, DialogueSupplyDemandRuleSchema, FactionDefinitionSchema, FactionRuleSchema, AchievementRewardSchema, AchievementDefinitionSchema, AchievementRuleSchema, EnvironmentModifierSchema, EnvironmentPhaseSchema, PhaseWeatherOptionSchema, GroundOverrideSchema, PlaceRuleSchema, ProgressionRuleSchema, ProgressionCurveSchema, ProgressionSkillRuleSchema, type CombatRule, type NeedsRule, type CraftingRule, type CraftingRecipe, type DayNightRule, type EnvironmentRule, type EnvironmentPhase, type EnvironmentModifier, type PhaseWeatherOption, type GroundOverride, type ServerRule, type RespawnRule, type RaidRule, type DisasterRule, type WildfireRule, type StormRule, type DialogueRule, type DialogueTradeRule, type DialogueSupplyDemandRule, type FactionDefinition, type FactionRule, type AchievementReward, type AchievementDefinition, type AchievementRule, type PlaceRule, type ProgressionRule } from "framework/config/schema/RuleSchema";
+export { CombatRuleSchema, NeedsRuleSchema, CraftingRuleSchema, DayNightRuleSchema, EnvironmentRuleSchema, ServerRuleSchema, RespawnRuleSchema, RaidRuleSchema, DisasterRuleSchema, WildfireRuleSchema, StormRuleSchema, DialogueRuleSchema, DialogueTradeRuleSchema, DialogueSupplyDemandRuleSchema, FactionDefinitionSchema, FactionRuleSchema, AchievementRewardSchema, AchievementDefinitionSchema, AchievementRuleSchema, EnvironmentModifierSchema, EnvironmentPhaseSchema, PhaseWeatherOptionSchema, GroundOverrideSchema, PlaceRuleSchema, FallDamageRuleSchema, ProgressionRuleSchema, ProgressionCurveSchema, ProgressionSkillRuleSchema, type CombatRule, type NeedsRule, type CraftingRule, type CraftingRecipe, type DayNightRule, type EnvironmentRule, type EnvironmentPhase, type EnvironmentModifier, type PhaseWeatherOption, type GroundOverride, type ServerRule, type RespawnRule, type RaidRule, type DisasterRule, type WildfireRule, type StormRule, type DialogueRule, type DialogueTradeRule, type DialogueSupplyDemandRule, type FactionDefinition, type FactionRule, type AchievementReward, type AchievementDefinition, type AchievementRule, type PlaceRule, type FallDamageRule, type ProgressionRule } from "framework/config/schema/RuleSchema";
 export { FACTION_RELATION_PREFIX, factionRelationKey, getFactionRule, getFactionDefinition, factionOfNpcKind, getFactionRep, addFactionRep, creditFactionForNpcKind, creditTradeFactionRep } from "framework/systems/gameplay/factions";
 export { DEFAULT_TRADE_VOLUME_PREFIX, tradeVolumeKey, tradeVolumeTickKey, tradeVolumePrefix, decayedTradeVolume, recordTradeVolume, tradeUnitPrice, type TradePriceInput } from "framework/systems/gameplay/pricing";
-export { ACHIEVEMENT_PROGRESS_PREFIX, DEFAULT_ACHIEVEMENT_CHECK_INTERVAL, achievementProgressKey, isAchievementUnlocked, getAchievementRule, createAchievementSystem, achievementSystem, type AchievementSystemConfig } from "framework/systems/gameplay/achievementSystem";
+export { ACHIEVEMENT_PROGRESS_PREFIX, ACHIEVEMENT_PENDING_PREFIX, DEFAULT_ACHIEVEMENT_CHECK_INTERVAL, achievementProgressKey, achievementPendingKey, isAchievementUnlocked, getAchievementRule, createAchievementSystem, achievementSystem, type AchievementSystemConfig } from "framework/systems/gameplay/achievementSystem";
 export { setRelation } from "framework/systems/gameplay/relation";
 export { Progression, initProgression, type ProgressionState, type SkillProgress } from "framework/components/progression";
 export { addXp, levelForXp, getSkillBonuses, getSkillAdd, getSkillMultiplier, awardHarvestXp, progressionSystem, getProgressionRules, parseProgressionRules, validateProgressionConfig, validateProgressionRules, DEFAULT_PROGRESSION_CURVE, type ProgressionCurve, type SkillBonusRule, type ProgressionRules, type SkillBonuses, type XpGainResult } from "framework/systems/gameplay/progression";

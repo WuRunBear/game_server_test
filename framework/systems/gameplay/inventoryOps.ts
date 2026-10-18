@@ -17,7 +17,7 @@ import { applyEffectSpecs } from "framework/simulation/effects/effectRegistry";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { ItemKindSpec, ConsumeEffect } from "framework/config/schema/ItemKindSchema";
-import { mergeSpoilAt, spoilAtForTick } from "framework/systems/gameplay/spoilSystem";
+import { spoilAtForTick } from "framework/systems/gameplay/spoilSystem";
 import { isGameplayReachable } from "framework/utils/gameplayDistance";
 import { isOfflineRetained } from "framework/components/offline";
 
@@ -58,7 +58,9 @@ function initialDurabilityFor(
  * 规则：先合入同 kind 未满堆叠，再用空槽；满包则剩余返还。
  *
  * 腐烂到期 tick（可选，经 options 传入）：新堆叠按 kind.spoilTicks 写入
- * `spoilAt`；合并进已有堆叠时取两者最早值（整堆按最早时刻腐烂）。
+ * `spoilAt`；合并进已有堆叠时**要求两堆 spoilAt 完全相同**（F-22）——新鲜与
+ * 快坏的批次不混成整堆，否则整堆会按最早时刻一起腐烂，凭空损失新鲜度。
+ * 不同 spoilAt 时改用空槽（无空槽则剩余返还未入包）。
  */
 export function addToInventory(
   inv: InventoryEntry,
@@ -75,13 +77,12 @@ export function addToInventory(
   // 初始化，保证任何入包路径（采集/拾取/合成/交易/容器转移）都能拿到耐久。
   const durability = options?.durability ?? initialDurabilityFor(itemKinds, kind);
 
-  // 1) 合入同 kind 未满堆叠
+  // 1) 合入同 kind 且同 spoilAt 的未满堆叠（混批不合并——见函数注释）
   for (const slot of inv.slots) {
     if (remaining <= 0) break;
-    if (slot && slot.kind === kind && slot.count < maxStack) {
+    if (slot && slot.kind === kind && slot.count < maxStack && slot.spoilAt === spoilAt) {
       const add = Math.min(remaining, maxStack - slot.count);
       slot.count += add;
-      slot.spoilAt = mergeSpoilAt(slot.spoilAt, spoilAt);
       remaining -= add;
     }
   }
@@ -106,8 +107,10 @@ export function addToInventory(
 /**
  * 转/合/换两个槽。空 from → no-op。
  *
- * 同 kind 合并时以 `maxStackFor(kind)` 决定上限（遵守 item 的 maxStack）；
- * 未提供查找函数或查不到该 kind 时，保守按 1 上限（dst 已满则原地交换）。
+ * 同 kind 且同 `spoilAt` 时按 `maxStackFor(kind)` 合并；spoilAt 不同（混批）
+ * 时不合并——直接失败并保持两槽原样（F-22：避免新鲜与快坏批次混堆后按最早
+ * 时刻整堆腐烂）。未提供查找函数或查不到该 kind 时，保守按 1 上限（dst 已满
+ * 则原地交换）。
  */
 export function transferSlot(
   inv: InventoryEntry,
@@ -127,17 +130,18 @@ export function transferSlot(
   }
 
   if (dst.kind === src.kind) {
+    // 混批不可合并：状态不变（调用方按 false 处理为「目标槽已有不同批次」）
+    if (dst.spoilAt !== src.spoilAt) return false;
     const maxStack = maxStackFor ? maxStackFor(src.kind) : DEFAULT_MAX_STACK;
     const space = maxStack - dst.count;
     const move = Math.min(src.count, space);
     if (move <= 0) {
-      // 同 kind 但 dst 已满 → 原地交换（保持两者都可见）
+      // 同 kind 同批次但 dst 已满 → 原地交换（保持两者都可见）
       inv.slots[to] = src;
       inv.slots[from] = dst;
       return true;
     }
     dst.count += move;
-    dst.spoilAt = mergeSpoilAt(dst.spoilAt, src.spoilAt);
     src.count -= move;
     if (src.count <= 0) inv.slots[from] = null;
     return true;

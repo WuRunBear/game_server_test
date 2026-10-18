@@ -106,6 +106,7 @@ describe("F-21 规则 schema 注册与非法配置拒绝", () => {
       placeRange: 64,
       containerRange: 64,
       gridSnap: false,
+      maxEnclosedArea: 256,
     });
     const progression = ProgressionRuleSchema.parse({});
     expect(progression).toEqual({});

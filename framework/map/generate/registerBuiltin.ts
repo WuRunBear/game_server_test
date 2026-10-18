@@ -3,7 +3,7 @@
  *
  * 每个积木对应一个注册名（如 "noise-terrain"），由地图生成配置
  * （MapGenerationConfig.pipeline[].generator）引用。注册表实例由
- * bootstrap 创建后传入（接线属后续核心切换 todo）。
+ * bootstrap 创建后传入，`bootstrapFramework()` 已接线。
  */
 import type { GeneratorRegistry } from "map/generate/generatorRegistry";
 import { caCave } from "map/generate/blocks/caCave";

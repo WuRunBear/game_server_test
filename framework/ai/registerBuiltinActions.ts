@@ -6,7 +6,6 @@
  * 游戏如需自定义节点，可在 src/register.ts 中另行注册。
  */
 import type { ActionRegistry } from "framework/ai/actionRegistry";
-import { createIdleAction } from "framework/ai/nodes/actions/idle";
 import { createWanderAction } from "framework/ai/nodes/actions/wander";
 import { createChaseAction } from "framework/ai/nodes/actions/chase";
 import { createFleeAction } from "framework/ai/nodes/actions/flee";
@@ -20,7 +19,6 @@ import { createIsInLightCondition } from "framework/ai/nodes/conditions/isInLigh
 import { createHealthBelowCondition } from "framework/ai/nodes/conditions/healthBelow";
 
 export function registerBuiltinActions(registry: ActionRegistry): void {
-  registry.register("Idle", createIdleAction);
   registry.register("Wander", createWanderAction);
   registry.register("Chase", createChaseAction);
   registry.register("Flee", createFleeAction);

@@ -26,6 +26,19 @@ export interface PathfindingConfig {
   waypointTolerance: number;
   /** Flee 的逃逸目标距离（像素，tile-units 归一化后的形态）。 */
   fleeGoalDistance: number;
+  /**
+   * 目标稳定阈值（像素，tile-units 归一化后的形态）：目标格相对上次实际
+   * 寻路目标的偏移不超过该值时不立即重算（等 repathTicks 间隔），抑制目标
+   * 在格边界附近抖动导致的高频 A*。0 = 任何目标格变化都立即重算（旧行为）。
+   * 配置写 `goalStabilityTiles`（格），加载期归一化为本 px 键。
+   */
+  goalStability: number;
+  /**
+   * 每 tick 的 A* 搜索预算（全局共享，跨实体/行为树）：超出预算的寻路请求
+   * 不再跑 A*——沿用旧路径（有则继续沿 waypoint 走），无旧路径则回退直线。
+   * 用于避免大量 NPC 在同一帧同时求路造成的帧尖峰。
+   */
+  maxSearchesPerTick: number;
 }
 
 /** 默认值（按 tile 尺寸派生：0.35 格判定半径、8 格逃逸距离、1 秒重算、16384 节点）。 */
@@ -36,6 +49,8 @@ export function createDefaultPathfindingConfig(tilePx: number): PathfindingConfi
     maxNodes: 16384,
     waypointTolerance: 0.35 * tilePx,
     fleeGoalDistance: 8 * tilePx,
+    goalStability: 0,
+    maxSearchesPerTick: 8,
   };
 }
 
@@ -56,6 +71,8 @@ const CONFIG_KEYS = new Set([
   "maxNodes",
   "waypointTolerance",
   "fleeGoalDistance",
+  "goalStability",
+  "maxSearchesPerTick",
 ]);
 
 function asRecord(value: unknown, source: string): Record<string, unknown> {
@@ -75,6 +92,13 @@ function positiveInteger(value: unknown, source: string, field: string): number 
 function positiveNumber(value: unknown, source: string, field: string): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     throw new Error(`${source}.${field}: expected a positive number, got ${String(value)}`);
+  }
+  return value;
+}
+
+function nonNegativeNumber(value: unknown, source: string, field: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(`${source}.${field}: expected a non-negative number, got ${String(value)}`);
   }
   return value;
 }
@@ -127,6 +151,16 @@ export function parsePathfindingConfigValue(
       source,
       "fleeGoalDistance",
     );
+  }
+  if (raw.goalStability !== undefined) {
+    overrides.goalStability = nonNegativeNumber(
+      raw.goalStability,
+      source,
+      "goalStability",
+    );
+  }
+  if (raw.maxSearchesPerTick !== undefined) {
+    overrides.maxSearchesPerTick = positiveInteger(raw.maxSearchesPerTick, source, "maxSearchesPerTick");
   }
 
   return overrides;

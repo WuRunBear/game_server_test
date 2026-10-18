@@ -896,7 +896,7 @@ describe("Slice 2 集成：战斗闭环", () => {
         Health: { current: 60, max: 60 },
         Attack: { value: 8, range: 32 },
         Cooldown: {},
-        Perception: { visionRadius: 160, hostilityRange: 80 },
+        Perception: { visionRadius: 160 },
         LootTable: [{ kind: "m1", qty: 1, chance: 1 }],
       },
       behavior: "test-hostile-bt",

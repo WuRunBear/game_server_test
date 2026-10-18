@@ -160,13 +160,13 @@
   并接入游戏逻辑/快照；`growthScale` 接到作物/资源再生速率（FSM 定时缩放）。
 - 验收：冬季草地查询为雪地、雪线随进度移动；资源再生速率随相位变化。
 
-### ☐ F-16 `setLevel` 写回缺失
+### ☑ F-16 `setLevel` 写回缺失
 - 位置：`framework/map/runtime/terrainWriteback.ts`、`docs/map-system-v2-design.md:48`
 - 问题：设计声明 `setGround/setWalkable/setLevel` 三入口，实现只有前两者，偏差清单未记。
 - 修复方向：补 `setLevel`（含指纹/碰撞失效/脏格），或把设计改为"level 写回后置"并记录。
 - 验收：二选一，文档与实现一致。
 
-### ☐ F-17 坠落伤害未实现
+### ☑ F-17 坠落伤害未实现
 - 位置：`framework/systems/core/entityLevelSystem.ts:176`、
   `docs/map-system-v2-design.md:24`
 - 问题：cliff 跳下只放行，无 cliff 语义校验、无按层数伤害。
@@ -206,16 +206,16 @@
 
 | ID | 位置 | 问题 | 处理 |
 |---|---|---|---|
-| F-22 | `inventoryOps.ts:79,135` + `spoilSystem.ts:52-93` | 腐烂整堆取最早 spoilAt（混批全坏） | 记录；可选按批次拆堆 |
-| F-23 | `craftingSystem.ts:291-293,433-435` | 合成产物未传 nowTick，spoilAt 晚 1 tick 补写 | 低成本修 |
-| F-24 | `achievementSystem.ts:149-169` | 无在线玩家时成就奖励永久丢弃 | 改为"待领取"进度键，上线兑换 |
-| F-25 | `builtStructures.ts:103-111,142-149` | 同格第二个连接器被静默丢弃 | 加载期校验 + 告警 |
-| F-26 | `indoors.ts:73-80`、`builtStructures.ts:230-249` | 房间检测 256 格上限、图边界当墙 | 记录；可配置上限 |
-| F-27 | `factions.ts:22-28` | 势力声望复用 Relation（`faction:` 前缀），语义混淆 | 记录；消费方按前缀过滤 |
-| F-28 | `aosSyncAdapters.ts:78-92` | 其他玩家的背包槽位对视野内客户端可见 | 合作向可接受；PvP 前裁剪为仅自己 |
-| F-29 | `navigate.ts:151-152` | 目标格抖动绕过节流；A* 无每帧预算 | 加目标稳定阈值 + 每帧预算上限 |
-| F-30 | `GameSimulation.ts:704-718` | 自动存档在 tick 线程同步序列化全图 | 记录；后续改增量/异步 |
-| F-31 | `populationSystem.ts:239-240` | 离线不实例化 spawnInstances | 当前全关，记录 |
+| F-22 | `inventoryOps.ts:79,135` + `spoilSystem.ts:52-93` | 腐烂整堆取最早 spoilAt（混批全坏） | 已修：不同 spoilAt 不合并（拆批保留各自到期），满槽剩余返还 |
+| F-23 | `craftingSystem.ts:291-293,433-435` | 合成产物未传 nowTick，spoilAt 晚 1 tick 补写 | 已修：即时/延时/预检均传 nowTick |
+| F-24 | `achievementSystem.ts:149-169` | 无在线玩家时成就奖励永久丢弃 | 已修：achievement-pending 键，上线补发（幂等、满包重试） |
+| F-25 | `builtStructures.ts:103-111,142-149` | 同格第二个连接器被静默丢弃 | 已修：保留 eid 序首个 + 一次性 warn（含 map/tile/eid） |
+| F-26 | `indoors.ts:73-80`、`builtStructures.ts:230-249` | 房间检测 256 格上限、图边界当墙 | 已修：place.json maxEnclosedArea 可配（缺省 256） |
+| F-27 | `factions.ts:22-28` | 势力声望复用 Relation（`faction:` 前缀），语义混淆 | 保留：键前缀约定 + 消费方过滤（文档记录，未新增组件） |
+| F-28 | `aosSyncAdapters.ts:78-92` | 其他玩家的背包槽位对视野内客户端可见 | 已修：per-client 快照裁剪他人 Inventory，本人可见 |
+| F-29 | `navigate.ts:151-152` | 目标格抖动绕过节流；A* 无每帧预算 | 已修：goalStabilityTiles + maxSearchesPerTick（超预算沿用旧路/回退直线） |
+| F-30 | `GameSimulation.ts:704-718` | 自动存档在 tick 线程同步序列化全图 | 部分改进：JSON.stringify 移出 tick 异步段；serializeWorld ~11.5ms 同步边界记录为可接受 |
+| F-31 | `populationSystem.ts:239-240` | 离线不实例化 spawnInstances | 结论：保持离线不实例化（记账已快进，上线首 tick 补足；理由入 JSDoc） |
 | F-32 | `deathSystem.ts:141-152` | 重启后 0 血玩家重复掉落/空尸体 | 已随 F-07 修复：恢复时补重生标记，deathSystem 跳过 |
 | F-33 | `game/rules/dialogue.json:2` vs `game.json:44` | `talkRange:48` 被 interaction.range 24 先筛 | 已在批次 A 修复：talk 分支读 dialogue.talkRange，interaction.range 只约束 interact/attack |
 | F-34 | `game/ecosystems.json:131-136` | rocky 夜狼 `every:155520000 + isNight` 永不触发 | 已修：every→900，保留 max 1 + isNight |
@@ -226,11 +226,11 @@
 
 ## 4. P3 —— 占位/死代码/卫生
 
-### ☐ F-37 桩后端
+### ☑ F-37 桩后端
 - `framework/postgres.ts`、`framework/redis.ts`：空实现且未导出。处理：删除或标注"未实现、
   不可用"并在文档中明确；不假装可用。
 
-### ☐ F-38 零消费者组件/效果/导出
+### ☑ F-38 零消费者组件/效果/导出
 - 组件：`AIState`、`Target`、`BlackboardRef`、`Duration`、`LastSynced`、`Perception.hostilityRange`
 - 效果：`heal`、`spawn-projectile`、`impulse`、`ledger`、`spawn-entity`
 - 导出/函数：`subscribeEvent`、`dispatchEvents`、`drainDirtyTiles`、`setWalkable`（仅测试）、
@@ -238,17 +238,17 @@
   `materializePopulation`、`populationSnapshot`
 - 处理：逐项决定"接线使用 / 删除 / 注释标死"；`hostilityRange` 要么实现受击反击，要么删配置。
 
-### ☐ F-39 死事件：`on-item-break` / `on-achievement` 无触发器求值器
+### ☑ F-39 死事件：`on-item-break` / `on-achievement` 无触发器求值器
 - `framework/simulation/triggers/triggerRegistry.ts:91-100`、`durability.ts:78`、
   `achievementSystem.ts:163`
 - 处理：注册求值器（配置可消费）或在文档明确"仅服务端事件"。
 
-### ☐ F-40 未使用内容
+### ☑ F-40 未使用内容
 - `wall_upper`（零引用）、`Idle`（无树使用）、`ca-cave`/`height-mask`（无图使用）、
   `Ledger`（无 archetype/效果启用）、`QUEST_AVAILABLE`（未使用）
 - 处理：接入演示或删除/标注。
 
-### ☐ F-41 死配置/魔法值清单化
+### ☑ F-41 死配置/魔法值清单化
 - `initialAgeTicks/every=155520000/51840000`、campfire 1e9、water_pool 9999、
   `building-demo initialAgeTicks:1`——统一注释"语义=近似无限/只刷一次"，或改为显式字段。
 
@@ -264,11 +264,11 @@
   仍由 `maxMoveSpeed` 拒绝式校验负责）；NaN/Infinity 整条拒绝；interact/attack/talk
   归一布尔。GameRoom 浅校验同规则。
 
-### ☐ F-44 商店无限货架/钱箱
+### ☑ F-44 商店无限货架/钱箱
 - `dialogueSystem.ts:150-190`：单方 settle，无商人库存/资金；卖出物品直接消失。
 - 处理：至少给商人配置库存/资金（可复用 Ledger），或文档明确"抽象商店"。
 
-### ☐ F-45 文档纠偏（逐条）
+### ☑ F-45 文档纠偏（逐条）
 - `docs/map-system-v2-design.md`：偏差清单补 `setLevel`、坠落伤害、季节派生视图、
   `ca-cave` 未用于任何图。
 - `docs/gameplay-v2-design.md`：删除"投掷矛 demo 完成"虚报；"未落地：无"改为实际缺口表；
@@ -280,7 +280,7 @@
 - `framework/map/geometry/types.ts:7`、`clock.ts:10`、`PlayerRuleSchema.ts:7`、
   `registerBuiltin.ts:6`、`GameSimulation.ts:381` 等"尚未实现/后续 todo"注释已过期。
 
-### ☐ F-46 浅测试补强
+### ☑ F-46 浅测试补强
 - `map-boot-smoke`、`map-generate-aux`、`map-validate-integrity`、`map-validate-level`、
   `runtime-boundaries`（schema 结构）：补行为断言（尤其针对 F-01/F-02/F-05/F-07/F-19）。
 
@@ -371,3 +371,67 @@
   斑驳（coverage+hash）、区域包含/排除，链式顺序；不写回/不落盘/确定性。StateMachine
   定时迁移支持 `scale:"growthScale"`（区间积分，跨相位连续；未声明零变化），
   berry_bush 再生接入；离线快进与逐 tick 同一函数（等价断言）。
+
+### 批次 F2（卫生、商店库存、文档、浅测试）
+
+- F-37 桩后端：删除 `framework/postgres.ts` / `framework/redis.ts`；全仓无 import。
+  文档统一改为「无外部数据库后端（仅文件仓储）」（architecture / ROADMAP / AGENTS /
+  HANDOFF / SURVIVAL-ISLAND-PLAN）。
+- F-38 零消费者清理（逐项）：
+  - 删除组件 `AIState` / `Target` / `BlackboardRef`（`components/ai.ts` 整文件）、
+    `Duration`、`LastSynced`、`Perception.hostilityRange`；同步清理注册表、瞬态名单、
+    game/测试配置引用。`Perception` 仅保留 `visionRadius`。
+  - 删除导出/函数：`clampMs`（`utils/timer.ts` 整文件）、`spawnInitialEntities`
+    （空 no-op）、`listIndoorEntities`、`subscribeEvent`/`dispatchEvents`（事件总线只保留
+    `drainEvents` 单消费路径，`EventBus.handlers` 一并删除）、`addTrigger`（配置走
+    `initTriggers`）、`clearTimers`（实体销毁由 `destroyEntity` 统一清 AoS 定时条目）、
+    `populationSnapshot`、`materializePopulation`（保留内部函数，移出公共导出）。
+  - 保留并说明：`setWalkable`/`drainDirtyTiles` 是写回入口的一部分（terrainWriteback
+    由并行 lane 独占，未改）；`populationSpawnBudget` 等非清单导出未动。
+  - 效果：`heal` 接入熟肉与成就触发器；`ledger` 接入 `on-item-break`（破碎装备计数）；
+    `spawn-entity` 在测试中保留；`spawn-projectile`/`impulse` 为通用能力保留、当前
+    game 配置零引用（已在设计文档如实标注）。
+- F-39 `on-item-break` / `on-achievement` 注册内建求值器；实体 Triggers 配置可消费。
+  game/entities/player.json 增加对应示例（破碎记 `broken_gear`、成就回血）。
+- F-40 `Idle` 删除（动作注册 + 实现 + 相关断言）；`QUEST_AVAILABLE` 删除（未接任务不建
+  条目）；`wall_upper` 确认已在 building-demo 的 entity-rules 使用；`ca-cave`/`height-mask`
+  能力保留、无图使用（文档标注）；`Ledger` 与 `ledger` 效果启用（商店库存 + 破碎计数）。
+- F-44 商店库存/资金：商贩实体挂 `Ledger` = 有限商店（currency 余额=资金，其余 kind=
+  库存），无 `Ledger` = 旧无限货架/钱箱。`tradeAtShop` 改为玩家+商贩双方 settle；
+  买扣库存/加资金，卖加库存/扣资金，不足整单拒绝。库存/资金随实体入档（AoS 全量），
+  不同步客户端（服务端权威）。villager.json 配 `shell:100 / shell_spear:6 / axe:6`。
+- F-45 文档与过期注释：map-system-v2 偏差清单补 setLevel/坠落/季节派生/ca-cave 与
+  height-mask；gameplay-v2 删除投掷矛虚报、把「未落地：无」换成实际缺口表；
+  gameplay-features-design 更新 computeStat/触发器/容器商店语义；ROADMAP 的
+  `RoomState.entities` 与存档防御口径；HANDOFF 待办；CLIENT-INTEGRATION 的
+  `ResourceNode.remaining` 语义；过期代码注释（types/PlayerRuleSchema/registerBuiltin/
+  entityLevel/triggerRegistry）。`GameSimulation.ts` 注释因并行 lane 独占未改。
+- F-46 浅测试：`map-boot-smoke` 补玩家出生可通行/需求衰减/昼夜推进/资源与商贩内容
+  接线；`map-generate-aux` 补 brand 运行时语义与真实 height-channel→height-mask 闭环
+  （缺上游拒绝）；`map-validate-integrity` 补通过/拒绝的结构差异；`map-validate-level`
+  补冻结几何上 level→cliff 通行联动。
+- 新增 `framework/__tests__/integrity-batch-f2.test.ts`：死组件不注册、两个触发器求值、
+  商店买空/资金不足/卖出加库存/无配置无限货架/存档恢复。
+
+
+### 批次 F（98 文件 / 1208 用例）
+- F-16 `setLevel`：terrainWriteback 新增（Int8 校验、指纹、地形纪元、脏格），delta 存档支持 level。
+- F-17 坠落伤害：place.json `fallDamage{damagePerLevel,minDropLevels}`；层差≥阈值按标准公式结算，
+  slope 下行不扣血；cliff 语义校验；传送按落点重确立层号避免误判。
+- F-22/23 腐烂与合成计时：不同 spoilAt 不合并（拆批）；合成入包传 nowTick。
+- F-24 成就待领取：achievement-pending 键，上线补发（幂等、满包重试）。
+- F-25/26 连接器与房间：同格冲突保留首个 + 一次性 warn；maxEnclosedArea 可配。
+- F-28 背包可见性：per-client 快照裁剪他人 Inventory。
+- F-29 A*：goalStabilityTiles（tile-units 归一化）+ maxSearchesPerTick，超预算沿用旧路/回退。
+- F-30 存档：JSON.stringify 移出 tick 同步段；serializeWorld 同步边界记录。
+- F-31：保持离线不实例化（记账快进，上线补足）。
+- F-37 桩后端：删除 postgres/redis 与文档引用。
+- F-38 死组件/导出：删除 AIState/Target/BlackboardRef/Duration/LastSynced/hostilityRange、
+  subscribeEvent/dispatchEvents/clampMs/spawnInitialEntities/listIndoorEntities/addTrigger/
+  clearTimers/populationSnapshot；heal/ledger 接线使用；spawn-projectile/impulse/spawn-entity
+  能力保留并标注；materializePopulation 转内部。
+- F-39 死事件：注册 on-item-break/on-achievement 求值器（player 触发器示例）。
+- F-40 未使用内容：删除 Idle/QUEST_AVAILABLE；ca-cave/height-mask 能力保留并文档标注。
+- F-41 魔法值：无限资源/燃料已显式化（D2）；initialAge/every 作为内容语义在文档记录。
+- F-44 商店库存/资金：商贩 Ledger（currency=资金，其余=库存），买卖双方 settle，入档。
+- F-45 文档纠偏与 F-46 浅测试补强：按审计清单完成（GameSimulation todo 注释留待后续）。

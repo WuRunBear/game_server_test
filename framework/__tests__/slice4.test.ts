@@ -131,7 +131,7 @@ function registerHunterArchetypeAndBehavior(world: GameWorld): void {
       Health: { current: 80, max: 80 },
       Attack: { value: 10, range: 32 },
       Cooldown: {},
-      Perception: { visionRadius: 180, hostilityRange: 100 },
+      Perception: { visionRadius: 180 },
     },
     behavior: "w1-night",
     team: 2,

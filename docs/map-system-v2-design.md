@@ -218,7 +218,7 @@ noise-terrain(岛形遮罩+ridged)
 | 5 跨层移动 | `a941b82` | 按层碰撞（静态体矩形合并）、level 转移+滞回、单向跳崖、投射物锁层 |
 | 6 楼层建造 | `6111c66` | GridOccupancy 加层、Structure（楼板/墙/连接器）、walkableAtLevel 统一、房间检测、9 处距离检查收敛 |
 | 7 写回+增量存档 | `0b1d337` | setGround/setWalkable（指纹重算/碰撞失效/脏格）、出厂底板 diff、指纹比对拒读档、>10% 降级全量 |
-| 8 新生成积木 | `a941b82` | noise-channel、whittaker-regions、river、ca-cave + island-v2 演示图 |
+| 8 新生成积木 | `a941b82` | noise-channel、whittaker-regions、river、ca-cave 积木 + island-v2 演示图（island-v2 实际使用 noise/river/whittaker/quantize，未使用 ca-cave） |
 | 9 配方/袭击/灾害 | `0cb4cd9` | 配方解锁/时长/燃料（玩法线 C+E 同批）、袭击导演（预警/门槛/暂停）、野火/风暴（真实消费写回） |
 
 ### 与设计的偏差 / 后置项（如实记录）
@@ -231,4 +231,8 @@ noise-terrain(岛形遮罩+ridged)
 6. **楼板格与同层家具的占用冲突未解**：占用模型无"面/内容"之分，楼板格之上暂不能再放同层家具（留待真实需求）。
 7. **levelSemantics 不进指纹**：作为 MapGeometry 可选字段经快照往返；语义 id 变化必然改写 tiles，指纹经 tiles 传递。
 8. **区域归属写回仍不做**（设计原意，v1 明确不开放）。
+9. **`setLevel` 写回已开放（F-16，批次 F1）**：写回入口现为 `setGround / setWalkable / setLevel` 三路，level 进内容指纹与增量存档（`{tileIndex, field:"level", value}`）；写回只改底板，不改已存在实体的层号——`entityLevelSystem` 下一 tick 按 slope/连接器/cliff 过渡规则跟随。
+10. **坠落伤害已实现（F-17，批次 F1）**：跳崖要求落点格为 `levelSemantics.cliff`（有层语义的图），并按 `rules/place.json` 的 `fallDamage`（`damagePerLevel` / `minDropLevels`）走标准伤害公式扣血；slope 的 ±1 下行不扣血，无配置零变化。
+11. **季节派生视图（F-15）已实现，但不是所有消费方都接线**：`effectiveGroundAt` / `deriveEffectiveGround` 纯函数与 StateMachine 的 `growthScale` 区间积分已落地（离线/在线同函数）；当前只有浆果丛再生接 growthScale，雪地/湿地面为查询派生（不写回、不落盘），客户端视觉渲染尚未接线。
+12. **`ca-cave` 生成积木无图使用（能力保留）**：CA 平滑雕挖 + 连通保证有独立单测覆盖；现有 `cave` 用 noise-terrain + room-corridor，`island-v2` 用 noise/river/whittaker/quantize，均未引用 `ca-cave`。`height-mask` 亦无配置图引用（仅测试覆盖），`height-channel` 在 highlands/island-v2 使用。
 

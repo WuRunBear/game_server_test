@@ -79,7 +79,7 @@ git branch --show-current        # 确认已是新分支
 1. **范围取舍：对话+任务+好感，faction/achievement/progression 不做**：PLAN 原列 6 系统按需收敛——故事闭环只需对话树承载剧情、任务驱动目标、好感回馈关系；成就/等级是离线统计与第三成长维，无 demo 需求牵引
 2. **任务双形态（用户决策）**：collect 型纯配置（背包计数，零新机制）+ kill 型需要事件——落地帧内事件总线（无订阅解耦的最简队列，帧首清空防堆积）；事件消费方先整体取出再分发（清空式消费的共享语义）
 3. **对话入口=新交互键（用户决策）**：PlayerInput.talk 独立意图而非复用 interact——对话是显式社交动作，与采集（interact）语义分离；客户端协议扩展面可控（一个可选布尔字段）
-4. **对话/任务/好感全部 AoS 组件挂玩家**：变长结构走 S1 定型的 AoS 家族机制（初始化钩子 + 同步适配器 + worldSerializer 全量入档）；Dialogue 入瞬态名单（会话重连重开，与 Velocity/AIState 同类），Quest/Relation 持久（进度/好感随玩家存档）
+4. **对话/任务/好感全部 AoS 组件挂玩家**：变长结构走 S1 定型的 AoS 家族机制（初始化钩子 + 同步适配器 + worldSerializer 全量入档）；Dialogue 入瞬态名单（会话重连重开，与 Velocity 同类），Quest/Relation 持久（进度/好感随玩家存档）
 5. **效果驱动任务（对话节点选项挂效果）**：accept/submit 不新开命令通道，而是对话选项效果——任务线完全由对话树配置编排（换任务线只改配置）；效果失败不推进（玩家停留可重试，无需失败分支节点）
 6. **submit 好感对象=对话 NPC kind**：提交行为发生在对话中，对象即对话对象——任务定义不声明好感对象，消除配置重复与漂移
 7. **击杀事件在 combatSystem 发射而非 deathSystem**：attackTarget 是唯一知道"谁打的最后一击"的点（deathSystem 处理饿死等无击杀者死亡，不产生击杀事件）
@@ -97,7 +97,7 @@ git branch --show-current        # 确认已是新分支
 - 其余 S1-S6 陷阱（AoS 家族、destroyEntity、触发判定与碰撞分离互斥、systemRuntimes 选择性重建、存档异步写、schema:gen 空文件、Colyseus async onCreate）不变
 
 ## 8. 已知待办（未修，不要擅自处理）
-- **待办已清零**（本切片无遗留缺陷）；记录不修：factionSystem / achievementSystem / progressionSystem（无真实需求牵引）、对话选项好感解锁条件（无消费方）、postgres/redis 真实现（等真实部署需求）、`schema:gen` 空文件（工具链问题）、LagComp（ROADMAP 缺口）
+- **当前待办**（2026-10-18 批次 F2 更新）：无阻塞项；明确不做/后置：factionSystem / achievementSystem / progressionSystem 的更深内容（框架已有基础实现，无真实需求牵引）、对话选项好感解锁条件（无消费方）、**外部数据库后端（仅文件仓储；postgres/redis 桩已删除）**、`schema:gen` 空文件（工具链问题）、LagComp（ROADMAP 缺口）、`ca-cave` 生成积木（能力保留、暂无演示图使用）、`spawn-projectile` / `impulse` 效果（通用能力保留、暂无 game 配置引用）
 - **S6 审查 P2 记录不修（追加补充，与 PLAN 对账对齐）**：slice5 fileRepository 并发写 flaky（mkdir 微任务竞态）、enterMap 保留物越界（cave 小图虚空实体）、floor/furniture 与 wall 同格叠放被拒（无层概念）、portal 刷怪随机点位置不稳、campfire 被动 gridSnap（24px→2×2 格）、Placeable.ownerNetworkId 未进 netSync——详见 PLAN「S6 审查 P2 记录不修」与「后续候选」表
 - **兴趣裁剪晚加入竞态（colyseus/colyseus#935，core 0.17.43 缺陷，记录不修）**：`SchemaSerializer.getFullState` 在 `root.changes` 非空窗口（本部署每 50ms tick 改 tick/hour 必现）重跑 `encodeAll` 时缺结构引入（旧玩家的 players map ADD 已被消费），晚加入客户端全量快照出现 `"refId not found"`/`"field not defined"` 解码告警、可能看不到旧玩家实体。PR#936 关闭未合并（endel 转 schema 侧修复，4.0.22 拓扑序只解决 view.changes 顺序一类）；已装 core 0.17.43/schema 4.0.25 无完整修复。**规避（本次修复已含）**：GameRoom 最小视图接线（只挂自己 PlayerState + 实体进出 view.add/remove）消除了跨玩家 refId 泄漏；残余影响仅"多玩家时晚加入者可能缺旧玩家结构"。处置选项：升级 core 评估（0.17.44+ 无明确修复版，schema 5.x 为破坏性大版本，需前后端同步升级）或维持现状。实证过程：`applyInterest` 实体未 `view.add` → `isVisibilitySharedWithParent=false` → 实体树 invisible → 内容不编码（NPC 冻结根因，已修）
 - 基线三命令：`pnpm test`（199 全绿）+ `npx tsc --noEmit`（0）+ `pnpm tools validate`（✓）+ framework 游戏词 grep 空（blackboard 技术词豁免，rg 未安装时用 grep 工具核对）

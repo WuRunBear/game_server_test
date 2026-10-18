@@ -12,16 +12,3 @@ export const NetworkId = defineComponent({
    */
   value: Types.ui32,
 });
-
-/**
- * LastSynced 组件：实体最近一次被同步的逻辑帧（SoA 结构）。
- *
- * 约定：
- * - tick 用于增量同步、跳帧补发等策略
- */
-export const LastSynced = defineComponent({
-  /**
-   * 最近一次同步的逻辑帧。
-   */
-  tick: Types.ui32,
-});

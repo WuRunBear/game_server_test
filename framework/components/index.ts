@@ -11,15 +11,13 @@ export { Size } from "components/size";
 export { Velocity, Acceleration, Collider, ColliderShape } from "components/physics";
 // —— 战斗 ——
 export { Health, Attack, Defense, Team } from "components/combat";
-// —— AI ——
-export { AIState, BlackboardRef, Target } from "components/ai";
 // —— 物品/背包（AoS 数据组件） ——
 export { Inventory, initInventory, type ItemStack, type InventoryEntry } from "components/inventory";
 export { ItemMeta, type ItemMetaEntry } from "components/itemMeta";
 // —— 网络同步 ——
-export { NetworkId, LastSynced } from "components/network";
+export { NetworkId } from "components/network";
 // —— 计时 ——
-export { Cooldown, Duration } from "components/timer";
+export { Cooldown } from "components/timer";
 // —— 实体寿命（SoA，持久绝对到期 tick）——
 export { Lifetime } from "components/lifetime";
 // —— 计数账本 / 投射物 ——
@@ -52,7 +50,7 @@ export { GridOccupancy } from "components/gridOccupancy";
 export { Portal, initPortal, type PortalState } from "components/portal";
 export { Dialogue, type DialogueState } from "components/dialogue";
 export { DialogueSource, initDialogueSource, type DialogueSourceState } from "components/dialogueSource";
-export { Quest, QUEST_AVAILABLE, QUEST_ACTIVE, QUEST_READY, QUEST_DONE, type QuestState } from "components/quest";
+export { Quest, QUEST_ACTIVE, QUEST_READY, QUEST_DONE, type QuestState } from "components/quest";
 export { Relation, type RelationState } from "components/relation";
 export { Intent } from "components/intent";
 export { Kind } from "components/kind";

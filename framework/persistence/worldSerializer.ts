@@ -16,7 +16,7 @@
  *    结构），与 netSync 的 buildSnapshot 同构。
  * 3. **恢复语义**：按 kind 查 archetype → spawnEntity（含 tags/team/AoS 初始化）
  *    → 覆写存档组件值 → 覆写 NetworkId（保持客户端稳定标识）→ 固定 nextNetworkId。
- * 4. **eid 不保真**：恢复后 eid 由 bitecs 重新分配，跨存档引用（如 Target 的 eid）
+ * 4. **eid 不保真**：恢复后 eid 由 bitecs 重新分配，运行时跨实体引用（AI 目标等）
  *    一律不入存档（瞬态名单）；客户端凭 networkId 稳定追踪实体。
  */
 import { query, hasComponent, addComponent } from "bitecs";
@@ -50,10 +50,8 @@ import type { SerializedEntity, WorldRecord } from "framework/repository";
  *
  * 理由（逐项）：
  * - Velocity：每帧清零/写入的移动输入，存档瞬间值无意义
- * - Target / AIState / BlackboardRef：AI 运行时状态，目标 eid 跨存档失效，恢复后重感知
- * - Cooldown / Duration：计时器，重启即重置
+ * - Cooldown：计时器，重启即重置
  * - Intent：一帧脉冲信号
- * - LastSynced：传输层内部同步标记
  * - Kind：由 archetype.kind 承载（序列化用 kind 字段，恢复时 spawnEntity 重写）
  * - NetworkId：单独存于 SerializedEntity.networkId 字段，恢复时显式覆写，故不进组件块
  * - Dialogue：瞬态对话会话（当前对话树/节点/选项），断线重连后重置
@@ -69,13 +67,8 @@ import type { SerializedEntity, WorldRecord } from "framework/repository";
  */
 const RUNTIME_ONLY_COMPONENTS = new Set([
   "Velocity",
-  "Target",
-  "AIState",
-  "BlackboardRef",
   "Cooldown",
-  "Duration",
   "Intent",
-  "LastSynced",
   "Kind",
   "NetworkId",
   "Dialogue",

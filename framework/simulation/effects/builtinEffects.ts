@@ -6,6 +6,10 @@
  * 由 bootstrapFramework 调用一次（注册表查重，重复注册抛错）。
  * 全部效果为通用机制词（damage/heal/status/impulse/ledger/spawn/resource 等），
  * 具体数值与语义由 EffectSpec.params / game/ 配置声明。
+ *
+ * 引用现状（2026-10，F-38）：`heal` / `ledger` 已有 game 配置引用；
+ * `spawn-projectile` / `impulse` / `spawn-entity` 目前只有单测覆盖、无
+ * game 配置引用——它们是通用能力保留项，不是死代码（效果注册表按需引用）。
  */
 import { hasComponent } from "bitecs";
 import { Health, Defense, Kind, Transform, ResourceNode, NetworkId } from "components";

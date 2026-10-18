@@ -19,7 +19,9 @@ import { query } from "bitecs";
 
 import { Inventory, Player } from "components";
 import {
+  ACHIEVEMENT_PENDING_PREFIX,
   ACHIEVEMENT_PROGRESS_PREFIX,
+  achievementPendingKey,
   achievementProgressKey,
   markAchievementUnlocked,
 } from "framework/components/achievements";
@@ -34,7 +36,7 @@ import { addFactionRep } from "framework/systems/gameplay/factions";
 import { queueEvent } from "framework/simulation/events/eventBus";
 
 /** 成就解锁进度键前缀（world.progress）；定义随 Achievements 组件（供同步复用）。 */
-export { ACHIEVEMENT_PROGRESS_PREFIX, achievementProgressKey };
+export { ACHIEVEMENT_PROGRESS_PREFIX, ACHIEVEMENT_PENDING_PREFIX, achievementProgressKey, achievementPendingKey };
 
 /** 缺省检查间隔（tick）。 */
 export const DEFAULT_ACHIEVEMENT_CHECK_INTERVAL = 20;
@@ -61,7 +63,17 @@ function applyReward(world: GameWorld, reward: AchievementReward | undefined, pl
   }
 
   if (playerEid === undefined) return;
+  applyPlayerReward(world, playerEid, reward);
+}
 
+/** 奖励是否包含只能发给玩家的部分（物品 / 势力声望）。 */
+function hasPlayerScopedReward(reward: AchievementReward | undefined): boolean {
+  if (!reward) return false;
+  return (reward.items?.length ?? 0) > 0 || (reward.factionRep?.length ?? 0) > 0;
+}
+
+/** 玩家侧奖励发放（物品入包 + 势力声望；不做世界 progress 部分）。 */
+function applyPlayerReward(world: GameWorld, playerEid: EntityId, reward: AchievementReward): void {
   if (reward.items && reward.items.length > 0) {
     const inv = Inventory[playerEid];
     if (inv) {
@@ -80,6 +92,29 @@ function applyReward(world: GameWorld, reward: AchievementReward | undefined, pl
   }
 }
 
+/**
+ * 奖励物品能否完整入包（dry-run 克隆槽位）：无背包/放不下返回 false。
+ *
+ * 只对 items 判定——声望无容量概念。用真实 addToInventory + nowTick 模拟，
+ * 与正式发放走同一入包/混批规则（F-22 后不合并不同 spoilAt 堆叠）。
+ */
+function rewardFits(world: GameWorld, playerEid: EntityId, reward: AchievementReward): boolean {
+  if (!reward.items || reward.items.length === 0) return true;
+  const inv = Inventory[playerEid];
+  if (!inv) return false;
+  const dryInv = {
+    capacity: inv.capacity,
+    slots: inv.slots.map((slot) => (slot ? { ...slot } : null)),
+  };
+  for (const item of reward.items) {
+    const leftover = addToInventory(dryInv, world.gameDef.itemsByKind, item.kind, item.count, {
+      nowTick: world.time.tick,
+    });
+    if (leftover > 0) return false;
+  }
+  return true;
+}
+
 /** 系统级配置 schema（game.json systems[].config）。 */
 export interface AchievementSystemConfig {
   /** 检查间隔（tick）；缺省 20。 */
@@ -95,6 +130,61 @@ export function createAchievementSystem(config?: AchievementSystemConfig) {
       : DEFAULT_ACHIEVEMENT_CHECK_INTERVAL;
   /** 已告警过的未知条件名（防每 tick 刷日志）。 */
   const warnedConditions = new Set<string>();
+  /** 已有待领取奖励但背包放不下的玩家（防每检查周期刷日志）。 */
+  const warnedPending = new Set<string>();
+
+  /**
+   * 补发挂起的成就奖励（F-24）：无在线玩家时解锁写入的
+   * `achievement-pending:<id>`，在玩家上线后由本函数发放并清除。
+   *
+   * - 接收者优先取「条件对其成立」的在线玩家，否则取首个在线玩家（世界级
+   *   条件不区分主体；无人可发时保留 pending 等下一次检查）；
+   * - 物品放不下 → 保留 pending 重试（不半发、不丢失）；
+   * - 发放成功即删除 pending 键——成就标记仍为已解锁，不会二次挂起。
+   */
+  function deliverPendingRewards(world: GameWorld, players: EntityId[], rule: AchievementRule): void {
+    if (players.length === 0) return;
+    const pendingIds: string[] = [];
+    for (const [key, value] of Object.entries(world.progress)) {
+      if (!key.startsWith(ACHIEVEMENT_PENDING_PREFIX) || typeof value !== "number" || value <= 0) continue;
+      pendingIds.push(key.slice(ACHIEVEMENT_PENDING_PREFIX.length));
+    }
+
+    for (const id of pendingIds) {
+      const def = rule.achievements.find((entry) => entry.id === id);
+      const pendingKey = achievementPendingKey(id);
+      if (!def?.reward || !hasPlayerScopedReward(def.reward)) {
+        // 配置已移除/无玩家侧奖励：清掉无意义的挂起键
+        delete world.progress[pendingKey];
+        continue;
+      }
+
+      let recipient: EntityId | undefined;
+      if (hasSpawnCondition(def.condition)) {
+        try {
+          const condition = getSpawnCondition(def.condition);
+          recipient = players.find((playerEid) => condition(world, playerEid));
+        } catch {
+          recipient = undefined;
+        }
+      }
+      recipient ??= players[0];
+      if (recipient === undefined) continue;
+
+      if (!rewardFits(world, recipient, def.reward)) {
+        if (!warnedPending.has(id)) {
+          warnedPending.add(id);
+          world.logger.warn("成就待领取奖励背包放不下，保留待领取", { id, playerEid: recipient });
+        }
+        continue;
+      }
+
+      applyPlayerReward(world, recipient, def.reward);
+      delete world.progress[pendingKey];
+      warnedPending.delete(id);
+      world.logger.info("成就待领取奖励已补发", { id, playerEid: recipient });
+    }
+  }
 
   return function achievementSystem(world: GameWorld): GameWorld {
     if (world.time.tick % checkInterval !== 0) return world;
@@ -103,6 +193,9 @@ export function createAchievementSystem(config?: AchievementSystemConfig) {
     if (!rule?.achievements?.length) return world;
 
     const players: EntityId[] = [...query(world, [Player])];
+
+    // F-24：先补发上次无人在线时挂起的奖励（幂等键，只发一次）
+    deliverPendingRewards(world, players, rule);
 
     for (const def of rule.achievements) {
       if (isAchievementUnlocked(world, def.id)) continue;
@@ -167,6 +260,11 @@ export function createAchievementSystem(config?: AchievementSystemConfig) {
       });
       world.logger.info("成就解锁", { id: def.id, name: def.name ?? def.id });
       applyReward(world, def.reward, triggerPlayer);
+      // F-24：无触发玩家时玩家侧奖励不可发——挂起为待领取键，上线后补发
+      if (triggerPlayer === undefined && hasPlayerScopedReward(def.reward)) {
+        world.progress[achievementPendingKey(def.id)] = 1;
+        world.logger.info("成就奖励挂起待领取（无在线玩家）", { id: def.id });
+      }
     }
 
     return world;

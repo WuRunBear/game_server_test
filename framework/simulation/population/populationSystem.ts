@@ -68,7 +68,6 @@ import {
   regionAreaOf,
   resolveHomeRegion,
   populationGeometryOf,
-  type PopulationNodeState,
 } from "framework/simulation/population/population";
 import type { MapGeometry } from "map/geometry/types";
 import type { GameWorld } from "framework/world";
@@ -218,7 +217,7 @@ const warnedMissingSpecies = new Set<string>();
  * 补足到 count（单节点单门控尝试数有界；确定性随机流）。返回本次新增数。
  * 未开启 / 无几何 / 原型未知时为空操作。
  */
-export function materializePopulation(
+function materializePopulation(
   world: GameWorld,
   eid: number,
   options?: MaterializeOptions,
@@ -303,6 +302,20 @@ export function createPopulationSystem(config?: Record<string, unknown>): (world
  * 离线快进：把全部节点一次推进到 targetTick（槽步进，非逐 tick）。
  * 函数返回时 world.time.tick 恢复为调用前的值（时钟推进归调用方 advanceTickTo）。
  * 只推进节点数值，不做实体实例化（生产通路非节点状态）。
+ *
+ * ## F-31 决策：离线不实例化（保持）
+ *
+ * 离线补差只推进记账数值；`spawnInstances` 的实体落地仍由在线 tick 的
+ * populationSystem 完成（下一 tick 按 count − 半径内存活数补足）。理由：
+ * - 离线窗口通常远超实体生命周期，按补差窗口实例化会产生一批「从无玩家
+ *   观察过、也没有逐 tick 行为历史」的实体，落地后立刻进入 AI/碰撞/同步，
+ *   成本与在线语义都不成立；
+ * - 当前所有生态节点 `spawnInstances` 均为 false（game/entities/nest_spider.json），
+ *   离线实例化没有真实内容牵引；
+ * - 玩家上线后首个 tick 的补足是确定性的（count 已由离线快进推进到正确值），
+ *   不会丢生态进度。
+ * 将来若需要「离线期间也让实体消耗/死亡」，应作为独立切片设计（离线事件
+ * 重放 + 有界预算），而不是在这里偷偷实例化。
  */
 export function fastForwardPopulations(world: GameWorld, targetTick: number): void {
   const saved = world.time.tick;
@@ -314,10 +327,4 @@ export function fastForwardPopulations(world: GameWorld, targetTick: number): vo
   } finally {
     world.time.tick = saved;
   }
-}
-
-/** 只读快照（测试/调试）：拷贝单节点状态。 */
-export function populationSnapshot(eid: number): PopulationNodeState | undefined {
-  const node = Population[eid];
-  return node ? { ...node } : undefined;
 }

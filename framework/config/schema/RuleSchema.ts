@@ -28,11 +28,30 @@ export const CombatRuleSchema = z.object({
 export type CombatRule = z.infer<typeof CombatRuleSchema>;
 
 /**
+ * 坠落伤害子规则（PlaceRuleSchema.fallDamage）：层号向下跃迁 ≥ minDropLevels
+ * 时按层差扣除 Health（通用机制，无游戏语义）。
+ *
+ * 结算走标准伤害公式 `max(1, damagePerLevel × 层差 − 目标防御)`（与 combat
+ * 基础一致），致死归 deathSystem 统一处理。slope 的 ±1 下行不经此路径；
+ * 无本段配置时零变化（不扣血）。
+ */
+export const FallDamageRuleSchema = z.object({
+  /** 每层落差造成的防御前伤害量（正数）。 */
+  damagePerLevel: z.number().positive(),
+  /** 触发伤害的最小层差（整数 ≥ 1；缺省 2——1 层落差视为普通台阶）。 */
+  minDropLevels: z.number().int().min(1).optional(),
+}).passthrough();
+
+/** 坠落伤害规则的类型推断。 */
+export type FallDamageRule = z.infer<typeof FallDamageRuleSchema>;
+
+/**
  * 放置/拆除/容器取回全局规则（game/rules/place.json）。
  *
- * 三个距离/网格参数都被 placeableSystem / deconstructSystem / inventoryOps
- * 直接消费；缺省值与此前的模块内兜底常量保持一致（64 / 64 / false），
- * 因此旧配置（只写其中一部分字段）行为不变。
+ * 距离/网格/室内检测/坠落伤害参数都被 placeableSystem / deconstructSystem /
+ * inventoryOps / indoors / entityLevelSystem 直接消费；缺省值与此前的模块内
+ * 兜底常量保持一致（64 / 64 / false / 256），因此旧配置（只写其中一部分
+ * 字段）行为不变。
  */
 export const PlaceRuleSchema = z.object({
   /** 放置/拆除距离（像素）；缺省 64。 */
@@ -41,6 +60,13 @@ export const PlaceRuleSchema = z.object({
   containerRange: z.number().nonnegative().default(64),
   /** 是否把放置坐标对齐到 tile 格线中心并写入网格占用；缺省 false。 */
   gridSnap: z.boolean().default(false),
+  /**
+   * 室内判定围合洪泛的格数上限（缺省 256）：超过即视为区域豁通到远方（露天）。
+   * 只影响房间检测成本/口径，不改变底板。
+   */
+  maxEnclosedArea: z.number().int().positive().default(256),
+  /** 坠落伤害配置；缺省不结算（零变化）。 */
+  fallDamage: FallDamageRuleSchema.optional(),
 }).passthrough();
 
 /** 放置规则的类型推断（即 game/rules/place.json）。 */

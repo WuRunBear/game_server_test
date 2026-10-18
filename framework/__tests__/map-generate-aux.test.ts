@@ -16,6 +16,8 @@ import { describe, expect, it } from "vitest";
 
 import { createGeneratorRegistry, type GeneratorRegistry } from "map/generate/generatorRegistry";
 import { buildMapGeometry } from "map/generate/pipeline";
+import { heightChannel } from "map/generate/blocks/heightChannel";
+import { heightMask } from "map/generate/blocks/heightMask";
 import {
   createGeometryDraft,
   defineAuxSlot,
@@ -34,14 +36,29 @@ const COUNTS = defineAuxSlot<number[]>("test:counts");
 
 /** 把草稿填充为合法最小图（2×2，单区域全覆盖）。 */
 function fillDraft(draft: GeometryDraft): void {
-  draft.width = 2;
-  draft.height = 2;
+  fillDraftSized(draft, 2, 2);
+}
+
+/** 按尺寸填充合法草稿（单区域全覆盖、全部可走）。 */
+function fillDraftSized(draft: GeometryDraft, width: number, height: number): void {
+  const total = width * height;
+  draft.width = width;
+  draft.height = height;
   draft.tileWidth = 16;
   draft.tileHeight = 16;
-  draft.tiles = new Uint8Array(4);
-  draft.walkable = new Uint8Array(4).fill(1);
+  draft.tiles = new Uint8Array(total);
+  draft.walkable = new Uint8Array(total).fill(1);
   draft.regions.set("region-a", { name: "region-a", meta: {} });
-  draft.regionOfTile = new Uint16Array(4);
+  draft.regionOfTile = new Uint16Array(total);
+}
+
+/** 注册真实内置积木（height-channel 生产 / height-mask 消费）。 */
+function makeRealAuxRegistry(): GeneratorRegistry {
+  const registry = createGeneratorRegistry();
+  registry.register("sizing", (ctx) => fillDraftSized(ctx.geometry, 16, 16));
+  registry.register("height-channel", heightChannel);
+  registry.register("height-mask", heightMask);
+  return registry;
 }
 
 /** 构造注册了给定积木的注册表（积木体只拿草稿，屏蔽上下文细节）。 */
@@ -173,5 +190,68 @@ describe("getAux 缺省语义与确定性", () => {
     const b = buildMapGeometry(config, withAux);
     expect(b.version).toBe(a.version);
     expect(b).toEqual(a);
+  });
+});
+
+describe("aux 品牌运行时：brand 只在编译期，运行期按槽位名索引", () => {
+  it("同名常量共享存储（brand 无运行时作用）；不同名槽位互不可见", () => {
+    const slotA = defineAuxSlot<string>("same.name");
+    const slotB = defineAuxSlot<string>("same.name");
+    expect(slotA).not.toBe(slotB); // 对象身份不同
+    expect(slotA.name).toBe(slotB.name);
+
+    const draft = createGeometryDraft("identity");
+    setAux(draft, slotA, "from-a");
+    expect(getAux(draft, slotA)).toBe("from-a");
+    // 运行期键是 name：同名（即使常量不同）读到同一份数据
+    expect(getAux(draft, slotB)).toBe("from-a");
+    // 不同名槽位隔离
+    const other = defineAuxSlot<string>("other.name");
+    expect(getAux(draft, other)).toBeUndefined();
+  });
+});
+
+describe("内置 height-channel → height-mask：真实积木的 aux 生产/消费闭环", () => {
+  it("POSITIVE：上游写场、下游改 walkable；冻结几何无 aux 且同 seed 可复现", () => {
+    const registry = makeRealAuxRegistry();
+    const config: MapGenerationConfig = {
+      key: "aux-builtin",
+      seed: 7,
+      pipeline: [
+        { generator: "sizing" },
+        { generator: "height-channel", params: { cell: 3 } },
+        { generator: "height-mask", params: { mode: "mask", minLevel: 0.5 } },
+      ],
+    };
+
+    const a = buildMapGeometry(config, registry);
+    const b = buildMapGeometry(config, registry);
+    expect(b).toEqual(a);
+    expect(Object.hasOwn(a, "aux")).toBe(false);
+
+    // height-mask 真实改写了通行位：16×16 噪声场在 0.5 阈值下必然同时有 0/1
+    const values = new Set(a.walkable);
+    expect(values.has(1)).toBe(true);
+    expect(values.has(0)).toBe(true);
+  });
+
+  it("NEGATIVE：下游缺少上游 height-channel → 抛错点名依赖", () => {
+    const registry = createGeneratorRegistry();
+    registry.register("sizing", (ctx) => fillDraftSized(ctx.geometry, 4, 4));
+    registry.register("height-mask", heightMask);
+
+    expect(() =>
+      buildMapGeometry(
+        {
+          key: "aux-missing-upstream",
+          seed: 1,
+          pipeline: [
+            { generator: "sizing" },
+            { generator: "height-mask", params: { mode: "mask" } },
+          ],
+        },
+        registry,
+      ),
+    ).toThrowError(/height-mask requires an upstream "height-channel"/);
   });
 });

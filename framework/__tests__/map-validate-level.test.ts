@@ -18,6 +18,9 @@ import { describe, expect, it } from "vitest";
 
 import { validateMapGeometry } from "map/generate/validate";
 import { createGeometryDraft } from "map/generate/types";
+import { createGeneratorRegistry } from "map/generate/generatorRegistry";
+import { buildMapGeometry } from "map/generate/pipeline";
+import { distinctLevels, levelAt, walkableAt, walkableAtLevel } from "map/geometry/query";
 import type { GeometryDraft } from "map/generate/types";
 
 /**
@@ -125,5 +128,49 @@ describe("② slope 链连通（多层地形可走区必须单连通域）", () 
     }
 
     expect(validateMapGeometry(draft)).toEqual([]);
+  });
+});
+
+describe("层号 → 通行/碰撞联动（冻结几何上的真实查询）", () => {
+  it("cliff 格只在「站在其上或更高」的层视角可越过；低层视角阻挡", () => {
+    const registry = createGeneratorRegistry();
+    // 生成一块 4×4 地理：x=0 列是高台崖格（level 2、不可走、cliff 语义），
+    // x=1 列 level 1，x=2/3 列 level 0；其余可走。
+    registry.register("level-fixture", (ctx) => {
+      const draft = ctx.geometry;
+      draft.width = 4;
+      draft.height = 4;
+      draft.tileWidth = 16;
+      draft.tileHeight = 16;
+      draft.tiles = new Uint8Array(16).fill(1);
+      draft.walkable = new Uint8Array(16).fill(1);
+      draft.level = new Int8Array(16);
+      draft.regionOfTile = new Uint16Array(16);
+      draft.regions.set("plain", { name: "plain", meta: {} });
+      draft.levelSemantics = { slope: 7, cliff: 8 };
+      for (let y = 0; y < 4; y++) {
+        draft.level[y * 4] = 2;
+        draft.tiles[y * 4] = 8; // cliff 语义
+        draft.walkable[y * 4] = 0;
+        draft.level[y * 4 + 1] = 1;
+      }
+    });
+
+    const geometry = buildMapGeometry(
+      { key: "level-link", seed: 1, pipeline: [{ generator: "level-fixture" }] },
+      registry,
+    );
+
+    // 数据层：层号与底板语义都来自生成产物
+    expect(levelAt(geometry, 0, 0)).toBe(2);
+    expect(walkableAt(geometry, 0, 0)).toBe(false);
+    expect(distinctLevels(geometry)).toEqual([0, 1, 2]);
+
+    // 运行时联动：站在 level 2 可越过 cliff 格；低层（0/1）视角被挡
+    expect(walkableAtLevel(geometry, 0, 0, 2)).toBe(true);
+    expect(walkableAtLevel(geometry, 0, 0, 1)).toBe(false);
+    expect(walkableAtLevel(geometry, 0, 0, 0)).toBe(false);
+    // 普通可走格与层无关（既有语义）
+    expect(walkableAtLevel(geometry, 2, 0, 0)).toBe(true);
   });
 });

@@ -17,6 +17,8 @@
 
 G1–G8 期间建的玩法地基**已建成但未通电**：
 
+> 以下 G1–G8 是审计时（2026-10 初）的基线；三系统与 computeStat 已在后续批次接线，
+> 现状以文末「实施状态」为准。
 - `projectile` / `timer` / `trigger` 三系统已注册，但 **game.json 的 systems 未启用** →
   投射物、定时效果、事件驱动玩法当前完全不可用。
 - `Modifiers.computeStat` 存在，但 **combat / movement 不读它** → 即便施加减速/DoT
@@ -87,7 +89,7 @@ framework/ 逐词扫描零游戏名词命中；src/register.ts 为空占位。�
 | 寻路 | A*（walkable 网格现成；**必须按地图 v2 的 level 维度预留**） | framework |
 | Boss/精英与阶段行为 | BT 阶段节点 + 世界唯一实体 | framework 节点 + game 内容 |
 | 袭击导演补全 | 预警期/进度门槛/无玩家暂停（Valheim 语义） | framework |
-| 远程与弹道 | 投掷矛 demo（projectile 系统激活 + PlayerInput 瞄准方向） | framework 接线 + game 配置 |
+| 远程与弹道 | **已接线**：projectile 系统启用 + `throwing_spear` 投掷档案（speed/lifeMs/radius/cooldown/damage）+ `throw` 命令（复用 PlayerCommand 的 x/y 世界坐标瞄准）；命中/耐久/被建造墙阻挡已结算。没有独立演示场景脚本，投掷物就是内容侧 demo | framework 接线 + game 配置 |
 | 击退与控制 | impulse 效果接战斗 | framework 接线 |
 | 武器分化 | 暴击/攻速/克制 | 后置 |
 
@@ -152,7 +154,7 @@ framework/ 逐词扫描零游戏名词命中；src/register.ts 为空占位。�
 
 | # | 切片 | 内容 | 依赖 |
 |---|---|---|---|
-| A | 激活休眠层 | 启用 projectile/timer/trigger + computeStat 接 combat/movement + 状态效果闭环 + 投掷矛 demo | 无（可立即动工，与地图切片 1 并行） |
+| A | 激活休眠层 | 启用 projectile/timer/trigger + computeStat 接 combat/movement + 状态效果闭环；投掷矛已随批次 D 以 `throwing_spear` + `throw` 命令落地（非独立演示脚本） | 无（可立即动工，与地图切片 1 并行） |
 | B | 生存深度 | 工具门槛、采集掉落表、耐久、死亡策略、断线保留 | A |
 | C | 科技树与制作 | 配方解锁条件、制作时间、站点燃料、多层加工链 | A；与地图切片 1（WorldClock）联动后做季节绑定 |
 | D | 威胁升级 | A* 寻路、Boss 阶段、袭击导演补全、结构防御值 | A；寻路注意地图切片 4 的 level 维度 |
@@ -179,9 +181,10 @@ framework/ 逐词扫描零游戏名词命中；src/register.ts 为空占位。�
 
 ## 附：审计依据摘要
 
-- 休眠证据：`framework/systems/registerBuiltinSystems.ts`（21 注册）vs
-  `game/game.json` systems（18 启用，缺 projectile/timer/trigger）；
+- 休眠证据（审计时基线）：`framework/systems/registerBuiltinSystems.ts`（21 注册）vs
+  `game/game.json` systems（当时 18 启用，缺 projectile/timer/trigger）；
   `framework/systems/gameplay/modifiers.ts` 注释自认 computeStat 未接线。
+  后续批次已启用三系统并把 computeStat 接入 movement/combat（见「实施状态」）。
 - 能力矩阵详情：见 2026-10 玩法审计报告（本会话）；地图层见
   `docs/map-system-v2-design.md` §9 前置修正清单与附录。
 - 调研锚点：DS Regrowth 四机制 / hound wave 预警-间隔-峰值曲线 / Valheim
@@ -217,9 +220,21 @@ framework/ 逐词扫描零游戏名词命中；src/register.ts 为空占位。�
 
 **已知近似**：离线燃料按总 tick 闭式扣减、任务在世界时钟推进后统一结算——若任务在离线区间中途到点、而站点燃料在其后才耗尽，离线会按末端状态判挂起（“不重放 tick”的既定取舍）。
 
-### 仍未落地
+### 仍未落地 / 已知近似（2026-10-18）
 
-- 无（P2 内容层与运行时边界均已完成）。
+| 项 | 现状 |
+|---|---|
+| `setLevel` 写回 / 坠落伤害 | 已由批次 F1（F-16/F-17）实现：写回三入口 + cliff 语义校验 + `rules/place.json` 的 `fallDamage`；slope 下行不扣血 |
+| 季节派生视图 | `effectiveGroundAt` 与 `growthScale` 已实现（批次 E）；当前只有浆果丛再生接 growthScale，雪地/湿地面仍是查询派生、客户端视觉未接线 |
+| 商店库存/资金 | 已由批次 F2（F-44）实现：商贩实体挂 `Ledger` = 有限库存/资金；无 Ledger 保持无限货架。库存/资金随实体入档，**不同步客户端**（服务端权威，客户端只看到买卖成功/失败） |
+| 事件触发器 | `on-item-break` / `on-achievement` 求值器已注册（F-39），配置可直接声明 Triggers；`on-region-enter` / `on-region-clear` 仍只有求值器、无产生方 |
+| 通用效果引用 | `spawn-projectile` / `impulse` / `spawn-entity` 已注册并通过单测，但当前 game 配置零引用（能力保留）；`heal`（熟肉 + 成就回血）、`ledger`（装备破碎计数）已有真实引用 |
+| 腐烂批次 | 同一堆叠混批时按最早 `spoilAt` 整堆判坏（F-22，未按批次拆堆） |
+| 成就离线奖励 | 解锁时无在线玩家则物品/声望奖励丢弃（F-24，未做待领取） |
+| 连接器同格 | 同格第二个连接器被静默丢弃（F-25，未加加载期校验） |
+| 室内检测成本 | 围合洪泛上限可配置（`place.json` 的 `maxEnclosedArea`，缺省 256），不是无上限 |
+| 自动存档 | 在 tick 线程同步序列化全图/全实体（F-30），后续可改增量/异步 |
+| 客户端感知 | 商店库存、AI 目标、投射物等仍为服务端权威；客户端只依赖 netSync 字段表（见 `CLIENT-INTEGRATION.md`） |
 
 ### 实施中发现并修复的框架缺陷
 

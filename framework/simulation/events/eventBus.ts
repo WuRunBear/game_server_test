@@ -7,9 +7,9 @@
  *   （不自动派发，保持系统拓扑确定性）； GameInstance.step 帧首清空残留，
  *   事件只在产生它的那一 tick 有效。
  *
- * 消费方式两种（二选一，同一 tick 内不要混用）：
- * - drainEvents：整体取出队列自行处理（triggerSystem 用它做声明式触发器求值）；
- * - dispatchEvents：按 FIFO 取出并逐事件调用订阅者（subscribeEvent 注册）。
+ * 唯一消费方式：`drainEvents` 整体取出队列自行处理（triggerSystem 用它做
+ * 声明式触发器求值）。不提供订阅者分发路径——避免出现两套消费方争抢同一
+ * 队列（先 drain 后 dispatch 会得到空队列）。
  *
  * 游戏无关——事件名与载荷结构由 TypedEventPayloads 声明（interface merging 可扩展）。
  */
@@ -20,8 +20,8 @@ import { Triggers, type TriggerEntry } from "framework/simulation/triggers/trigg
  * 类型化事件载荷表：事件名 → 载荷结构。
  *
  * 命名约定：触发器求值器名 = 事件名（triggerRegistry 按 on-* 名注册）。
- * on-death（deathSystem）/ on-hit（combatSystem）的产生方已接线；
- * on-region-* 的产生方接线在配方切片补齐。
+ * 除 on-region-*（仅保留求值器、暂无产生方）外，本表全部事件已有产生方，
+ * 配置可直接声明 Triggers 消费。
  */
 export interface TypedEventPayloads {
   /** 定时器触发（timerSystem 入队；phase 区分一次性到期/周期触发）。 */
@@ -73,20 +73,15 @@ export interface QueuedEvent {
   triggers?: TriggerEntry[];
 }
 
-/** 事件处理器签名：载荷 + world（处理器可据此入队新事件）。 */
-export type EventHandler = (payload: unknown, world: GameWorld) => void;
-
 /** 事件总线结构（挂在 world.eventBus 上，per-world 实例）。 */
 export interface EventBus {
   /** 本 tick 待消费队列（FIFO）。 */
   queue: QueuedEvent[];
-  /** 订阅表：事件名 → 处理器列表。 */
-  handlers: Map<string, EventHandler[]>;
 }
 
 /** 创建空事件总线（帧首由 GameInstance.step 清空 queue）。 */
 export function createEventBus(): EventBus {
-  return { queue: [], handlers: new Map() };
+  return { queue: [] };
 }
 
 /**
@@ -106,22 +101,6 @@ export function queueEvent<N extends TypedEventName>(
 }
 
 /**
- * 订阅事件（dispatchEvents 消费路径）。
- * @returns 取消订阅函数
- */
-export function subscribeEvent(world: GameWorld, name: string, handler: EventHandler): () => void {
-  const list = world.eventBus.handlers.get(name) ?? [];
-  list.push(handler);
-  world.eventBus.handlers.set(name, list);
-  return () => {
-    const current = world.eventBus.handlers.get(name);
-    if (!current) return;
-    const index = current.indexOf(handler);
-    if (index >= 0) current.splice(index, 1);
-  };
-}
-
-/**
  * 取出并清空当前队列（清空式消费；由固定阶段的系统调用）。
  * @returns FIFO 顺序的事件数组（消费方持有，总线队列已清空）
  */
@@ -129,27 +108,4 @@ export function drainEvents(world: GameWorld): QueuedEvent[] {
   const events = world.eventBus.queue;
   world.eventBus.queue = [];
   return events;
-}
-
-/**
- * 派发：按 FIFO 取出队列并逐事件调用订阅者（订阅顺序即调用顺序）。
- * 无订阅者的事件自然丢弃；处理器抛错不中断后续派发（错误隔离交由
- * GameSimulation 的 tick 级 catch 之外本层保证——逐 handler try/catch）。
- */
-export function dispatchEvents(world: GameWorld): void {
-  const events = drainEvents(world);
-  for (const evt of events) {
-    const handlers = world.eventBus.handlers.get(evt.name);
-    if (!handlers) continue;
-    for (const handler of [...handlers]) {
-      try {
-        handler(evt.payload, world);
-      } catch (err) {
-        world.logger.warn("事件处理器执行失败", {
-          name: evt.name,
-          error: err instanceof Error ? err.stack : String(err),
-        });
-      }
-    }
-  }
 }

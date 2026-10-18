@@ -119,7 +119,7 @@ describe("食物腐烂：背包堆叠", () => {
     expect(inv.slots[0]).toEqual({ kind: "rotten", count: 4, spoilAt: undefined });
   });
 
-  it("同 kind 合并取最早到期；入包时按 kind 写入 spoilAt", () => {
+  it("同 kind 不同 spoilAt 不合并（F-22 拆批）；相同 spoilAt 合并；入包按 kind 写入 spoilAt", () => {
     const world = createBareWorld();
     registerBasics(world);
     const player = spawnTestPlayer(world);
@@ -129,10 +129,14 @@ describe("食物腐烂：背包堆叠", () => {
     expect(addToInventory(inv, world.gameDef.itemsByKind, "food", 2, { nowTick: 1000 })).toBe(0);
     expect(inv.slots[0]).toEqual({ kind: "food", count: 2, spoilAt: 1010 });
 
-    // 再入一批更早到期的（spoilAt 1005）→ 整堆取最早
+    // 再入一批更早到期的（spoilAt 1005）→ 不混堆，另起一槽
     expect(addToInventory(inv, world.gameDef.itemsByKind, "food", 1, { spoilAt: 1005 })).toBe(0);
-    expect(inv.slots[0]!.count).toBe(3);
-    expect(inv.slots[0]!.spoilAt).toBe(1005);
+    expect(inv.slots[0]).toEqual({ kind: "food", count: 2, spoilAt: 1010 });
+    expect(inv.slots[1]).toEqual({ kind: "food", count: 1, spoilAt: 1005 });
+
+    // 同 spoilAt → 正常合并
+    expect(addToInventory(inv, world.gameDef.itemsByKind, "food", 1, { spoilAt: 1005 })).toBe(0);
+    expect(inv.slots[1]).toEqual({ kind: "food", count: 2, spoilAt: 1005 });
     expect(mergeSpoilAt(undefined, 5)).toBe(5);
   });
 

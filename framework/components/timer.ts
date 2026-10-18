@@ -12,16 +12,3 @@ export const Cooldown = defineComponent({
    */
   remainingMs: Types.f32,
 });
-
-/**
- * Duration 组件：持续时间计时（SoA 结构）。
- *
- * 约定：
- * - remainingMs：剩余持续时间（毫秒）
- */
-export const Duration = defineComponent({
-  /**
-   * 剩余持续时间（毫秒）。
-   */
-  remainingMs: Types.f32,
-});

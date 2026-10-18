@@ -7,7 +7,8 @@
  *
  * 到期时刻用**绝对 tick** 记录，两处承载：
  * - 地面掉落物 → `ItemMeta.spoilAt`
- * - 背包/容器堆叠 → `ItemStack.spoilAt`（同 kind 合并取最早值）
+ * - 背包/容器堆叠 → `ItemStack.spoilAt`（同 kind 且同 spoilAt 才合并；混批
+ *   保持独立堆叠——F-22）
  * 绝对 tick 使读档与离线补差天然可继续腐烂（补差把 world.time.tick 推到边界后，
  * 下一次系统扫描即结算全部到期堆叠）。
  *

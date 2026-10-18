@@ -27,7 +27,6 @@ import { regionAreaOf, growthForSlot } from "framework/simulation/population/pop
 import {
   populationSystem,
   fastForwardPopulations,
-  populationSnapshot,
 } from "framework/simulation/population/populationSystem";
 import { setMapSeeds } from "map/runtime/mapSeeds";
 import { destroyEntity } from "framework/entities/destroyEntity";
@@ -39,6 +38,12 @@ import type { MapGeometry, RegionMeta } from "map/geometry/types";
 import type { GameWorld } from "framework/world";
 import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
 import type { SimulationPort } from "simulation";
+
+/** 只读节点快照（等价于旧 populationSnapshot 调试助手）。 */
+function snapshotOf(eid: number) {
+  const node = Population[eid];
+  return node ? { ...node } : undefined;
+}
 
 beforeAll(() => {
   bootstrapFramework();
@@ -246,7 +251,7 @@ describe("③ 离线等价性：快进 ≡ 逐 tick（核心断言）", () => {
     const eid = spawnNode(world, spec);
     world.time.tick = targetTick;
     fastForwardPopulations(world, targetTick);
-    return populationSnapshot(eid);
+    return snapshotOf(eid);
   }
 
   function runTickByTick(targetTick: number) {
@@ -256,7 +261,7 @@ describe("③ 离线等价性：快进 ≡ 逐 tick（核心断言）", () => {
       world.time.tick = t;
       populationSystem(world);
     }
-    return populationSnapshot(eid);
+    return snapshotOf(eid);
   }
 
   it("中途（tick 23，槽未对齐）：快进 ≡ 逐 tick", () => {
@@ -285,7 +290,7 @@ describe("③ 离线等价性：快进 ≡ 逐 tick（核心断言）", () => {
     const eid = spawnNode(world, spec);
     fastForwardPopulations(world, 23);
     fastForwardPopulations(world, 57);
-    expect(populationSnapshot(eid)).toEqual(runFastForward(57));
+    expect(snapshotOf(eid)).toEqual(runFastForward(57));
   });
 });
 
@@ -301,7 +306,7 @@ describe("④ 序列化 → 恢复后节点状态正确", () => {
     });
     world1.time.tick = 17;
     populationSystem(world1);
-    const expected = populationSnapshot(eid1)!;
+    const expected = snapshotOf(eid1)!;
     expect(expected.count).toBeGreaterThan(0);
 
     const record = serializeWorld(world1, "pop");
@@ -332,7 +337,7 @@ describe("⑤ 确定性：同种子重复运行一致", () => {
       world.time.tick = t;
       populationSystem(world);
     }
-    return populationSnapshot(eid);
+    return snapshotOf(eid);
   }
 
   it("同世界同种子重复运行结果逐位一致", () => {
@@ -461,7 +466,7 @@ describe("GameSimulation.runOfflineCatchUp 挂载点（真配置读档 + 离线�
 
   function nodeSnapshot(world: GameWorld) {
     const eid = query(world, [NetworkId]).find((e) => Kind[e] === SIM_NODE)!;
-    return populationSnapshot(eid);
+    return snapshotOf(eid);
   }
 
   async function loadSim(def: LoadedGameDefinition, record: unknown, offlineTicks: number) {

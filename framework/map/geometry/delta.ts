@@ -15,11 +15,12 @@ import type { MapGeometry } from "map/geometry/types";
 /**
  * 可写回的底板字段。
  *
- * v1 决策（设计 §3.4）：只开放 tiles（地面语义）与 walkable（通行位）——
- * 焦土/小径类持久变化走 tiles、通行性变化走 walkable；level 写回后置
- * （层号改动牵连碰撞/跨层语义，先不开放），因此增量项不含 level 字段。
+ * tiles（地面语义）与 walkable（通行位）是 v1 开放的两路（焦土/小径类持久
+ * 变化走 tiles、通行性变化走 walkable）；level（离散层号）经 F-16 补齐
+ * `setLevel` 后同样可写回——层号改动会经地形纪元触发按层碰撞静态体重建，
+ * 并由实体层号系统在下一 tick 读取新地形层。三者一起参与增量 diff。
  */
-export type WritableTileField = "tiles" | "walkable";
+export type WritableTileField = "tiles" | "walkable" | "level";
 
 /** 单格终态修改项（last-write-wins：存的是叠加后的终值，不携带时刻）。 */
 export interface TileModification {
@@ -27,7 +28,7 @@ export interface TileModification {
   tileIndex: number;
   /** 被改写的底板字段。 */
   field: WritableTileField;
-  /** 终态值（tiles 为地面语义 id 0-255；walkable 为 0|1）。 */
+  /** 终态值（tiles 为地面语义 id 0-255；walkable 为 0|1；level 为 Int8 -128..127）。 */
   value: number;
 }
 
@@ -65,6 +66,8 @@ export interface TerrainBaseline {
   tiles: Uint8Array;
   /** 生成时的通行位数组副本。 */
   walkable: Uint8Array;
+  /** 生成时的离散层号数组副本（Int8；F-16 起 setLevel 可写回）。 */
+  level: Int8Array;
   /** 生成时的内容指纹（底板指纹，读档路径据此拒绝配置/种子漂移的存档）。 */
   version: string;
 }
@@ -79,6 +82,7 @@ export function captureTerrainBaseline(geometry: MapGeometry): TerrainBaseline {
   return {
     tiles: geometry.tiles.slice(),
     walkable: geometry.walkable.slice(),
+    level: geometry.level.slice(),
     version: geometry.version,
   };
 }
@@ -86,7 +90,7 @@ export function captureTerrainBaseline(geometry: MapGeometry): TerrainBaseline {
 /**
  * 对出厂底板做 diff，产出稀疏终态修改项（存档序列化的增量来源）。
  *
- * 逐格比较 tiles/walkable 两个通道，与底板不同的格各产出一条修改项——
+ * 逐格比较 tiles/walkable/level 三个通道，与底板不同的格各产出一条修改项——
  * 数组即时状态即终态，天然 last-write-wins（与脏格队列无关：队列推完即清、
  * 只服务在线推送，存档 diff 恒以底板重比为准）。
  *
@@ -110,6 +114,11 @@ export function computeTileModifications(
       `terrain baseline mismatch on map "${geometry.key}": walkable length ${geometry.walkable.length}/${baseline.walkable.length} != width*height ${total}`,
     );
   }
+  if (baseline.level.length !== total || geometry.level.length !== total) {
+    throw new Error(
+      `terrain baseline mismatch on map "${geometry.key}": level length ${geometry.level.length}/${baseline.level.length} != width*height ${total}`,
+    );
+  }
 
   const modifications: TileModification[] = [];
   for (let i = 0; i < total; i++) {
@@ -118,6 +127,9 @@ export function computeTileModifications(
     }
     if (geometry.walkable[i] !== baseline.walkable[i]) {
       modifications.push({ tileIndex: i, field: "walkable", value: geometry.walkable[i]! });
+    }
+    if (geometry.level[i] !== baseline.level[i]) {
+      modifications.push({ tileIndex: i, field: "level", value: geometry.level[i]! });
     }
   }
   return modifications;
@@ -129,8 +141,8 @@ export function computeTileModifications(
  * 校验（畸形存档绝不静默加载，fail-fast）：
  * - modifications 须为数组；
  * - tileIndex 须为 [0, width*height) 内的整数；
- * - field 须为 tiles|walkable；value 须在字段值域内（tiles 整数 0-255，
- *   walkable 严格 0|1）。
+ * - field 须为 tiles|walkable|level；value 须在字段值域内（tiles 整数 0-255，
+ *   walkable 严格 0|1，level 为 Int8 整数 -128..127）。
  *
  * 不重算 version（叠加后的指纹由调用方统一重算——boot 分支还要先跑结构
  * 校验，指纹只算一次）；不校验分层可达性等图级结构约束（由调用方的
@@ -149,8 +161,8 @@ export function applyTileModifications(
   for (let i = 0; i < modifications.length; i++) {
     const mod = modifications[i]!;
     const described = `map "${geometry.key}" modification[${i}] ${JSON.stringify(mod)}`;
-    if (mod.field !== "tiles" && mod.field !== "walkable") {
-      throw new Error(`${described}: unknown field (expected "tiles" | "walkable")`);
+    if (mod.field !== "tiles" && mod.field !== "walkable" && mod.field !== "level") {
+      throw new Error(`${described}: unknown field (expected "tiles" | "walkable" | "level")`);
     }
     if (!Number.isInteger(mod.tileIndex) || mod.tileIndex < 0 || mod.tileIndex >= total) {
       throw new Error(`${described}: tileIndex out of range (0..${total - 1})`);
@@ -159,13 +171,19 @@ export function applyTileModifications(
       if (!Number.isInteger(mod.value) || mod.value < 0 || mod.value > 255) {
         throw new Error(`${described}: tiles value out of range (0..255)`);
       }
-    } else if (mod.value !== 0 && mod.value !== 1) {
-      throw new Error(`${described}: walkable value must be 0 or 1`);
+    } else if (mod.field === "walkable") {
+      if (mod.value !== 0 && mod.value !== 1) {
+        throw new Error(`${described}: walkable value must be 0 or 1`);
+      }
+    } else if (!Number.isInteger(mod.value) || mod.value < -128 || mod.value > 127) {
+      throw new Error(`${described}: level value out of range (-128..127)`);
     }
     if (mod.field === "tiles") {
       geometry.tiles[mod.tileIndex] = mod.value;
-    } else {
+    } else if (mod.field === "walkable") {
       geometry.walkable[mod.tileIndex] = mod.value;
+    } else {
+      geometry.level[mod.tileIndex] = mod.value;
     }
   }
 }

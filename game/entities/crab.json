@@ -6,7 +6,7 @@
     "Velocity": {},
     "Collider": { "shape": 1, "halfW": 7, "halfH": 4 },
     "Health": { "current": 15, "max": 15 },
-    "Perception": { "visionRadius": 100, "hostilityRange": 50 }
+    "Perception": { "visionRadius": 100 }
   },
   "behavior": "rabbit-flee",
   "xpValue": 8,

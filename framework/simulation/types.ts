@@ -142,6 +142,13 @@ export interface EntitySnapshot {
    * 切片，level 维度已留出）。
    */
   level: number;
+  /**
+   * 是否为玩家实体（挂 Player 标签；F-28）。
+   *
+   * 传输层据此做 per-client 私密字段裁剪：其他玩家的 `Inventory.*` 槽位
+   * 不下发（仅本人可见），容器/尸体等非玩家实体的背包仍同步（容器 UI 需要）。
+   */
+  player?: boolean;
 }
 
 /**

@@ -22,8 +22,6 @@ export {
   advancePopulation,
   recordPopulationDeath,
   fastForwardPopulations,
-  materializePopulation,
   populationSpawnBudget,
-  populationSnapshot,
   type MaterializeOptions,
 } from "framework/simulation/population/populationSystem";

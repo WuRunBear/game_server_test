@@ -15,7 +15,7 @@
 | 能力 | 框架现状 | 证据 |
 |------|---------|------|
 | 攻击 | 瞬发 hitscan，`combatSystem.attackTarget`，伤害公式 max(1, 攻-防) | 无投射物 |
-| 状态效果 | `Duration` 组件已注册但**零消费者**；无 buff/poison/burn/slow/stun 概念 | — |
+| 状态效果 | （历史基线）`Duration` 组件当时零消费者；无 buff/poison/burn/slow/stun 概念。现状：`apply-status` + Modifiers 已实现，`Duration` 组件已删除（F-38） | — |
 | 技能/闪避 | PlayerCommand 8 种，PlayerInput 仅 move/interact/attack/talk；`Cooldown` 仅战斗使用 | 无 skill/dodge/ability |
 | 武器模型 | `Attack` 组件仅 value/range；ItemKind 的 equip 仅 attackBonus/defenseBonus/gatherMult | 无 category/rarity/攻击模式 |
 | 精英/缩放 | EntityRule 无任何缩放概念 | — |
@@ -23,7 +23,7 @@
 | 货币/商店 | 完全没有 | — |
 | Boss 能力 | BT 仅 6 动作 4 条件 | 无 telegraph/范围弹幕/召唤/阶段节点 |
 
-另有三个「已注册但未接线」的陷阱，借鉴时不要误判为已实现：`Duration`（**至今仍零消费者**——定时能力走新增的 ExpiresAt/Interval，见 3.3）、`AIState/Target/BlackboardRef`（全仓库无读写）、`Perception.hostilityRange`（组件注释自认占位）。
+另有三个「已注册但未接线」的坑（**历史基线**，已在批次 F2 清理）：`Duration` 组件删除（定时能力走 ExpiresAt/Interval，见 3.3）、`AIState/Target/BlackboardRef` 删除（全仓库无读写）、`Perception.hostilityRange` 字段删除（从未实现受击反击；需要时按真实需求重新引入）。
 
 ## 三、已实现：六个通用子系统 + 投射物最小集
 
@@ -32,7 +32,7 @@
 ### 3.1 事件总线（`framework/simulation/events/eventBus.ts`）
 
 - 与 `framework/events/gameEvents.ts`（帧内轻量、无订阅者）互补：**类型化事件队列**，tick 内排队、固定阶段消费（不自动派发，保系统拓扑确定性）。
-- API：`queueEvent(world, name, payload)` / `subscribeEvent` / `drainEvents`（清空式，triggerSystem 用）/ `dispatchEvents`（订阅式）。
+- API：`queueEvent(world, name, payload)` / `drainEvents`（清空式，triggerSystem 唯一消费路径；无订阅式分发，避免双消费方争抢队列）。
 - 事件表 `TypedEventPayloads`（interface merging 可扩展）：`on-timer`/`on-command`/`on-contact` 已由产生方接线；`on-hit`/`on-death`/`on-region-enter`/`on-region-clear` 预留（产生方留配方切片）。
 - 帧首由 GameInstance.step 清空队列，事件只在产生它的那一 tick 有效。
 - 挂在 `world.eventBus`（per-world 实例）。
@@ -58,21 +58,21 @@
 
 - AoS 组件（条目携带效果引用，SoA 表达不了）：`ExpiresAt`（一次性，绝对到期 tick）、`Interval`（周期 + 下次触发 + 剩余次数，负值无限）。
 - `timerSystem`：到期/到周期 → `applyEffectSpecs` → 发 `on-timer` 事件 → 清理；落后追帧单 tick 最多补 64 次防病态循环。
-- API：`setExpiresAt` / `setIntervalTimer` / `clearTimers`。
+- API：`setExpiresAt` / `setIntervalTimer`（实体销毁时由 `destroyEntity` 统一清理 AoS 定时条目）。
 - **瞬态**：worldSerializer 跳过清单，恢复后由效果/触发配置重建。
-- 注：`Duration` 组件仍零消费者（保留原组件不动，新定时能力独立实现）。
+- 注：`Duration` 组件已删除（F-38）；定时能力只由 ExpiresAt/Interval 承担。
 
 ### 3.4 修饰符（`framework/simulation/modifiers/modifiers.ts`）
 
 - `Modifiers` AoS：`statKey → ModifierEntry[]`（mul/add/bool 三型 + source + expiresTick）。
 - `computeStat(world, eid, statKey, base)`：`base × (1+Σmul) + Σadd`；bool 型条目取或（布尔语义 stat 优先）。
 - 过期条目惰性判定（读取路径过滤），不做主动清理。
-- 现有移动/战斗系统**暂未接入** computeStat（接线留配方切片）；当前消费方为 `apply-status` 效果与测试。
+- 现有移动/战斗系统**已接入** computeStat（批次 A：movement 读移速、combat 读攻击/防御，技能加成同源）；消费方还包括 `apply-status` 效果与测试。
 
 ### 3.5 触发器（`framework/simulation/triggers/`）
 
-- `Triggers` AoS：`TriggerEntry = { trigger, effects[] }`，声明式挂载（`addTrigger`）。
-- `triggerRegistry`：7 个内建求值器（`on-timer`/`on-command`/`on-hit`/`on-contact`/`on-death`/`on-region-enter`/`on-region-clear`），统一「实体事件」实现：owner=载荷 eid、target=载荷 target（缺省 owner），效果列表经 effectRegistry 求值。
+- `Triggers` AoS：`TriggerEntry = { trigger, effects[] }`，经 archetype 配置的 `initTriggers` 声明式挂载（无运行时 addTrigger API）。
+- `triggerRegistry`：10 个内建求值器（`on-timer`/`on-command`/`on-hit`/`on-contact`/`on-death`/`on-item-break`/`on-achievement`/`on-region-enter`/`on-region-clear`/`on-raid-warning`），统一「实体事件」实现：owner=载荷 eid、target=载荷 target（缺省 owner），效果列表经 effectRegistry 求值。`on-region-*` 仅保留求值器、暂无产生方。
 - `triggerSystem`：固定阶段 `drainEvents` 消费事件总线 → 按事件名匹配 → 执行命中实体的效果列表。系统序 `after: ["timer"]`（同 tick 定时器事件可被消费）。
 
 ### 3.6 容器层（`framework/economy/container.ts` + `components/ledger.ts`）
@@ -82,18 +82,19 @@
   - `"ledger"`：新 `Ledger` AoS 组件（kind → 数量，无容量上限，归零移除键），insert 直加、remove 余额校验。
 - 转移原语 `transferContainer` / `swapContainers`：**先全量校验后执行、失败整体回滚**（容器快照为回滚依据）；`snapshotContainer`/`restoreContainer` 供 settle 复用。
 - Ledger 随实体入档持久化；aosSyncAdapters 新增 Ledger 适配器（`Ledger.<kind>` 展平，fields 白名单 `"entries"`）；archetype 可配初始条目。
+- **商店库存/资金约定（F-44）**：商贩实体挂 `Ledger` 即有限商店——`currency`（由对话 buy/sell 效果声明）的余额是**资金**，其余 kind 的余额是**库存**。买单扣库存/加资金，卖单加库存/扣资金，任一不足整单拒绝；无 `Ledger` 的商贩保持旧的无限货架/钱箱语义。库存/资金随实体入档，当前不广播客户端（服务端权威）。
 
 ### 3.7 交易（`framework/economy/settle.ts` + `offer.ts`）
 
 - **L0 `settle(world, terms)`**：多方原子条款。`SettleTerms = SettlePartyTerms[]`，每方 `{ party, give?, take? }`（give/take 为 `{ container, kind, count }`）。流程：快照全部涉及容器 → 校验全部 give 足额 → 执行 give → 执行 take（剩余即容量不足）→ 任一失败整体回滚。支持任意方数，不做资产硬锁（同 tick 内先验后结）。
-- **L1 报价会话**：`openOffer`（无 Player 标签的方即时确认，confirmedParties 视为已确认，全确认即结算）/ `acceptOffer` / `cancelOffer` / `pruneExpiredOffers` / `getOffer`。会话挂 `world.offerSessions`（运行时状态不入档，重启即作废，与无锁语义一致）。
+- **L1 报价会话**：`openOffer`（F-01 收紧：只接受「双方均为在线 Player、发起者在条款中」的双人条款；另一方必须显式 `acceptOffer`，不再把非 Player 方当自动确认方——商店走 dialogueSystem 专用路径）/ `acceptOffer` / `cancelOffer` / `pruneExpiredOffers` / `getOffer`。会话挂 `world.offerSessions`（运行时状态不入档，重启即作废，与无锁语义一致）。
 - **命令接线**：PlayerCommand 新增 `offer` / `offer-accept` / `offer-cancel`（含 `offer` 条款、`offerId`、`ttlTicks`）；GameSimulation `submitCommand` 分发，发起方本人视为已确认；GameRoom.isPlayerCommand 浅校验（条款内容合法性由仿真层服务端权威校验）。命令成功时缓存 `on-command` 事件，下 tick beforeSystems 冲刷入总线供触发器消费。
-- 覆盖全部参与方组合：玩家↔玩家（双方确认）、NPC/系统↔玩家（非玩家方即时确认）、NPC↔NPC（创建即结算）、多方链式交换。
+- 覆盖参与方组合（economy 原语）：玩家↔玩家（双方确认）、NPC↔NPC / 多方链式交换；**玩家与容器/NPC 的 offer 已被 F-01 禁止**（防越权搬空），商店用 dialogueSystem，容器取回用 inventoryOps 的距离/层校验。
 
 ### 3.8 投射物最小集 + 伤害公式抽取
 
 - `Projectile` SoA 组件（`components/projectile.ts`）：owner/vx/vy/lifeMs/radius。
-- `projectileSystem`（`systems/gameplay/projectileSystem.ts`）：tick 位移 → 目标格不可走（`walkableAt`，与 collisionSystem 同源）销毁 → 同图实体距离接触 → 发 `on-contact` 事件并销毁 → 寿命归零销毁。**命中只发事件，不接伤害闭环**（on-contact → damage 留配方切片）。系统序 `after: ["movement"]`。
+- `projectileSystem`（`systems/gameplay/projectileSystem.ts`）：tick 位移 → 目标格不可走（`walkableAt`，与 collisionSystem 同源）销毁 → 同图实体距离接触 → 按标准伤害公式扣血并发 `on-hit` / `on-contact`，击杀发 `killed` → 销毁 → 寿命归零销毁。系统序 `after: ["collision"]`（批次 D 起）。
 - `spawnProjectile` 生成原语：无 archetype 的框架通用实体（归属随主人地图，kind 通用名 `"projectile"`），瞬态不入档。
 - `computeStandardDamage(base, defense)` 纯函数（`systems/gameplay/damageFormula.ts`）：从 combatSystem.attackTarget 抽取共用，hitscan 与 damage 效果走同一数值路径（custom 公式 RuleModule 逻辑保留在 combatSystem 内）。
 
@@ -128,8 +129,8 @@
 
 1. **协议零改动**：原 G1 方案要求扩展 PlayerInput 瞄准方向——本阶段未动 PlayerInput（客户端 schema 副本无需同步）；命令新增走 PlayerCommand 消息（GameRoom 浅校验，非 schema 字段）。
 2. **伤害闭环后置**：投射物命中只发 on-contact 事件（配 on-contact 触发器即可闭环），不在系统内直接扣血——保持「事件驱动、配方组装」的一致性。
-3. **computeStat 未接入现有系统**：避免在无真实玩法需求时改动 movement/combat 的取值路径（接线留配方切片，`apply-status` 效果已可写修饰符）。
-4. **Duration 未激活**：新定时能力走 ExpiresAt/Interval，保留 Duration 原组件不动（其消费者仍为零）。
+3. **computeStat 已接入现有系统**（批次 A）：movement 读移速、combat 读攻击/防御；本设计阶段最初的「暂不接线」已闭合。
+4. **Duration 已删除**（批次 F2）：新定时能力走 ExpiresAt/Interval，零消费者的 Duration 组件不再保留。
 5. **无资产硬锁**：offer 会话先验后结、重启即作废（会话表不入档）——与「服务端权威 + 确定性」一致，避免锁标志侵入所有容器操作。
 
 ## 六、剩余切片顺序

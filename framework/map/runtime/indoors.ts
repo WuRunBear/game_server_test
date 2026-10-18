@@ -19,8 +19,6 @@
  *
  * 纯函数性：同 (world 建造实体集, 查询格) 恒同输出；不依赖 tick/相位。
  */
-import { query } from "bitecs";
-
 import { Transform } from "framework/components/transform";
 import { entityMapOf } from "framework/components/entityMap";
 import { entityLevelOf } from "framework/components/entityLevel";
@@ -37,9 +35,33 @@ export type SpaceExposure = "indoor" | "outdoor";
 /** 围合判定洪泛格数上限（缺省）：超过即视为豁通远方（露天）。 */
 export const DEFAULT_MAX_ENCLOSED_AREA = 256;
 
+/**
+ * 从 world 配置解析围合上限（rules/place.json 的 maxEnclosedArea；F-26）：
+ * 显式 options 优先 → 规则配置 → 模块缺省 256。非法值（非正整数）回落缺省，
+ * 避免手工构造的 gameDef 把洪泛上限变成 0/NaN。
+ */
+function resolveMaxEnclosedArea(world: GameWorld, options: IndoorsOptions): number {
+  if (
+    typeof options.maxEnclosedArea === "number" &&
+    Number.isFinite(options.maxEnclosedArea) &&
+    options.maxEnclosedArea > 0
+  ) {
+    return Math.floor(options.maxEnclosedArea);
+  }
+  const raw = world.gameDef.resolvedRules["place"] as { maxEnclosedArea?: unknown } | undefined;
+  const configured = raw?.maxEnclosedArea;
+  if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
+    return Math.floor(configured);
+  }
+  return DEFAULT_MAX_ENCLOSED_AREA;
+}
+
 /** 室内判定选项。 */
 export interface IndoorsOptions {
-  /** 围合洪泛格数上限（缺省 DEFAULT_MAX_ENCLOSED_AREA）。 */
+  /**
+   * 围合洪泛格数上限（缺省 = rules/place.json 的 maxEnclosedArea，未配置时
+   * DEFAULT_MAX_ENCLOSED_AREA = 256）。显式传入优先于规则配置。
+   */
   maxEnclosedArea?: number;
 }
 
@@ -74,7 +96,7 @@ export function spaceExposureAt(
 
   // 2. 围合：同层洪泛被墙/边界封闭，且洪泛在触及面积上限前自然耗尽
   // （洪泛触顶 = 区域豁通到 ≥ maxEnclosedArea 格的远方 → 露天）
-  const maxVisited = options.maxEnclosedArea ?? DEFAULT_MAX_ENCLOSED_AREA;
+  const maxVisited = resolveMaxEnclosedArea(world, options);
   const reach = floodSameLevel(geometry, built, x, y, level, { maxVisited });
   if (reach.size >= maxVisited) return "outdoor";
   return "indoor";
@@ -114,13 +136,4 @@ export function entitySpaceExposure(world: GameWorld, eid: number): SpaceExposur
 /** 按实体查询是否室内（entitySpaceExposure 的布尔便捷形态）。 */
 export function entityIsIndoors(world: GameWorld, eid: number): boolean {
   return entitySpaceExposure(world, eid) === "indoor";
-}
-
-/** 供未来气候切片按需全量枚举室内实体（当前无 tick 消费方，按需调用）。 */
-export function listIndoorEntities(world: GameWorld): number[] {
-  const result: number[] = [];
-  for (const eid of query(world, [Transform])) {
-    if (entityIsIndoors(world, eid)) result.push(eid);
-  }
-  return result;
 }

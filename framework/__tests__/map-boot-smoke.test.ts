@@ -17,7 +17,15 @@ import {
 } from "framework/index";
 import { NetworkId } from "framework/components/network";
 import { Kind } from "framework/components/kind";
+import { Player } from "framework/components/tags";
+import { Needs } from "framework/components/needs";
+import { ResourceNode } from "framework/components/resourceNode";
+import { DialogueSource } from "framework/components/dialogueSource";
+import { Ledger } from "framework/components/ledger";
+import { Transform } from "framework/components/transform";
 import { entityMapOf } from "framework/components/entityMap";
+import { entityLevelOf } from "framework/components/entityLevel";
+import { walkableAtLevel } from "map/geometry/query";
 import type { GameWorld } from "framework/world";
 
 beforeAll(() => {
@@ -63,5 +71,51 @@ describe("boot smoke（真实配置 HeadlessHost 冒烟）", () => {
     for (let i = 1; i < results.length; i++) {
       expect(results[i]!.tick).toBe(results[i - 1]!.tick + 1);
     }
+  });
+
+  it("boot 后关键内容可直接交互：资源节点/商贩接线完整，玩家系统实际运行", async () => {
+    const def = loadGameDefinition({ gameJsonPath: "game/game.json" });
+    const sim = await createGameSimulation(def);
+    const world = (sim as unknown as { world: GameWorld }).world;
+    const eids = [...query(world, [NetworkId])];
+
+    // 资源实体：有真实 ResourceNode 数据（不是空壳原型）
+    const treeEid = eids.find((eid) => Kind[eid] === "tree")!;
+    expect(treeEid).toBeDefined();
+    expect(ResourceNode[treeEid]?.remaining).toBeGreaterThan(0);
+    expect(ResourceNode[treeEid]?.yieldsKind).toBe("wood");
+
+    // 商贩：DialogueSource.treeId 必须能在已解析对话树中查到（交互不是悬空引用）
+    const villagerEid = eids.find((eid) => Kind[eid] === "villager")!;
+    expect(villagerEid).toBeDefined();
+    const treeId = DialogueSource[villagerEid]?.treeId;
+    expect(treeId).toBeTruthy();
+    expect(world.gameDef.dialoguesByKind?.has(treeId!)).toBe(true);
+    // F-44：商贩账本由 archetype 配置真实初始化（有限库存/资金）
+    expect(Ledger[villagerEid]?.shell).toBe(100);
+    expect(Ledger[villagerEid]?.shell_spear).toBe(6);
+
+    // 玩家：出生点在其地图的层视角可通行；需求系统与昼夜系统在 tick 中实际运行
+    const join = sim.addPlayer("boot-smoke-player");
+    const playerEid = [...query(world, [Player, NetworkId])].find(
+      (eid) => NetworkId.value[eid] === join.networkId,
+    )!;
+    expect(playerEid).toBeDefined();
+    const geometry = world.maps[entityMapOf(world, playerEid)]!;
+    const level = entityLevelOf(playerEid);
+    const tileX = Math.floor(Transform.x[playerEid] / geometry.grid.tileWidth);
+    const tileY = Math.floor(Transform.y[playerEid] / geometry.grid.tileHeight);
+    expect(walkableAtLevel(geometry, tileX, tileY, level)).toBe(true);
+
+    const hunger = Needs[playerEid]?.find((need) => need.name === "hunger")!;
+    expect(hunger).toBeDefined();
+    const hungerBefore = hunger.current;
+    const hourBefore = world.time.timeOfDay.hour;
+
+    // 20 tick = 1s：需求衰减与昼夜推进都是同一条 tick 系统链的真实结果
+    sim.submitInput("boot-smoke-player", { seq: 1, moveX: 0, moveY: 0 });
+    runHeadless(sim, { tickCount: 20, dtMs: 50 });
+    expect(hunger.current).toBeLessThan(hungerBefore);
+    expect(world.time.timeOfDay.hour).not.toBe(hourBefore);
   });
 });

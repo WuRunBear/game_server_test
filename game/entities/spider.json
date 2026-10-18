@@ -8,7 +8,7 @@
     "Health": { "current": 45, "max": 45 },
     "Attack": { "value": 7, "range": 28 },
     "Cooldown": {},
-    "Perception": { "visionRadius": 160, "hostilityRange": 90 },
+    "Perception": { "visionRadius": 160 },
     "LootTable": [{ "kind": "raw_meat", "qty": 1, "chance": 1.0 }]
   },
   "behavior": "wolf-night",

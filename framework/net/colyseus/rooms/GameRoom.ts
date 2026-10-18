@@ -447,19 +447,23 @@ export class GameRoom extends Room<{ state: RoomState }> {
 
       const visible = result.interest!.get(client.sessionId) ?? [];
       const alive = new Set(visible);
+      const ownNetworkId = playerState.entityId;
       for (const networkId of visible) {
         const snap = snapshot.entities.get(networkId);
         if (!snap) continue;
+        // F-28：其他玩家的背包槽位不下发（仅本人可见）；容器/尸体等非玩家
+        // 实体的 Inventory 照旧同步（容器 UI 依赖）。Equipment/ItemMeta 不受影响。
+        const hideInventory = snap.player === true && networkId !== ownNetworkId;
         const key = String(networkId);
         let entityState = playerState.visibleEntities.get(key);
         if (!entityState) {
           entityState = new EntityState();
-          this.writeEntityState(entityState, networkId, snap);
+          this.writeEntityState(entityState, networkId, snap, hideInventory);
           playerState.visibleEntities.set(key, entityState);
           // 先挂 state 再 add 进 view（新实例无 refId，StateView 会拒收 detached）
           (client.view as StateView | undefined)?.add(entityState);
         } else {
-          this.writeEntityState(entityState, networkId, snap);
+          this.writeEntityState(entityState, networkId, snap, hideInventory);
         }
       }
       playerState.visibleEntities.forEach((entityState: EntityState, key: string) => {
@@ -474,14 +478,23 @@ export class GameRoom extends Room<{ state: RoomState }> {
   /**
    * 把单实体快照写入 EntityState（数值/字符串字段按 key diff 更新，
    * 并清理本帧已消失的字段，如 AoS 索引缩短后的旧 key 残留）。
+   *
+   * @param hideInventory 是否裁掉 `Inventory.*` 键（F-28：其他玩家实体为 true，
+   *   其余实体/本人为 false）。被裁掉的键不在下一帧键集里 → 旧残留会被 diff 清除。
    */
-  private writeEntityState(entityState: EntityState, networkId: number, snap: EntitySnapshot): void {
+  private writeEntityState(
+    entityState: EntityState,
+    networkId: number,
+    snap: EntitySnapshot,
+    hideInventory = false,
+  ): void {
     entityState.id = networkId;
     // 层号：快照构建期由 entityLevelOf 统一写入（所有实体类型同一路径）
     entityState.level = snap.level;
 
     const nextNumberKeys = new Set<string>();
     for (const [fieldKey, value] of Object.entries(snap.values)) {
+      if (hideInventory && fieldKey.startsWith("Inventory.")) continue;
       nextNumberKeys.add(fieldKey);
       entityState.values.set(fieldKey, value);
     }
@@ -491,6 +504,7 @@ export class GameRoom extends Room<{ state: RoomState }> {
 
     const nextStringKeys = new Set<string>();
     for (const [fieldKey, value] of Object.entries(snap.strings)) {
+      if (hideInventory && fieldKey.startsWith("Inventory.")) continue;
       nextStringKeys.add(fieldKey);
       entityState.stringValues.set(fieldKey, value);
     }

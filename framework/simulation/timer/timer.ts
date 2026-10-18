@@ -59,9 +59,3 @@ export function setIntervalTimer(
 ): void {
   Interval[eid] = effect ? { periodTicks, nextTick, remaining, effect } : { periodTicks, nextTick, remaining };
 }
-
-/** 清除实体的全部定时器（一次性 + 周期）。 */
-export function clearTimers(eid: number): void {
-  ExpiresAt[eid] = undefined;
-  Interval[eid] = undefined;
-}

@@ -35,8 +35,6 @@ export interface GameInstance {
   beforeSystems?: (world: GameWorld) => void;
   /** 推进一个逻辑帧：tick+1 → 设 dtMs（限幅）→ 清空事件队列 → 演化钩子 → 跑全部系统。 */
   step(dtMs: number): void;
-  /** 空操作：初始实体全由 bootMaps 的初始演化产生（唯一实体生产路径）。 */
-  spawnInitialEntities(): void;
 }
 
 /**
@@ -97,10 +95,6 @@ export function createGameInstance(gameDef: LoadedGameDefinition, bootDeps: Boot
       for (const system of systems) {
         system(world);
       }
-    },
-
-    spawnInitialEntities() {
-      // 初始实体全由 bootMaps 的初始演化产生；本方法保留为空操作（兼容旧调用面）。
     },
   };
 

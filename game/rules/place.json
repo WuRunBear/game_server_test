@@ -1,5 +1,10 @@
 {
   "placeRange": 64,
   "containerRange": 64,
-  "gridSnap": true
+  "gridSnap": true,
+  "maxEnclosedArea": 256,
+  "fallDamage": {
+    "damagePerLevel": 10,
+    "minDropLevels": 2
+  }
 }

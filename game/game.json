@@ -24,7 +24,9 @@
           "repathTicks": 20,
           "maxNodes": 16384,
           "waypointToleranceTiles": 0.35,
-          "fleeGoalDistanceTiles": 8
+          "fleeGoalDistanceTiles": 8,
+          "goalStabilityTiles": 1,
+          "maxSearchesPerTick": 8
         }
       }
     },

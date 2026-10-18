@@ -961,6 +961,7 @@ export class GameSimulation implements SimulationPort {
             strings: {},
             mapId: entityMapOf(this.world, eid),
             level: entityLevelOf(eid),
+            player: hasComponent(this.world, eid, Player),
           };
           entities.set(id, snap);
         }

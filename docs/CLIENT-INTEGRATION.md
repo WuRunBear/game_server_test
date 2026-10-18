@@ -200,7 +200,7 @@ export class RoomState extends Schema {
 | Needs | `Needs.{i}.name/current/max` | 生存需求（条目集与 name 由 needs 规则定义，见 `game/rules/needs.json`；任一为 0 持续扣血） |
 | Inventory | `Inventory.{i}.kind/count` | 背包槽（容量由玩家原型配置定义；空槽 kind=`""` 占位） |
 | ItemMeta | `ItemMeta.kind/count` | 地面掉落物 |
-| ResourceNode | `ResourceNode.remaining` | 资源点剩余量（0 后消失，可再生） |
+| ResourceNode | `ResourceNode.remaining` | 资源点剩余量；0 = 已枯竭（**实体不消失**；`regenMs=0` 永不自动恢复，>0 按毫秒回满） |
 | Equipment | `Equipment.weaponSlot/toolSlot/armorSlot` | 装备槽引用的**背包槽索引**（-1=空） |
 | CraftingStation | `CraftingStation.stationType` | 合成站类型 id（类型语义由 crafting 配置定义；当前示例：0=通用，1=光源站点） |
 | LightSource | `LightSource.radius/fuelRemainingMs` | 光源半径与剩余燃料（≤0 熄灭） |

@@ -3,5 +3,6 @@
   "maxStack": 20,
   "spoilTicks": 9600,
   "spoilInto": "rotten",
-  "consume": [{ "need": "hunger", "amount": 50 }]
+  "consume": [{ "need": "hunger", "amount": 50 }],
+  "effects": [{ "name": "heal", "params": { "amount": 5 } }]
 }

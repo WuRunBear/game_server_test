@@ -151,6 +151,34 @@ describe("validateIntegrity：实体演化规则引用校验", () => {
     ]);
     expect(() => loadFrom(dir)).not.toThrow();
   });
+
+  it("结构差异：合法配置保留规则与地图实体结构；仅 region 改非法后拒绝并点名", () => {
+    // 同一份 fixture，先验证通过分支保留了可消费的结构（不是空壳成功）
+    const goodDir = makeDir([
+      { mode: "density", map: "m1", region: "alpha", kind: "kind_a", max: 2, every: 10 },
+    ]);
+    const def = loadFrom(goodDir) as {
+      resolvedMapConfigs: { key: string }[];
+      resolvedEntityRules: EntityRule[];
+      resolvedEntities: { kind: string }[];
+    };
+    expect(def.resolvedMapConfigs.map((config) => config.key)).toEqual(["m1", "tm"]);
+    expect(def.resolvedEntityRules).toHaveLength(1);
+    expect(def.resolvedEntityRules[0]).toMatchObject({
+      map: "m1",
+      region: "alpha",
+      kind: "kind_a",
+      max: 2,
+    });
+    expect(def.resolvedEntities.map((entity) => entity.kind)).toContain("kind_a");
+
+    // 拒绝分支：只把 region 换成不存在名，错误必须点名地图与区域，
+    // 且不复用通过分支的成功结果（loadGameDefinition 直接抛错）。
+    const badDir = makeDir([
+      { mode: "density", map: "m1", region: "nowhere", kind: "kind_a", max: 2, every: 10 },
+    ]);
+    expect(() => loadFrom(badDir)).toThrowError(/"m1".*"nowhere"/);
+  });
 });
 
 // ---------------------------------------------------------------------------

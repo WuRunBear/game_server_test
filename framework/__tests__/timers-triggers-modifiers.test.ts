@@ -16,10 +16,9 @@ import {
   triggerSystem,
   setExpiresAt,
   setIntervalTimer,
-  clearTimers,
   computeStat,
   addModifier,
-  addTrigger,
+  initTriggers,
   registerTrigger,
   getTrigger,
   hasTrigger,
@@ -34,6 +33,7 @@ import { Transform } from "framework/components/transform";
 import { NetworkId } from "framework/components/network";
 import { Health } from "framework/components/combat";
 import { EntityMap } from "framework/components/entityMap";
+import { destroyEntity } from "framework/entities/destroyEntity";
 import type { GameWorld } from "framework/world";
 
 beforeAll(() => {
@@ -148,13 +148,13 @@ describe("定时器（ExpiresAt / Interval / timerSystem）", () => {
     expect(events.length).toBe(10);
   });
 
-  it("clearTimers 清除全部定时器；非法周期条目被防御性清理", () => {
+  it("实体销毁清除全部定时器；非法周期条目被防御性清理", () => {
     const world = createBareWorld();
     const a = spawnTestEntity(world);
     const b = spawnTestEntity(world);
     setExpiresAt(a, 1);
     setIntervalTimer(a, 2, 2, 5);
-    clearTimers(a);
+    destroyEntity(world, a);
     expect(ExpiresAt[a]).toBeUndefined();
     expect(Interval[a]).toBeUndefined();
 
@@ -233,7 +233,9 @@ describe("触发器（triggerRegistry / triggerSystem）", () => {
     // SoA 全局单例防残留：显式清零位移
     Transform.x[target] = 0;
     Transform.y[target] = 0;
-    addTrigger(target, { trigger: "on-timer", effects: [{ name: "impulse", params: { dx: 5, dy: 0 } }] });
+    initTriggers(world, target, [
+      { trigger: "on-timer", effects: [{ name: "impulse", params: { dx: 5, dy: 0 } }] },
+    ]);
     setExpiresAt(target, 4); // 无直接效果引用——效果走 Triggers 声明
 
     world.time.tick = 3;
@@ -254,10 +256,9 @@ describe("触发器（triggerRegistry / triggerSystem）", () => {
     const world = createBareWorld();
     const target = spawnTestEntity(world, { hp: 10 });
     Health.current[target] = 5; // 受损状态，治疗可见
-    addTrigger(target, {
-      trigger: "on-command",
-      effects: [{ name: "heal", params: { amount: 3 } }],
-    });
+    initTriggers(world, target, [
+      { trigger: "on-command", effects: [{ name: "heal", params: { amount: 3 } }] },
+    ]);
 
     queueEvent(world, "on-command", { eid: target, type: "consume" });
     triggerSystem(world);
@@ -268,10 +269,9 @@ describe("触发器（triggerRegistry / triggerSystem）", () => {
     const world = createBareWorld();
     const owner = spawnTestEntity(world);
     const victim = spawnTestEntity(world, { hp: 10 });
-    addTrigger(owner, {
-      trigger: "on-contact",
-      effects: [{ name: "damage", params: { amount: 4 } }],
-    });
+    initTriggers(world, owner, [
+      { trigger: "on-contact", effects: [{ name: "damage", params: { amount: 4 } }] },
+    ]);
 
     queueEvent(world, "on-contact", { eid: owner, target: victim, x: 0, y: 0 });
     triggerSystem(world);
@@ -286,7 +286,9 @@ describe("触发器（triggerRegistry / triggerSystem）", () => {
     // 显式清零位移，防前一用例 impulse 残留干扰绝对值断言
     Transform.x[target] = 0;
     Transform.y[target] = 0;
-    addTrigger(target, { trigger: "on-timer", effects: [{ name: "impulse", params: { dx: 5 } }] });
+    initTriggers(world, target, [
+      { trigger: "on-timer", effects: [{ name: "impulse", params: { dx: 5 } }] },
+    ]);
 
     // 未注册求值器的自定义事件名：跳过不崩（直接入队绕过类型约束）
     world.eventBus.queue.push({ name: "on-nothing", payload: { eid: target } });
@@ -309,7 +311,9 @@ describe("触发器（triggerRegistry / triggerSystem）", () => {
       called += effects.length;
     });
     const target = spawnTestEntity(world);
-    addTrigger(target, { trigger: "on-test-custom", effects: [{ name: "impulse" }, { name: "impulse" }] });
+    initTriggers(world, target, [
+      { trigger: "on-test-custom", effects: [{ name: "impulse" }, { name: "impulse" }] },
+    ]);
     world.eventBus.queue.push({ name: "on-test-custom", payload: { eid: target } });
     triggerSystem(world);
     expect(called).toBe(2);

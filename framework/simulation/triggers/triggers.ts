@@ -22,17 +22,6 @@ export interface TriggerEntry {
 export const Triggers = [] as (TriggerEntry[] | undefined)[];
 
 /**
- * 为实体挂载一条触发器声明（无 Triggers 数据时自动创建列表）。
- */
-export function addTrigger(eid: number, entry: TriggerEntry): void {
-  let list = Triggers[eid];
-  if (!list) {
-    list = Triggers[eid] = [];
-  }
-  list.push({ trigger: entry.trigger, effects: entry.effects.map((spec) => ({ ...spec })) });
-}
-
-/**
  * AoS archetype 初始化钩子：按实体原型的 Triggers 配置写入声明列表。
  *
  * 配置形态为 TriggerEntry[]（trigger 字符串 + effects 效果引用数组）；

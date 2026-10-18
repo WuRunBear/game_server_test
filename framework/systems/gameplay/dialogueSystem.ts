@@ -15,12 +15,13 @@
  */
 import { hasComponent, query } from "bitecs";
 
-import { Dialogue, DialogueSource, Kind, NetworkId, Transform, Player, Health, entityMapOf } from "components";
+import { Dialogue, DialogueSource, Kind, NetworkId, Transform, Player, Health, entityMapOf, Ledger } from "components";
 import { entityLevelOf } from "framework/components/entityLevel";
 import { isGameplayReachable } from "framework/utils/gameplayDistance";
 import type { EntityId, GameWorld } from "world";
 import { acceptQuest, submitQuest } from "framework/systems/gameplay/questSystem";
 import { addRelation, getRelation } from "framework/systems/gameplay/relation";
+import { queryContainer, type ContainerRef } from "framework/economy/container";
 import { settle, type SettleTerms, type TransferAmount } from "framework/economy/settle";
 import type { DialogueTreeJson, DialogueNodeJson, DialogueEffectJson } from "framework/config/schema/DialogueSchema";
 import type { DialogueRule } from "framework/config/schema/RuleSchema";
@@ -170,6 +171,7 @@ export function applyDialogueEffect(
         effect.currency,
         effect.price,
         Kind[npcEid] ?? "",
+        npcEid,
       );
     default:
       return false;
@@ -179,10 +181,16 @@ export function applyDialogueEffect(
 /**
  * 商店买卖原子：玩家与商店的一次性等价交换（服务端权威，原子结算）。
  *
- * 最小通路：复用 economy 模块的 settle——**单方条款**即「对世界的现货交换」：
- * settle 对涉及容器做快照 → 校验 give 足额 → 扣减 → 插入 take，任一步失败
- * 整体回滚（零副作用）。商店侧无实体容器（无限货架/钱箱语义），货币与货物
- * 均在玩家背包容器内对冲，原子性由 settle 快照回滚保证。
+ * 库存/资金（F-44，服务端权威）：
+ * - 商贩实体挂 `Ledger`（AoS，随实体入档）时视为**有限商店**：账本里
+ *   `currency` 的余额 = 资金，其余 kind 的余额 = 库存。买单从商贩账本扣
+ *   货物、把货币记入账本；卖单从商贩账本扣货币、把货物记入账本。
+ *   库存/资金不足时整单拒绝（settle 先验后结 + 快照回滚，零副作用）。
+ * - 商贩无 `Ledger` 数据时保持旧语义：无限货架/无限钱箱（单方条款，货币
+ *   与货物都在玩家背包内对冲）。
+ *
+ * 原子性：复用 economy settle——双方条款对涉及容器做快照 → 校验 give 足额
+ * → 扣减 → 插入 take，任一步失败整体回滚。
  *
  * 定价：基础单价 = 效果显式 price，缺省取商品 item 定义的 value 字段；两者皆无
  * → 未定价，效果失败（对话停留在当前节点）。
@@ -203,6 +211,7 @@ function tradeAtShop(
   currency: string,
   price: number | undefined,
   npcKind: string,
+  npcEid: EntityId,
 ): boolean {
   const basePrice = price ?? world.gameDef.itemsByKind?.get(kind)?.value;
   if (basePrice === undefined || !(basePrice > 0)) return false; // 未定价：拒
@@ -226,12 +235,39 @@ function tradeAtShop(
   });
   const total = unitPrice * count;
 
+  // 商贩 Ledger 存在 = 有限库存/资金；无 Ledger = 旧语义（无限货架/钱箱）。
+  const merchantFinite = Ledger[npcEid] !== undefined;
+  const merchantRef: ContainerRef = { type: "ledger", eid: npcEid };
+  if (merchantFinite) {
+    // 前置显式校验（settle 也会再校验；这里给出清晰的库存/资金不足拒绝）
+    if (direction === "buy" && queryContainer(world, merchantRef, kind) < count) return false;
+    if (direction === "sell" && queryContainer(world, merchantRef, currency) < total) return false;
+  }
+
   const goods: TransferAmount = { container: "inventory", kind, count };
   const money: TransferAmount = { container: "inventory", kind: currency, count: total };
   const terms: SettleTerms =
     direction === "buy"
-      ? [{ party: playerEid, give: [money], take: [goods] }] // 付货币收货
-      : [{ party: playerEid, give: [goods], take: [money] }]; // 付货收货币
+      ? merchantFinite
+        ? [
+            { party: playerEid, give: [money], take: [goods] }, // 玩家付货币收货
+            {
+              party: npcEid,
+              give: [{ container: "ledger", kind, count }], // 商贩出货
+              take: [{ container: "ledger", kind: currency, count: total }], // 商贩收款
+            },
+          ]
+        : [{ party: playerEid, give: [money], take: [goods] }] // 无限货架：单方对冲
+      : merchantFinite
+        ? [
+            { party: playerEid, give: [goods], take: [money] }, // 玩家付货收货币
+            {
+              party: npcEid,
+              give: [{ container: "ledger", kind: currency, count: total }], // 商贩付款
+              take: [{ container: "ledger", kind, count }], // 商贩收货入账
+            },
+          ]
+        : [{ party: playerEid, give: [goods], take: [money] }]; // 无限钱箱：单方对冲
   const success = settle(world, terms);
   if (!success) return false;
 

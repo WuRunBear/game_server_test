@@ -3,8 +3,8 @@
  *
  * - 每块黑板绑定一个实体（owner），内部是 key → value 的 Map；
  * - 感知系统每 tick 写入感知结果（如最近敌对目标），action/condition 节点用 bbGet 读取；
- * - 与 AIState 组件互补：AIState 是 SoA 数值组件（存状态标识、可序列化），
- *   黑板存结构化的运行期中间数据，不占组件定义、不随实体序列化。
+ * - 黑板存结构化的运行期中间数据，不占组件定义、不随实体序列化（原 AIState
+ *   占位组件已在 F-38 删除，行为状态由黑板/行为树自身维护）。
  */
 import type { EntityId } from "framework/world";
 

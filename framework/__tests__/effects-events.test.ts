@@ -1,7 +1,7 @@
 /**
  * 类型化事件总线、效果系统与投射物子系统测试。
  *
- * 覆盖：事件总线（排队/派发顺序/订阅/隔离）、效果注册表、七个内置效果
+ * 覆盖：事件总线（排队/drain 顺序/tick 隔离）、效果注册表、七个内置效果
  * （damage/heal/spawn-projectile/apply-status/impulse/ledger/spawn-entity）、
  * 伤害公式纯函数、projectileSystem（直线运动/墙阻挡/接触事件/寿命销毁）。
  */
@@ -12,9 +12,7 @@ import {
   createGameInstance,
   createDefaultGameDefinition,
   queueEvent,
-  subscribeEvent,
   drainEvents,
-  dispatchEvents,
   registerEffect,
   getEffect,
   hasEffect,
@@ -106,28 +104,6 @@ describe("事件总线（eventBus）", () => {
     expect(events.map((e) => e.name)).toEqual(["on-command", "on-timer"]);
     // 清空式消费：二次 drain 为空
     expect(drainEvents(world)).toEqual([]);
-  });
-
-  it("dispatch：订阅者按事件顺序与订阅顺序调用；处理器抛错不中断", () => {
-    const world = createBareWorld();
-    const calls: string[] = [];
-    const off1 = subscribeEvent(world, "on-command", (payload) => {
-      calls.push(`a:${(payload as { eid: number }).eid}`);
-    });
-    subscribeEvent(world, "on-command", () => {
-      calls.push("b");
-      throw new Error("handler boom");
-    });
-    subscribeEvent(world, "on-command", () => calls.push("c"));
-
-    queueEvent(world, "on-command", { eid: 7, type: "drop" });
-    dispatchEvents(world);
-
-    expect(calls).toEqual(["a:7", "b", "c"]);
-    off1();
-    queueEvent(world, "on-command", { eid: 8, type: "drop" });
-    dispatchEvents(world);
-    expect(calls).toEqual(["a:7", "b", "c", "b", "c"]);
   });
 
   it("tick 隔离：GameInstance.step 帧首清空未消费队列", () => {

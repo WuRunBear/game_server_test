@@ -23,9 +23,10 @@
  * 2. 支撑校验（**先于**过渡校验）：求有效格在当前层「脚下」（含当前层）的
  *    最高站立面——当前层楼板、或服务当前层的连接器、或地形层、或当前层
  *    下方最高楼板；若最高面严格低于当前层（当前层既无同层地形/楼板，也
- *    无连接器支撑）→ 自然下落到该面（max(地形层, ≤当前层的最高楼板层)），
- *    不做重力/坠落伤害。只向下落：当前层低于地形层（走向高台/坡道下沿）
- *    不「向上掉」，仍交给过渡校验。
+ *    无连接器支撑）→ 自然下落到该面（max(地形层, ≤当前层的最高楼板层)）。
+ *    只向下落：当前层低于地形层（走向高台/坡道下沿）不「向上掉」，仍交给
+ *    过渡校验。F-17 起，向下跃迁 ≥ rules/place.json 的 fallDamage.minDropLevels
+ *    时按层差结算坠落伤害（无配置零变化）。
  *    支撑数据来自与 walkableAtLevel 的 `built` 参数同一份 BuiltStructuresIndex
  *    投影（collectBuiltStructuresByMap），楼板拆除后下一 tick 即失去支撑。
  * 3. 过渡校验（候选 ≠ 当前才判定）：
@@ -33,6 +34,8 @@
  *      实体侧连接器（有效格上的连接器覆盖当前层与候选层的过渡）——
  *      坡道带/连接器格两侧层号连续变化，不瞬移坐标；
  *    - Δ ≤ -2（自上而下跨崖边界）：允许（跳下，前置修正 8 的有向语义）；
+ *      有 levelSemantics 的图要求落点格为 cliff 语义（F-17 语义校验），
+ *      并按层差结算坠落伤害（配置驱动；无配置零变化）；
  *    - 其余（低→高跨崖、无坡道的 ±1）：拒绝，保持当前层号（碰撞层已把
  *      向上路径物理封死，此处是纯函数侧的一致性防线）。
  * 4. 写回：确立（无条目 → 地形层号，含 0）与校验通过的过渡都直接写
@@ -55,6 +58,9 @@ import { hasComponent, query } from "bitecs";
 import { EntityLevel } from "framework/components/entityLevel";
 import { entityMapOf } from "framework/components/entityMap";
 import { Projectile } from "framework/components/projectile";
+import { Health, Defense } from "framework/components/combat";
+import { isOfflineRetained } from "framework/components/offline";
+import { computeStandardDamage } from "framework/systems/gameplay/damageFormula";
 import {
   Structure,
   STRUCTURE_ROLE_NONE,
@@ -142,6 +148,16 @@ export function connectorCandidate(
 }
 
 /**
+ * 站立面解析结果：层号 + 来源（connector/floor/terrain）。来源用于坠落语义
+ * 判定（只有从地形层往下掉才是「跳崖」；从楼板/连接器边缘掉下是 F-05 的
+ * 自然下落）。
+ */
+interface SupportResolution {
+  level: number;
+  source: "connector" | "floor" | "terrain";
+}
+
+/**
  * 求有效格上「当前层脚下最高站立面」；当前层无支撑时返回下方最高面。
  *
  * 站立面候选：
@@ -157,7 +173,7 @@ export function connectorCandidate(
  * @param currentLevel 实体当前层号
  * @param connector 有效格上的连接器声明（无则 undefined）
  * @param built 建造层索引（floors 与 walkableAtLevel 同源；缺省只看地形）
- * @returns 站立面层号；当前层下方无任何面（当前层低于地形层）时 undefined
+ * @returns 站立面层号与来源；当前层下方无任何面（当前层低于地形层）时 undefined
  */
 function supportLevelAt(
   geometry: MapGeometry,
@@ -165,17 +181,22 @@ function supportLevelAt(
   currentLevel: number,
   connector: StructureConnector | undefined,
   built?: BuiltFloorsByLevel,
-): number | undefined {
+): SupportResolution | undefined {
   if (connector && (connector.low === currentLevel || connector.high === currentLevel)) {
-    return currentLevel;
+    return { level: currentLevel, source: "connector" };
   }
   const terrain = geometry.level[index] ?? 0;
-  let support: number | undefined = terrain <= currentLevel ? terrain : undefined;
+  let support: SupportResolution | undefined =
+    terrain <= currentLevel ? { level: terrain, source: "terrain" } : undefined;
   if (built) {
     for (const [level, tiles] of built.floors) {
-      if (level === currentLevel && tiles.has(index)) return currentLevel;
-      if (level < currentLevel && tiles.has(index) && (support === undefined || level > support)) {
-        support = level;
+      if (level === currentLevel && tiles.has(index)) return { level: currentLevel, source: "floor" };
+      if (
+        level < currentLevel &&
+        tiles.has(index) &&
+        (support === undefined || level > support.level)
+      ) {
+        support = { level, source: "floor" };
       }
     }
   }
@@ -195,6 +216,8 @@ function supportLevelAt(
  * @param currentLevel 实体当前层号（EntityLevel 已建立条目）
  * @param connectorAt 有效格索引 → 连接器声明（实体侧连接器；缺省无连接器）
  * @param built 建造层索引（楼板支撑判定；与 walkableAtLevel 的 `built` 同源）
+ * @param hadElevatedFooting 上一 tick 实体是否站在「楼板/连接器」上（F-17：
+ *   用于区分跳崖与从楼板边缘自然下落；缺省 true = 纯函数调用沿用宽容语义）
  * @returns 校验后的层号
  */
 export function resolveEntityLevel(
@@ -204,6 +227,7 @@ export function resolveEntityLevel(
   currentLevel: number,
   connectorAt?: (index: number) => StructureConnector | undefined,
   built?: BuiltFloorsByLevel,
+  hadElevatedFooting = true,
 ): number {
   const { level: terrainCandidate, index } = candidateLevelAt(geometry, x, y);
   const connector = connectorAt?.(index);
@@ -212,7 +236,22 @@ export function resolveEntityLevel(
   // 只向下（support < currentLevel）：走向更高地形时不向上“掉”，上行仍须
   // 经 slope/连接器/向下跳崖的既有过渡规则。
   const support = supportLevelAt(geometry, index, currentLevel, connector, built);
-  if (support !== undefined && support < currentLevel) return support;
+  if (support !== undefined && support.level < currentLevel) {
+    // F-17 cliff 语义校验：从地形层（非楼板/连接器）向下跃迁 ≥2 时，量化图
+    // 要求落点格为 cliff 语义；否则是「绕过崖带从任意高差瞬移」，拒绝并保持
+    // 当前层。从楼板/连接器边缘下落不受此限（F-05 自然下落）。
+    const semantics = geometry.levelSemantics;
+    if (
+      !hadElevatedFooting &&
+      support.source === "terrain" &&
+      currentLevel - support.level >= 2 &&
+      semantics !== undefined &&
+      geometry.tiles[index] !== semantics.cliff
+    ) {
+      return currentLevel;
+    }
+    return support.level;
+  }
 
   // 实体侧连接器：候选层按连接器方向重定向（上行 low→high / 下行 high→low）。
   // 重定向发生即过渡合法性——连接器只在自身方向上、对服务范围内的层号给出
@@ -233,9 +272,88 @@ export function resolveEntityLevel(
     if (viaConnector) return candidate;
     return currentLevel;
   }
-  // cliff 单向：自上而下跨崖边界允许（跳下）；向上跨层一律拒绝
-  if (delta <= -2) return candidate;
+  // cliff 单向：自上而下跨崖边界允许（跳下）；向上跨层一律拒绝。
+  // F-17：有层边界语义的图（量化积木产物）要求落点格是 cliff 语义——普通
+  // 低层格不构成「跳下」，防止绕过崖带语义从任意高差瞬移。无 levelSemantics
+  // 的图（flat/Tiled 旧图）保持既有放行语义（无权威语义可校验）。
+  if (delta <= -2) {
+    const semantics = geometry.levelSemantics;
+    if (semantics === undefined || geometry.tiles[index] === semantics.cliff) return candidate;
+    return currentLevel;
+  }
   return currentLevel;
+}
+
+/** 坠落伤害配置（rules/place.json 的 fallDamage 段；未配置返回 undefined）。 */
+interface FallDamageConfig {
+  damagePerLevel: number;
+  minDropLevels: number;
+}
+
+/**
+ * 解析坠落伤害配置：缺省/非法（非正伤害）视为未配置（零变化）；最小层差
+ * 缺省 2（1 层落差按普通台阶处理，不扣血）。
+ */
+function fallDamageConfigOf(world: GameWorld): FallDamageConfig | undefined {
+  const raw = world.gameDef.resolvedRules["place"] as
+    | { fallDamage?: { damagePerLevel?: unknown; minDropLevels?: unknown } }
+    | undefined;
+  const cfg = raw?.fallDamage;
+  if (!cfg || typeof cfg.damagePerLevel !== "number" || !Number.isFinite(cfg.damagePerLevel) || cfg.damagePerLevel <= 0) {
+    return undefined;
+  }
+  const minDropLevels =
+    typeof cfg.minDropLevels === "number" && Number.isInteger(cfg.minDropLevels) && cfg.minDropLevels >= 1
+      ? cfg.minDropLevels
+      : 2;
+  return { damagePerLevel: cfg.damagePerLevel, minDropLevels };
+}
+
+/**
+ * 结算一次坠落伤害（F-17）：层差 × damagePerLevel 走标准伤害公式
+ * （扣除目标 Defense 组件基础值，至少 1 点），只扣 Health；致死由 deathSystem
+ * 在本 tick 后续统一处理。无配置 / 无 Health / 已死亡 / 断线保留实体均跳过。
+ */
+function applyFallDamage(world: GameWorld, eid: number, dropLevels: number): void {
+  const config = fallDamageConfigOf(world);
+  if (!config || dropLevels < config.minDropLevels) return;
+  if (!hasComponent(world, eid, Health)) return;
+  if ((Health.current[eid] ?? 0) <= 0) return;
+  if (isOfflineRetained(world, eid)) return;
+
+  const defense = hasComponent(world, eid, Defense) ? (Defense.value[eid] ?? 0) : 0;
+  const damage = computeStandardDamage(config.damagePerLevel * dropLevels, defense);
+  Health.current[eid] = (Health.current[eid] ?? 0) - damage;
+}
+
+/**
+ * 每实体「上一 tick 是否站在楼板/连接器上」记录（F-17 坠落语义判定用）。
+ *
+ * 模块侧 WeakMap（world → eid → boolean），遵循 mapSeeds/terrainBaseline 的
+ * 「运行时编排产物不进 GameWorld 核心结构」惯例；不入档。缺省（未记录，如
+ * 读档后的首个 tick）= true——首个 tick 不做 cliff 语义拒绝，避免把读档位置
+ * 误判成一次跳崖。
+ */
+const elevatedFootingByWorld = new WeakMap<GameWorld, Map<number, boolean>>();
+
+function elevatedFootingMap(world: GameWorld): Map<number, boolean> {
+  let map = elevatedFootingByWorld.get(world);
+  if (!map) {
+    map = new Map();
+    elevatedFootingByWorld.set(world, map);
+  }
+  return map;
+}
+
+/** 实体在 (index, level) 是否站在楼板/连接器上（地形层不算「高架」站立面）。 */
+function elevatedFootingAt(
+  built: BuiltStructuresIndex | undefined,
+  index: number,
+  level: number,
+  connector: StructureConnector | undefined,
+): boolean {
+  if (connector && (connector.low === level || connector.high === level)) return true;
+  return built?.floors.get(level)?.has(index) ?? false;
 }
 
 /**
@@ -255,6 +373,7 @@ export function resolveEntityLevel(
  */
 export function entityLevelSystem(world: GameWorld): GameWorld {
   const builtByMap: Map<string, BuiltStructuresIndex> = collectBuiltStructuresByMap(world);
+  const footing = elevatedFootingMap(world);
 
   for (const eid of query(world, [Transform])) {
     // 投射物锁单层（前置修正 5）：层号在生成时随主人定格，飞行中不随地形变化
@@ -280,10 +399,16 @@ export function entityLevelSystem(world: GameWorld): GameWorld {
       // 「实体所在格决定其 level」，纯位置函数），**含 0 也落条目**——条目
       // 存在即「已确立」，此后变化一律走过渡校验（确立只发生一次；若 0 层
       // 不落条目，实体每回到无条目态都会被重新确立，跨层单向语义被击穿）。
-      EntityLevel[eid] = candidateLevelAt(geometry, Transform.x[eid], Transform.y[eid]).level;
+      const first = candidateLevelAt(geometry, Transform.x[eid], Transform.y[eid]);
+      EntityLevel[eid] = first.level;
+      footing.set(
+        eid,
+        elevatedFootingAt(built, first.index, first.level, connectors?.get(first.index)),
+      );
       continue;
     }
 
+    const index = candidateLevelAt(geometry, Transform.x[eid], Transform.y[eid]).index;
     const next = resolveEntityLevel(
       geometry,
       Transform.x[eid],
@@ -291,8 +416,15 @@ export function entityLevelSystem(world: GameWorld): GameWorld {
       stored,
       connectorAt,
       built,
+      footing.get(eid) ?? true,
     );
-    if (next !== stored) EntityLevel[eid] = next;
+    footing.set(eid, elevatedFootingAt(built, index, next, connectors?.get(index)));
+    if (next !== stored) {
+      EntityLevel[eid] = next;
+      // F-17：向下跃迁 ≥ 配置的最小层差 → 坠落伤害（slope 的 ±1 下行不足
+      // minDropLevels，天然不扣血；无配置零变化）。
+      if (next < stored) applyFallDamage(world, eid, stored - next);
+    }
   }
   return world;
 }

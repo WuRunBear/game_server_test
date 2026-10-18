@@ -20,9 +20,24 @@ import type { GameWorld } from "framework/world";
 /** 成就解锁进度键前缀（world.progress）。 */
 export const ACHIEVEMENT_PROGRESS_PREFIX = "achievement:";
 
+/**
+ * 待领取奖励进度键前缀（world.progress；F-24）。
+ *
+ * 成就解锁时若无在线玩家（或没有可归属的触发玩家），玩家侧奖励（物品/势力
+ * 声望）无法发放——写入 `achievement-pending:<id> = 1` 挂起，玩家上线后由
+ * achievementSystem 补发并删除该键（只发一次；世界侧 progress 奖励在解锁时
+ * 已即时结算，不重复）。
+ */
+export const ACHIEVEMENT_PENDING_PREFIX = "achievement-pending:";
+
 /** 成就进度键（world.progress）。 */
 export function achievementProgressKey(id: string): string {
   return `${ACHIEVEMENT_PROGRESS_PREFIX}${id}`;
+}
+
+/** 待领取奖励键（world.progress）。 */
+export function achievementPendingKey(id: string): string {
+  return `${ACHIEVEMENT_PENDING_PREFIX}${id}`;
 }
 
 /** 单实体的成就解锁集合：成就 id → 解锁标记（1）。 */

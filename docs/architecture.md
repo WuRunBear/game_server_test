@@ -33,12 +33,12 @@ framework/
     registerBuiltin.ts      # 注册内置组件（清单: pnpm tools list-registries）
     index.ts                # barrel 导出
     transform.ts, size.ts, physics.ts (Velocity/Acceleration/Collider/ColliderShape),
-    combat.ts (Health/Attack/Defense/Team), ai.ts (AIState/Target/BlackboardRef),
+    combat.ts (Health/Attack/Defense/Team),
     perception.ts (SoA 感知), equipment.ts / craftingStation.ts (SoA 装备/站点),
     lightSource.ts / placeable.ts (SoA 光源/可放置), gridOccupancy.ts / portal.ts (SoA 网格占用 / AoS 传送门),
     dialogue.ts / dialogueSource.ts / quest.ts / relation.ts (AoS 对话会话/对话源/任务/好感),
-    inventory.ts (AoS 例外), network.ts (NetworkId/LastSynced),
-    timer.ts (Cooldown/Duration), tags.ts (Player/Enemy/NPC/Item/Resource),
+    inventory.ts (AoS 例外), network.ts (NetworkId),
+    timer.ts (Cooldown), tags.ts (Player/Enemy/NPC/Item/Resource),
     nest.ts, needs.ts / resourceNode.ts / loot.ts / intent.ts / kind.ts / itemMeta.ts / entityMap.ts / spawnPoint.ts (AoS 家族)
   systems/
     systemRegistry.ts       # 系统注册表 + buildSystems (拓扑排序, Kahn 算法)
@@ -58,7 +58,7 @@ framework/
     btFactory.ts            # 行为树工厂 (配置 → mistreevous 树)
     btRunner.ts             # stepBehaviourTree(instance, ctx)
     blackboard.ts           # 每实体黑板 (perception.target 等 key)
-    registerBuiltinActions.ts   # 注册 Idle/Wander/Chase/Flee/Attack/Sleep/IsTargetInVision/InAttackRange/IsNight/IsInLight
+    registerBuiltinActions.ts   # 注册 Wander/Chase/Flee/Attack/Sleep/ApplyStatus/IsTargetInVision/InAttackRange/IsNight/IsInLight/HealthBelow
     nodes/actions/          # idle.ts, wander.ts, chase.ts, flee.ts, attack.ts, sleep.ts
     nodes/conditions/       # isTargetInVision.ts, inAttackRange.ts, isNight.ts, isInLight.ts
     nodes/steer.ts          # 移动方向/边界钳制共用工具
@@ -108,11 +108,10 @@ framework/
       state/                # RoomState, PlayerState, EntityState (Colyseus Schema, 字段按 netSync 配置映射)
     headless/
       HeadlessHost.ts       # runHeadless(sim, opts) — 无传输驱动 tick，返回 TickResult[]
-  utils/                    # logger.ts (winston), timer.ts (clampMs), placement.ts, light.ts
+  utils/                    # logger.ts (winston), placement.ts, light.ts
   events/                   # gameEvents.ts — 帧内事件总线（emit/consume，step 帧首清空）
   metrics.ts                # tick 性能指标 (EMA avg)
   repository.ts             # Repository 接口 (持久化抽象，WorldRecord 世界快照，含 maps 地理快照与 mapSeeds)
-  postgres.ts, redis.ts     # 占位 stub（接口已对齐，等真实部署需求）
   bitecs-legacy.d.ts        # bitecs legacy API 手工类型声明
   __tests__/                # 测试套件（各切片回归 + U1–U7/I1–I5 地图覆盖矩阵）
 

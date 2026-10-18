@@ -246,8 +246,9 @@ Tiled 图豁免（仍读 Tiled JSON 自带 tilewidth）。
 
 #### 4.5 第二批（观感确认后另开任务，本方案只定范围）
 
-- 其余 ~28 个 entities：Size/Collider、Perception（visionRadius/hostilityRange →
-  `visionRadiusTiles`）、Attack.range → `rangeTiles`、Placeable.footprint →
+- 其余 ~28 个 entities：Size/Collider、Perception（visionRadius →
+  `visionRadiusTiles`；原计划的 hostilityRange 后因零消费者在 F-38 删除）、
+  Attack.range → `rangeTiles`、Placeable.footprint →
   `footprintWTiles/H`、LightSource；
 - interaction/crafting/place/deconstruct/dialogue 距离：规则文件内 `*Tiles`
   （框架 px 默认值 24/64/64/64/48 保留为 fallback）；

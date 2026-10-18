@@ -11,8 +11,8 @@
  * 参照 EntityMap 模式：运行时写入、不由 archetype 声明（无 initializer——
  * 运行时层号依赖几何/连接器查询，静态原型配置表达不了）；未列入
  * worldSerializer 的瞬态跳过清单，随实体自然入档/恢复；**不注册 netSync
- * AoS 适配器**——层号经快照 DTO 的 level 字段参与服务端兴趣裁剪，客户端
- * 协议字段留待客户端渲染切片接线。
+ * AoS 适配器**——层号经 `EntitySnapshot.level` 参与服务端兴趣裁剪，
+ * 客户端协议上由 `EntityState.level`（F-06，字段索引 3）承载。
  */
 
 /** AoS 存储：普通 JS 数组按 eid 索引（非 bitecs 组件，不能 addComponent/query）。 */

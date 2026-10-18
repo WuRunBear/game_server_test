@@ -120,11 +120,12 @@ describe("systemRegistry", () => {
 
 // 动作注册表：内置行为树动作已注册；访问未注册动作抛错
 describe("actionRegistry", () => {
-  // Idle/Wander 等内置动作已在 bootstrap 时注册
+  // Wander/Chase 等内置动作已在 bootstrap 时注册（Idle 零树使用，已删除）
   it("should have registered builtin actions", () => {
     const { actionRegistry } = getRegistries();
-    expect(actionRegistry.has("Idle")).toBe(true);
+    expect(actionRegistry.has("Idle")).toBe(false);
     expect(actionRegistry.has("Wander")).toBe(true);
+    expect(actionRegistry.has("Chase")).toBe(true);
   });
 
   // 配置/行为树引用了未注册的动作名 → 运行期抛错
@@ -665,7 +666,7 @@ describe("actionRegistry edge cases", () => {
   // 重复注册同名动作 → 抛错
   it("should throw on duplicate action registration", () => {
     const { actionRegistry } = getRegistries();
-    expect(() => actionRegistry.register("Idle", () => () => State.SUCCEEDED))
+    expect(() => actionRegistry.register("Wander", () => () => State.SUCCEEDED))
       .toThrow("already registered");
   });
 
@@ -682,13 +683,12 @@ describe("actionRegistry edge cases", () => {
     }
   });
 
-  // 注册的动作可被调用并返回 mistreevous 状态码
+  // 注册的动作工厂可产出可调用的 agent 方法
   it("registered actions should be callable", () => {
     const { actionRegistry } = getRegistries();
-    const factory = actionRegistry.get("Idle");
-    const action = factory();
-    const result = action();
-    expect(result).toBe(State.SUCCEEDED);
+    const factory = actionRegistry.get("Chase");
+    const action = factory({ speedTiles: 0.5 });
+    expect(typeof action).toBe("function");
   });
 });
 

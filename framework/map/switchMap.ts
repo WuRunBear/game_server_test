@@ -11,6 +11,7 @@
  */
 import { Transform } from "components";
 import { EntityMap } from "framework/components/entityMap";
+import { EntityLevel } from "framework/components/entityLevel";
 import { prewarmCollisionRuntime } from "framework/systems/core/collisionSystem";
 import type { GameWorld, EntityId } from "framework/world";
 
@@ -41,6 +42,21 @@ export function movePlayerToMap(
   };
   Transform.x[eid] = dest?.x ?? fallback.x;
   Transform.y[eid] = dest?.y ?? fallback.y;
+  // 传送 = 重新落地：层号按目标落点地形重确立（首次确立语义）。否则
+  // entityLevelSystem 会把「高处传送 → 低处落点」当成一次 cliff 跳下
+  // （F-17 坠落伤害），或在非 cliff 落点被语义校验永久卡在旧层。
+  // 同图传送同样重新确立（movePlayerToMap 的语义是传送而非行走）。
+  {
+    const tx = Math.min(
+      geometry.grid.width - 1,
+      Math.max(0, Math.floor(Transform.x[eid] / geometry.grid.tileWidth)),
+    );
+    const ty = Math.min(
+      geometry.grid.height - 1,
+      Math.max(0, Math.floor(Transform.y[eid] / geometry.grid.tileHeight)),
+    );
+    EntityLevel[eid] = geometry.level[ty * geometry.grid.width + tx] ?? 0;
+  }
   // 预暖目标图碰撞运行时：实体当 tick 进入一个「已有碰撞体」的世界（新激活图当 tick 即可碰撞）。
   prewarmCollisionRuntime(world, mapId);
   return true;

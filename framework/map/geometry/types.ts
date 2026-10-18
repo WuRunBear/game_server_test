@@ -2,11 +2,11 @@
  * MapGeometry 数据层类型定义（framework/map/geometry/types.ts）。
  *
  * MapGeometry 是**生成期产出、运行时受控修改**的地理数据：地形由生成层一次
- * 产出；设计上运行期修改只允许走统一的写回入口（原地改数组 + 重算 version
- * 指纹 + 失效重建碰撞缓存 + 脏格 diff 推送，见 docs/map-system-v2-design.md
- * §3.2——该入口尚未实现，本层先把表述与数据载体落准，当前写入方仍只有
- * 生成层）。它只承载地理本身——地面语义、通行位图、离散层号、区域划分，
- * 不含任何实体/出生点/建造物语义。
+ * 产出；运行期修改只允许走统一写回入口（原地改数组 + 重算 version 指纹 +
+ * 失效重建碰撞缓存 + 脏格 diff 登记，见 docs/map-system-v2-design.md §3.2 与
+ * framework/map/runtime/terrainWriteback.ts 的 setGround/setWalkable/setLevel）。
+ * 它只承载地理本身——地面语义、通行位图、离散层号、区域划分，不含任何
+ * 实体/出生点/建造物语义。
  *
  * 纯数据层：不 import bitecs/ECS/任何 world 类型。
  */

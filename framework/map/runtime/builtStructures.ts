@@ -15,7 +15,9 @@
  *   转移判定的实体侧连接器（楼梯实体把「连接器格」扩展到实体侧）。
  *
  * 确定性：同一 ECS 状态恒投影出同一索引（query 顺序 = eid 序，仅影响同格
- * 多连接器时的取者，取首个、结果确定）。
+ * 多连接器时的取者，取首个、结果确定）。同格第二个连接器不会被静默丢弃：
+ * 首次投影到该冲突时记一次 warn（F-25，含保留/丢弃的 eid 与方向），语义仍
+ * 是「保留首个」——双向楼梯配置为两个不同 tile 的连接器（见 entityLevelSystem）。
  */
 import { hasComponent, query } from "bitecs";
 
@@ -65,13 +67,22 @@ export function emptyBuiltStructuresIndex(): BuiltStructuresIndex {
 }
 
 /**
+ * 同格连接器冲突告警去重键（map|tile|保留 eid|丢弃 eid）。模块级集合：同一
+ * 冲突每进程只告警一次（投影每 tick/每调用都会重建，不能每次都刷日志）。
+ */
+const warnedConnectorConflicts = new Set<string>();
+
+/**
  * 把单个建造实体投影进索引（floors / walls / connectors）。
  *
  * 建造实体的层号 = 放置/生成时显式写入的 EntityLevel（entityLevelSystem
  * 对 Structure 实体跳过推导）；无条目回退 0（配置/放置链漏写的兜底）。
- * 同格多连接器取首个（query 顺序 = eid 序，结果确定）。
+ * 同格多连接器取首个（query 顺序 = eid 序，结果确定）；后续同格连接器被
+ * 丢弃时第一次告警（F-25），不再静默。
  */
 function projectStructure(
+  world: GameWorld,
+  mapId: string,
   index: BuiltStructuresIndex,
   role: number,
   level: number,
@@ -96,12 +107,27 @@ function projectStructure(
     }
     byLevel.add(tileIndex);
   } else if (role === STRUCTURE_ROLE_CONNECTOR) {
-    if (!index.connectors.has(tileIndex)) {
+    const existing = index.connectors.get(tileIndex);
+    if (!existing) {
       index.connectors.set(tileIndex, {
         low: connectLow,
         high: connectHigh,
         dir: connectDir,
         eid,
+      });
+      return;
+    }
+    // 同格多连接器：保留首个（eid 序确定），首次冲突告警一次
+    const warnedKey = `${mapId}|${tileIndex}|${existing.eid}|${eid}`;
+    if (existing.eid !== eid && !warnedConnectorConflicts.has(warnedKey)) {
+      warnedConnectorConflicts.add(warnedKey);
+      world.logger.warn("同格存在多个连接器；保留 eid 序首个（其余不参与跨层转移）", {
+        mapId,
+        tileIndex,
+        keptEid: existing.eid,
+        kept: { low: existing.low, high: existing.high, dir: existing.dir },
+        droppedEid: eid,
+        dropped: { low: connectLow, high: connectHigh, dir: connectDir },
       });
     }
   }
@@ -131,6 +157,8 @@ export function collectBuiltStructures(world: GameWorld, mapId: string): BuiltSt
     const ty = Math.floor(Transform.y[eid] / tileHeight);
     if (tx < 0 || ty < 0 || tx >= width || ty >= height) continue;
     projectStructure(
+      world,
+      mapId,
       index,
       role,
       level,
@@ -158,6 +186,8 @@ export function collectBuiltStructures(world: GameWorld, mapId: string): BuiltSt
     const ty = Math.floor(Transform.y[eid] / tileHeight);
     if (tx < 0 || ty < 0 || tx >= width || ty >= height) continue;
     projectStructure(
+      world,
+      mapId,
       index,
       STRUCTURE_ROLE_WALL,
       level,
@@ -202,6 +232,8 @@ export function collectBuiltStructuresByMap(world: GameWorld): Map<string, Built
       byMap.set(mapId, index);
     }
     projectStructure(
+      world,
+      mapId,
       index,
       role,
       entityLevelOf(eid),
@@ -236,6 +268,8 @@ export function collectBuiltStructuresByMap(world: GameWorld): Map<string, Built
       byMap.set(mapId, index);
     }
     projectStructure(
+      world,
+      mapId,
       index,
       STRUCTURE_ROLE_WALL,
       entityLevelOf(eid),

@@ -12,8 +12,14 @@
  * 若两个存档同时写同一 id 的 tmp 文件再各自 rename，慢写者会覆盖快写者
  * （旧档覆盖新档）；排队后写入顺序即调用顺序，最终文件为最后一次调用的内容。
  *
- * 这是默认持久化后端（无外部依赖，可单机验收）；Postgres/Redis 实现见
- * postgres.ts / redis.ts（接口已对齐，当前为占位，等待真实部署需求）。
+ * JSON 编码（`JSON.stringify`）在队列任务内执行（F-30）：调用方在 tick 内
+ * 只需同步产出纯数据快照（serializeWorld），编码/写盘在 tick 返回后的异步段
+ * 完成，降低大世界自动存档的当帧阻塞。record 视为不可变快照——入队后调用方
+ * 不得再修改它（内部唯一调用方 serializeWorld 每帧新建对象，满足该契约）。
+ *
+ * 这是当前唯一的持久化后端（无外部依赖，可单机验收）；仓库不提供
+ * Postgres/Redis 实现（F-37 删除了不可用的占位桩，等真实部署需求再按
+ * Repository 接口实现）。
  */
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -56,10 +62,13 @@ export function createFileRepository(dir: string): Repository {
     async saveWorld(record: WorldRecord) {
       const target = join(dir, `${safeId(record.id)}.json`);
       const tmp = `${target}.tmp`;
-      const payload = JSON.stringify(record);
 
       // 同步入队（在任何 await 之前）：保证入队顺序==调用顺序，旧档不覆盖新档。
+      // JSON.stringify 放在队列任务内（F-30）：调用方（自动存档在 tick 内触发）
+      // 只同步产出纯数据快照（serializeWorld），编码与写盘在 tick 返回后的
+      // 微任务/异步段执行，避免大世界 JSON 编码阻塞当帧 tick。
       const task = writeQueue.then(async () => {
+        const payload = JSON.stringify(record);
         await mkdir(dir, { recursive: true });
         await writeFile(tmp, payload, "utf8");
         await rename(tmp, target);

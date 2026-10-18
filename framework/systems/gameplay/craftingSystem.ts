@@ -31,6 +31,8 @@ import type { CraftingRecipe, EnvironmentRule } from "framework/config/schema/Ru
  * 产出挂入 world.craftingJobs，由 `stepCraftingJobs` 每 tick 推进——到点时重验
  * 站点（含燃料）与背包空间：不满足则**挂起重试**（不丢已耗材料、不丢产出），
  * 直到可产出或玩家经 `cancelCrafting` 取消（取消按配方回退 inputs，放不下则拒绝取消）。
+ * 产出按**实际到账 tick** 传 nowTick 派生 spoilAt（F-23：即时/延时两条路径都不再
+ * 晚 1 tick 由 spoilSystem 补写）。
  * 任务表随 WorldRecord.craftingJobs 入档（合成者按 NetworkId 引用，绝对 finishTick）——
  * 重启后继续推进，离线补差在世界时钟推到边界后按同一 stepCraftingJobs 结算。
  *
@@ -294,7 +296,9 @@ export function craftRecipe(world: GameWorld, ownerEid: number, recipeId: string
   }
 
   for (const out of recipe.outputs) {
-    addToInventory(inv, world.gameDef.itemsByKind, out.kind, out.count);
+    addToInventory(inv, world.gameDef.itemsByKind, out.kind, out.count, {
+      nowTick: world.time.tick,
+    });
   }
   return true;
 }
@@ -436,7 +440,9 @@ export function stepCraftingJobs(world: GameWorld): void {
         continue;
       }
       for (const out of recipe.outputs) {
-        addToInventory(inv, world.gameDef.itemsByKind, out.kind, out.count);
+        addToInventory(inv, world.gameDef.itemsByKind, out.kind, out.count, {
+          nowTick: tick,
+        });
       }
     }
     if (remaining.length > 0) world.craftingJobs.set(ownerEid, remaining);
@@ -527,7 +533,9 @@ function outputsFit(world: GameWorld, inv: NonNullable<(typeof Inventory)[number
     slots: inv.slots.map((s) => (s ? { ...s } : null)),
   };
   for (const out of recipe.outputs) {
-    const leftover = addToInventory(dryInv, world.gameDef.itemsByKind, out.kind, out.count);
+    const leftover = addToInventory(dryInv, world.gameDef.itemsByKind, out.kind, out.count, {
+      nowTick: world.time.tick,
+    });
     if (leftover > 0) return false;
   }
   return true;
