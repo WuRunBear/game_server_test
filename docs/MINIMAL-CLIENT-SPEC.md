@@ -47,6 +47,7 @@
     id:           "uint32",          // NetworkId
     values:       { map: "number" }, // 数值字段，"组件.字段"
     stringValues: { map: "string" }, // 字符串字段，"组件.字段"
+    level:        "int8",            // 实体离散层号（末尾追加；旧客户端前三项索引不变）
   });
 
   class PlayerState extends Schema {}
@@ -98,6 +99,7 @@
     id:           "uint32",          // NetworkId
     values:       { map: "number" }, // 数值字段，"组件.字段"
     stringValues: { map: "string" }, // 字符串字段，"组件.字段"
+    level:        "int8",            // 实体离散层号（末尾追加；旧客户端前三项索引不变）
   });
 
   class PlayerState extends Schema {}
@@ -150,7 +152,9 @@
    | 传送门 | Portal.targetMap | 紫色 | 门 |
    | 建筑 | Placeable.* | 灰色 | — |
 
+   > 协议现在**下发实体种类字段** `Kind.value`（见协议 §3.5/§3.6）：**优先按 `Kind.value` 分类**，拿不到时才回退上表的「同步字段组合」启发式。
 5. 形状：`Collider.shape` 0=圆（用 `radius`）、1=矩形（用 `Size.w/h`）；缺省按半径 8 圆处理。`Transform.x/y` 是**中心**坐标。
+6. **层号过滤（`EntityState.level`，int8）**：实体带离散层号（缺省 0）。客户端应按自身所在层过滤渲染（异层实体不画），并在 HUD 显示当前层号——注意该字段是**末尾追加**，旧客户端前三项索引不变。
 
 ### P1 地图加载
 
@@ -178,12 +182,19 @@
 | `C` | 开关合成面板：列出 crafting 配置（`game/rules/crafting.json`）定义的配方按钮，点击发 `{type:"craft",recipe}` |
 | `B` | 放置选中 kit：目标点 = 自身坐标 + 面板方向 × 32px，发 `{type:"place",slot,x,y}` |
 | `X` | 拆除最近建筑（从实体表找最近 `Placeable.*`，发 `{type:"deconstruct",target}`） |
+| `R` | 搜刮容器：找最近的容器实体（尸体等，带 `Inventory.0.kind`），弹出**搜刮面板**（逐槽名称/数量/耐久 + 「取回」按钮 → `{type:"transfer",target,slot}`）；容器为空或没有容器时只提示、不弹空面板 |
+| `Y` | 取消进行中的延时制作（读 `Crafting.0.recipeId` → `{type:"craft-cancel",recipe}`） |
+| `U` | 给最近的燃料型站点加燃料（`{type:"refuel",target}`；射程 = crafting 规则 `stationRange`） |
+| `Q` | 投掷：选中**投掷矛**时进入**瞄准模式**（鼠标跟随准星，左键把屏幕坐标换算成世界坐标发 `{type:"throw",x,y}`，`Esc` 取消，本地冷却提示）；未持投掷矛时按最近敌怪投掷 |
 | 对话选项 | 自身实体存在 `Dialogue.{i}.option` 时渲染按钮列表，点击发 `{type:"dialogue",option:i}` |
+
+> 面板类 UI 的通用约定：**命令失败无回执**（坑 K4），所以面板只做「提示 + 乐观展示」，不等待响应；列表类 DOM 若需定时刷新，**按内容签名重建**，避免整表重绘打断玩家点击。
 
 ### P4 状态 HUD
 
-左上角常驻：HP（Health.current）、需求条（`Needs.{i}`，按 `name` 渲染）、时钟（hour + phase 昼/夜）、mapId（该玩家当前地图）；
-底部背包条（`Inventory.{i}.kind/count`，槽位数按原型配置渲染、空槽灰显）；右上角任务列表（`Quest.*`，state 含义见协议 §4.7）。
+左/右上角常驻：HP（Health.current）、需求条（`Needs.{i}`，按 `name` 渲染）、时钟（hour + phase 昼/夜）、mapId（该玩家当前地图）、**层号**（`EntityState.level`）；
+底部背包条（`Inventory.{i}.kind/count`，槽位数按原型配置渲染、空槽灰显）；右上角任务列表（`Quest.*`，state 含义见协议 §4.7）；
+成长面板（`Progression.totalXp/level` + `Progression.skill.{id}.xp/level` 技能等级）与成就列表（`Achievements.{id}` = 1）——**中文名需自备静态表**（来自 `game/rules/progression.json`、`game/rules/achievements.json`、`game/quests/quests.json`，见协议 §4.8）；成就**新解锁**（key 由无到有）时弹一次提示。
 
 ---
 
@@ -205,12 +216,15 @@
   6. **（方式 B 专用）importmap 位置**：`<script type="importmap">` **必须放在所有 module script 之前**，且一个页面**只能有一个** importmap；两个 module script 里重复贴 importmap 会报错。importmap 只影响裸名称解析，不影响方式 A（全局脚本+模块直导入）的正确性。
 - **K9 首帧状态未就绪**：`joinOrCreate` 返回后、首个状态补丁到达前，`room.state.players` 可能为 `undefined`，同步读 `players.get(...)` 直接抛错。一切状态读取先判空（`room?.state?.players`），渲染循环自然重试；勿在 join 后同步断言字段存在。
 - **K10（方式 B）页面实际加载两份 schema**：importmap 钉的是 4.0.25，但 SDK 的 `+esm` 内部对 schema 的传递依赖由 CDN 解析为其范围内最新版（实测 4.0.26）——**解码路径用的是 SDK 内部那份**（控制台报错来源会显示 4.0.26）。如需绝对钉版，在 importmap 里把该传递依赖也显式映射。
+- **K11 `EntityState.level`（int8，末尾追加）**：实体带离散层号（缺省 0）。该字段**追加在 `id`/`values`/`stringValues` 之后**——既有三项的**字段索引不变**，旧客户端结构上仍能解码新流（只是读不到层号）；新客户端连旧服务端则缺该字段，按 0 处理即可。客户端声明 schema 时**必须把 `level` 放在最后**（字段顺序即线协议）。渲染时按自身层号过滤异层实体。
+- **K12 重连语义（断线保留）**：服务端**不是**「断线即销毁」——会话断开后玩家实体保留**约 5 分钟**（server 规则 `offlineRetentionTicks`，缺省 tickRate×300s；配 0 才关闭），期间**对所有客户端不可见**（不进快照）。客户端可把自己断线前的 networkId 存本地（localStorage），join 时作为**可选参数**回传：`joinOrCreate("game", { networkId: saved })`——服务端**严格按该 id 匹配**未到期的保留实体：命中则复用同一角色（背包/进度不丢），未命中则新建。**不要**假设「重连一定是新角色」，也不要假设「重连一定恢复原角色」。
+- **K13 冷却/瞬态不同步**：`Cooldown`（投掷/攻击冷却）等瞬态组件**不进状态同步**（存档也跳过）。客户端若要提示冷却，只能本地计时（按物品/规则配置的冷却值），且**不能**把它当作服务端裁决——真正的冷却由服务端判定，命令失败无回执。
 
 ---
 
 ## 4. 明确不做（防止 AI 过度发挥）
 
-美术资源/精灵动画/音频、客户端预测与插值平滑、断线自动重连与指数退避、移动端触控、国际化、单元测试、打包优化。
+美术资源/精灵动画/音频、客户端预测与插值平滑、**断线自动重连与指数退避**（但「保留期凭 networkId 复用角色」是协议语义，见 K12，可按需实现）、移动端触控、国际化、单元测试、打包优化。
 检测到自己在实现以上任何一项时立即停止。
 
 ---
@@ -228,6 +242,11 @@
 7. 选中 kit 类物品按 `B` → 身前出现建筑实体（`Placeable.*` 特征）；`X` 可拆除自己放置的建筑（实体消失）。
 8. 走进任一传送门（`Portal.targetMap` 特征）→ 该玩家 `mapId` 变化、地图按新 key 重绘（`{key, version}` 缓存生效）；经对应回程门可返回原图。
 9. 重启服务端后重连 → 进度恢复至最近存档（存档周期内的最后变更可能丢失）。
+10. 断线后**保留期内**重连（join 参数回传 networkId）→ 复用原角色：背包/位置/进度不丢、`entityId` 与断线前一致（K12）。
+11. 走近任一容器实体（尸体等，带 `Inventory.0.kind`）按 `R` → 搜刮面板列出该容器的槽位（名称/数量/耐久）→ 点「取回」→ 物品进入本人背包（`transfer{target,slot}`）；空容器只给提示、不弹空面板。
+12. 合成延时配方 → 面板出现「制作中」进度条（`Crafting.*`）→ `Y` 或面板「取消」可取消（`craft-cancel`）；`suspended=1` 时显示「等待产出」。
+13. 选中投掷矛按 `Q` → 进入瞄准模式（准星跟随鼠标）→ 左键发出 `throw{x,y}`（屏幕坐标换算为世界坐标）；`Esc` 取消。
+14. HUD 出现等级/经验与技能（`Progression.*`）、成就（`Achievements.*`）与任务（`Quest.*`）条目，且中文名来自静态表。
 
 ---
 
@@ -243,3 +262,4 @@
 | v2.0 | 2026-09-18 | 通用化改写——脱离具体游戏内容：任务指令/验收清单改为机制级（验收不钉内容值，实体/物品/坐标均为配置产物）；内容类枚举改为指向 `game/` 配置来源（配方=game/rules/crafting.json 等）。协议契约无变化，协议细节仍以 `CLIENT-INTEGRATION.md` 为唯一权威 |
 | v2.1 | 2026-09-22 | tile-units 机制落地后输入约束复核：§P2 移动幅度从硬编码 ≤200 改为指向 server 规则速度上限并标注当前值 32px/s（`maxMoveSpeedTiles: 2` 格/s × 16px/格）——旧值会使生成的客户端全部输入被静默拒收（角色不动）。协议契约（三层 Schema/端点/CORS/K1-K8）无任何变化 |
 | v2.2 | 2026-09-23 | 按生成客户端实测反馈修订：K1 改写为**逐实体过滤**（实测空壳与正常实体同表混入、`values`/`stringValues` 整个缺失，旧的整表校验写法会每帧崩；空壳伴随 `"refId not found"` 预期噪音）；新增 K9（join 后首帧 `players` 可能为 `undefined`，读取需判空）；新增 K10（方式 B 下 SDK 传递依赖漂移，页面实际加载 4.0.25/4.0.26 两份 schema）；K5 补 https/wss 部署白名单说明；§P1 相机补渲染缩放建议；昼夜 `hour` 换算语义补至协议文档 §3.1 |
+| v2.3 | 2026-10-21 | 协议扩容同步（协议细节仍以 `CLIENT-INTEGRATION.md` 为唯一权威）：① **§1 约束 3 的两段 Schema 示例补 `EntityState.level`（int8，末尾追加）**——字段顺序即线协议，漏声明会与新服务端错位解码（新增 K11：末尾追加 ⇒ 旧客户端前三项索引不变）；② §P0 补层号过滤与 `Kind.value` 优先辨识；③ §P3 补新命令键位（`R` 搜刮容器面板 / `Y` 取消制作 / `U` 加燃料 / `Q` 投掷瞄准 + `Esc` 取消）；④ §P4 补成长面板（`Progression.*`）、成就（`Achievements.*`）与新解锁提示；⑤ 新增 K12（**重连语义改正**：断线保留约 5 分钟，凭 networkId 复用，旧文档「断线即销毁」已过时）与 K13（冷却等瞬态组件不同步，客户端只能用本地计时提示）；⑥ 验收清单补第 10-14 条（重连复用 / 搜刮面板 / 制作进度与取消 / 投掷瞄准 / 成长成就 HUD） |

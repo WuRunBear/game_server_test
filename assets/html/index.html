@@ -17,18 +17,32 @@
     ④ 新增实体形状：corpse(可搜刮容器)、boss_alpha(醒目体型)、
        Structure.role=1 楼板 / 2 墙 / 3 连接器(楼梯)、Passage.open 门开合两态、
        tree/rock/berry_bush/shell_node/driftwood/wolf/spider/boar/rabbit/crab/frog/tentacle 分形；
-    ⑤ 接通新命令（只发命令，本轮不做面板）：transfer{target}(容器取回)、
+    ⑤ 接通新命令（只发命令）：transfer{target}(容器取回)、
        transfer{slot,toSlot}、craft-cancel、refuel、throw；
     ⑥ 重连：自己的 networkId 存 localStorage，连接时作为 join 参数传入，
        断线保留期内可复用角色；断开后自动重连一次；
     ⑦ 物品静态表同步 game/items/*.json 当前 29 种（中文名/色标/用途分类）。
+  本轮改动【UI 面板层】（协议内核与既有键位不变）：
+    ⑧ 容器搜刮面板（R 键）：列出最近容器的 Inventory.<i>.kind/count/durability，
+       逐槽「取回」→ transfer{target,slot}，另有「全部取回」；空容器/无容器只提示不弹面板；
+    ⑨ 合成面板增强：顶部「制作中」进度条（Crafting.<i>.recipeId/remainingTicks/progress/suspended，
+       挂起显示「等待产出（背包满/站点失效）」+「取消」→ craft-cancel{recipe}）；
+       配方解锁条件 unlock.condition 中文提示（需风暴季/需击败首领，置灰但仍可点，服务端裁决）；
+       靠近燃料站点时出现「加燃料」→ refuel{target}；
+    ⑩ 投掷瞄准（Q 键，选中投掷矛时）：鼠标准星跟随 + 落点虚线，点击发 throw{x,y}
+       （屏幕坐标换算世界坐标），Esc 取消；Cooldown 不同步 → 本地计时提示；
+    ⑪ 成长面板（右上）：等级/经验（Progression.totalXp/level，按 progression 曲线换算本级进度）、
+       技能（Progression.skill.<id>.xp/level）、已解锁成就（Achievements.<id>=1），
+       新解锁弹一次 toast（首轮同步只建基线不弹）；
+    ⑫ 任务面板改用中文任务名（静态表 ← game/quests/quests.json）。
   保留不动：视觉风格与 DOM 结构、地图拉取与校验、input 发送循环
   （50ms / seq 递增 / 32px/s / 边沿触发）、既有 command 键位与载荷形状、
   K1 空壳兜底、me() 判空、服务端权威（无预测/插值）。
   视觉参照《饥荒》界面：深棕木质面板 + 米黄描边 + 衬线字体 + 暗角；
-  右上圆形昼夜钟 + 液位徽章组；底部木质热键条 + 右端 3 装备槽；左缘合成页签轨 + 展开大面板。
+  右上圆形昼夜钟 + 液位徽章组 + 角色面板；底部木质热键条 + 右端 3 装备槽；
+  左缘合成页签轨 + 展开大面板；中左搜刮面板。
   明确不做（规格 §4）：美术/动画/音频、客户端预测与插值、移动端、i18n、测试、打包。
-  （断线重连本轮已做：networkId 复用 + 自动重连一次。）
+  （断线重连已做：networkId 复用 + 自动重连一次。）
   运行方式（坑 K5 CORS）：用静态服务器把本页跑在 http://localhost:5173
     （如 `npx serve -l 5173` 或 `python3 -m http.server 5173`），
     或在服务端 .env 配置 CORS_ORIGINS=<本页地址> 后重启服务端。
@@ -159,6 +173,10 @@
     box-shadow: inset 0 0 0 1px var(--gold), 0 0 6px rgba(216,169,78,.5); }
   .recipeCell.locked { opacity: .38; } /* 材料不足置暗 */
   .recipeCell.locked::after { content: "\1F512"; position: absolute; top: 0; right: 2px; font-size: 9px; }
+  /* 有解锁条件的配方（unlock.condition）：虚线框 + 锁标记，仍可点击（服务端裁决） */
+  .recipeCell.unlck { border-style: dashed; opacity: .62; }
+  .recipeCell.unlck::after { content: "\1F512"; position: absolute; top: 0; right: 2px; font-size: 9px; }
+  .recipeCell.locked.unlck { opacity: .38; }
   #craftDetail { border-top: 1px solid rgba(201,182,137,.35); padding: 8px 12px 10px; }
   #craftName { font-weight: bold; color: var(--beige); font-size: 14px; letter-spacing: 1px; }
   #craftDesc { font-size: 11px; color: var(--ink-dim); margin: 3px 0 6px; line-height: 1.4; }
@@ -174,6 +192,24 @@
   #craftBuild:hover { border-color: var(--gold); color: var(--gold); }
   .craft-note { font-size: 10px; color: rgba(168,154,120,.7); padding: 6px 12px 8px;
     border-top: 1px dashed rgba(201,182,137,.2); line-height: 1.5; }
+
+  /* ---------- 制作中任务条（Crafting.<i>.* 动态 key） ---------- */
+  #craftJobs { border-top: 1px solid rgba(201,182,137,.35); padding: 7px 12px 8px; }
+  #craftJobs:empty { display: none; }
+  #craftJobs .gSecTitle { margin-bottom: 5px; }
+  .jobRow { margin-bottom: 6px; }
+  .jobRow:last-child { margin-bottom: 0; }
+  .jobName { font-size: 12px; color: var(--ink); display: flex; justify-content: space-between; gap: 6px; }
+  .jobId { font-size: 10px; color: var(--ink-dim); }
+  .jobMeta { display: flex; justify-content: space-between; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--ink-dim); }
+  .jobSuspended { color: var(--gold); }
+  #craftUnlock { font-size: 11px; color: var(--gold); margin: 2px 0 5px; min-height: 0; }
+  #craftUnlock:empty { display: none; }
+  #craftRefuel { width: 100%; margin-top: 6px; padding: 4px 0; font-size: 12px; letter-spacing: 4px;
+    background: #2c2216; border: 1px solid var(--beige-dim); color: var(--beige);
+    border-radius: 5px; cursor: pointer; }
+  #craftRefuel:hover { border-color: var(--gold); color: var(--gold); }
 
   /* ---------- 右缘任务面板（竖向窄面板，与整体面板统一风格） ---------- */
   #quests { position: fixed; right: 12px; bottom: 128px; z-index: 10; width: 172px; }
@@ -234,6 +270,69 @@
   #log { position: fixed; left: 10px; bottom: 8px; z-index: 10; font-size: 11px;
     color: rgba(232,220,192,.55); pointer-events: none; text-shadow: 0 1px 2px #000;
     line-height: 1.55; }
+
+  /* ---------- 容器搜刮面板（R 键；取回走 transfer{target,slot}） ---------- */
+  #loot { position: fixed; left: 420px; top: 50%; transform: translateY(-50%); z-index: 30;
+    width: 306px; max-height: 74vh; display: flex; flex-direction: column; }
+  #lootBody { padding: 8px 12px 4px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+  .lootRow { display: flex; align-items: center; gap: 8px; padding: 5px 0;
+    border-bottom: 1px dashed rgba(201,182,137,.2); }
+  .lootRow:last-child { border-bottom: none; }
+  .lootDot { width: 8px; height: 8px; border-radius: 50%; flex: none;
+    box-shadow: 0 0 0 1px rgba(0,0,0,.55); }
+  .lootName { flex: 1 1 auto; font-size: 13px; color: var(--ink); }
+  .lootCnt { font-size: 12px; color: var(--ink-dim); flex: none; }
+  .lootDur { width: 52px; height: 7px; border-radius: 4px; background: #141009; flex: none;
+    border: 1px solid var(--beige-dim); overflow: hidden; }
+  .lootDur i { display: block; height: 100%; background: #8a9a5a; }
+  .lootDur.low i { background: #b8622a; }
+  .btnWood { background: #2c2216; border: 1px solid var(--beige-dim); color: var(--beige);
+    border-radius: 4px; padding: 2px 10px; font-size: 12px; cursor: pointer; flex: none; }
+  .btnWood:hover { background: #3d2f1e; border-color: var(--gold); color: var(--gold); }
+  #lootFoot { display: flex; gap: 8px; padding: 6px 12px 10px; }
+  #lootFoot button { flex: 1; background: #2c2216; border: 1px solid var(--beige-dim);
+    color: var(--ink); border-radius: 4px; padding: 4px 0; font-size: 12px; cursor: pointer; }
+  #lootFoot button:hover { background: #3d2f1e; border-color: var(--beige); }
+
+  /* ---------- 右上成长面板（等级/经验/技能/成就；置于昼夜钟左侧，不与合成面板重叠） ---------- */
+  #growth { position: fixed; right: 120px; top: 52px; z-index: 10; width: 216px; }
+  #growthBody { padding: 7px 11px 9px; font-size: 12px; line-height: 1.6; }
+  .gSec { margin-bottom: 8px; }
+  .gSec:last-child { margin-bottom: 0; }
+  .gSecTitle { color: var(--beige); font-size: 11px; letter-spacing: 2px;
+    border-bottom: 1px solid rgba(201,182,137,.25); padding-bottom: 2px; margin-bottom: 4px; }
+  .gRow { display: flex; justify-content: space-between; gap: 6px; color: var(--ink); }
+  .gDim { color: var(--ink-dim); }
+  .gBar { height: 7px; border-radius: 4px; background: #141009; margin: 3px 0 4px;
+    border: 1px solid var(--beige-dim); overflow: hidden; }
+  .gBar i { display: block; height: 100%; background: linear-gradient(90deg, #6a7a4a, #b9c98e); }
+  .gTag { display: inline-block; margin: 1px 4px 1px 0; padding: 0 6px; border-radius: 3px;
+    border: 1px solid #6a7a4a; color: #b9c98e; font-size: 11px; }
+  .gEmpty { color: var(--ink-dim); font-size: 11px; letter-spacing: 1px; }
+
+  /* ---------- 成就提示 toast（顶部居中，短暂浮现） ---------- */
+  #toasts { position: fixed; top: 54px; left: 50%; transform: translateX(-50%); z-index: 45;
+    display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+  .toast { background: linear-gradient(180deg, rgba(48,37,24,.96), rgba(26,20,13,.96));
+    border: 1px solid var(--gold); border-radius: 6px; padding: 6px 18px; color: var(--gold);
+    font-size: 13px; letter-spacing: 1px; box-shadow: 0 4px 14px rgba(0,0,0,.65);
+    animation: toastIn .25s ease-out; }
+  .toast.out { opacity: 0; transition: opacity .5s; }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+
+  /* ---------- 投掷瞄准层（Q 进入瞄准；准星跟随鼠标 + 屏幕轻高亮） ---------- */
+  #aimLayer { position: fixed; inset: 0; z-index: 25; pointer-events: none;
+    box-shadow: inset 0 0 150px rgba(216,169,78,.15); }
+  #aimCross { position: fixed; width: 22px; height: 22px; margin: -11px 0 0 -11px;
+    border: 1px solid rgba(216,169,78,.9); border-radius: 50%;
+    box-shadow: 0 0 6px rgba(216,169,78,.55); }
+  #aimCross::before, #aimCross::after { content: ""; position: absolute; background: rgba(216,169,78,.9); }
+  #aimCross::before { left: 50%; top: -7px; width: 1px; height: 34px; margin-left: -.5px; }
+  #aimCross::after { top: 50%; left: -7px; height: 1px; width: 34px; margin-top: -.5px; }
+  #aimBanner { position: fixed; left: 50%; transform: translateX(-50%); bottom: 152px;
+    background: rgba(23,17,10,.9); border: 1px solid var(--beige-dim); color: var(--beige);
+    border-radius: 6px; padding: 5px 16px; font-size: 13px; letter-spacing: 1px;
+    text-shadow: 0 1px 2px #000; }
 </style>
 </head>
 <body>
@@ -269,11 +368,14 @@
   <div class="panel-head"><span>合 成</span><button id="craftClose">×</button></div>
   <div id="craftCats"></div>
   <div id="recipeGrid"></div>
+  <div id="craftJobs"></div>
   <div id="craftDetail">
     <div id="craftName">—</div>
     <div id="craftDesc">选择上方配方查看详情。</div>
+    <div id="craftUnlock"></div>
     <div id="craftMats"></div>
     <button id="craftBuild">建 造</button>
+    <button id="craftRefuel" class="hidden">加 燃 料</button>
   </div>
   <div class="craft-note">
     配方静态内嵌自 game/rules/crafting.json（协议不枚举配方，随配置漂移需手动同步）。
@@ -287,6 +389,34 @@
   <div id="questList"></div>
 </div>
 
+<!-- 容器搜刮面板（R 键：列出容器内物品，逐槽取回 transfer{target,slot}） -->
+<div id="loot" class="panel hidden">
+  <div class="panel-head"><span id="lootTitle">搜 刮</span><button id="lootClose">×</button></div>
+  <div id="lootBody"></div>
+  <div id="lootFoot">
+    <button id="lootAll">全部取回</button>
+    <button id="lootCloseBtn">关闭</button>
+  </div>
+  <div class="craft-note">
+    取回命令 <code>transfer{target,slot}</code>；服务端校验同图/同层/距离，失败无回执，以背包为准。
+  </div>
+</div>
+
+<!-- 右上成长面板（等级与经验 Progression.* / 技能 / 成就 Achievements.*） -->
+<div id="growth" class="panel hidden">
+  <div class="panel-head"><span>角 色</span></div>
+  <div id="growthBody"></div>
+</div>
+
+<!-- 成就解锁提示（顶部居中 toast，自动淡出） -->
+<div id="toasts"></div>
+
+<!-- 投掷瞄准层（Q 进入瞄准：准星跟随鼠标，点击发送 throw{x,y}） -->
+<div id="aimLayer" class="hidden">
+  <div id="aimCross" class="hidden"></div>
+  <div id="aimBanner" class="hidden">瞄准中 · 左键投掷 · Esc 取消</div>
+</div>
+
 <!-- 对话面板（规格 P3：自身实体存在 Dialogue.{i}.option 时渲染选项按钮） -->
 <div id="dlg" class="panel hidden">
   <div id="dlgTitle">对话</div>
@@ -295,7 +425,7 @@
 
 <!-- 底部操作提示 + 热键条（12 背包槽 + 右端 3 装备槽） -->
 <div id="bottomWrap">
-  <div id="hint">WASD 移动 · E 采集 · 空格 攻击 · T 对话 · C 合成 · F 食用/装备 · G 丢弃 · B 放置 · X 拆除 · R 搜刮容器 · Y 取消合成 · U 加燃料 · Q 投掷 · K 换槽 · 1-9/0/-/= 选槽</div>
+  <div id="hint">WASD 移动 · E 采集 · 空格 攻击 · T 对话 · C 合成 · F 食用/装备 · G 丢弃 · B 放置 · X 拆除 · R 搜刮容器 · Y 取消合成 · U 加燃料 · Q 投掷（持投掷矛＝瞄准，Esc 取消） · K 换槽 · 1-9/0/-/= 选槽</div>
   <div id="hotbarRow">
     <div id="invBar"></div>
     <div id="equipBar"></div>
@@ -375,7 +505,9 @@ const GROUND_COLOR_FALLBACK = "#33352c";
  * 协议不枚举配方（协议 §4.4），客户端无法拉取配方清单；craft 命令只发 recipe id。
  * in/out 形如 [kind, count]；station 为站点类型要求（0/缺省=通用，1=光源站点，见 crafting 配置）；
  * dur 为延时制作 tick 数（缺省=即时）。
- * 当前同步点：crafting.json 共 18 条配方（wood_axe … boss_cleaver）。
+ * 当前同步点：crafting.json 共 19 条配方（wood_axe … boss_cleaver）。
+ * unlock = 配方的解锁条件串（crafting.json 的 unlock.condition），仅作中文提示，
+ * 仍可点击——解锁与否由服务端裁决（命令失败无回执，坑 K4）。
  * ==========================================================================*/
 const RECIPES = [
   { id: "wood_axe",       in: [["wood", 2]],                                 out: [["axe", 1]] },
@@ -383,8 +515,8 @@ const RECIPES = [
   { id: "pickaxe",        in: [["wood", 2], ["stone", 2]],                   out: [["pickaxe", 1]] },
   { id: "spear",          in: [["wood", 2], ["stone", 1]],                   out: [["spear", 1]] },
   { id: "throwing_spear", in: [["wood", 2], ["stone", 1]],                   out: [["throwing_spear", 1]], dur: 30 },
-  { id: "shell_spear",    in: [["plank", 1], ["shell", 3]],                  out: [["shell_spear", 1]], station: 1, dur: 40 },
-  { id: "boss_cleaver",   in: [["boss_core", 1], ["stone", 5], ["plank", 2]], out: [["boss_cleaver", 1]], dur: 60 },
+  { id: "shell_spear",    in: [["plank", 1], ["shell", 3]],                  out: [["shell_spear", 1]], station: 1, dur: 40, unlock: "inPhase:storm" },
+  { id: "boss_cleaver",   in: [["boss_core", 1], ["stone", 5], ["plank", 2]], out: [["boss_cleaver", 1]], dur: 60, unlock: "progressAtLeast:boss_alpha:1" },
   { id: "shell_armor",    in: [["shell", 3], ["plank", 1]],                  out: [["shell_armor", 1]], station: 1, dur: 40 },
   { id: "berry_pie",      in: [["berry", 3]],                                out: [["berry_pie", 1]] },
   { id: "cooked_meat",    in: [["raw_meat", 1]],                             out: [["cooked_meat", 1]], station: 1 },
@@ -488,6 +620,68 @@ const CONSUMABLE_KINDS = new Set(Object.keys(ITEM_TABLE).filter((k) => ITEM_TABL
 function itemName(kind) { return (kind && ITEM_TABLE[kind]?.name) || kind || ""; }
 function itemColor(kind) { return (kind && ITEM_TABLE[kind]?.color) || "#8f7f5c"; }
 
+/* ============================================================================
+ * 成长 / 成就 / 任务 静态表：⚠️ 静态内嵌自 game/ 配置（随配置漂移，需手动同步！）
+ *   ACHIEVEMENTS ← game/rules/achievements.json（id → 名称/描述）
+ *   QUESTS       ← game/quests/quests.json（id → 任务名/目标）
+ *   SKILLS       ← game/rules/progression.json（skillId → 中文名）
+ *   XP_CURVE     ← game/rules/progression.json 的 curve（服务端按同公式派生等级）
+ *   DURABILITY_MAX ← game/items/*.json 的 maxDurability（协议只同步当前耐久）
+ *   PHASE_NAMES  ← game/rules/environment.json 的 phases[].id（季节/相位名）
+ * 协议不枚举这些内容（§4.4/§4.7 同理），客户端按 id 自行映射显示。
+ * ==========================================================================*/
+const ACHIEVEMENTS = {
+  village_friend: { name: "渔村的熟人", desc: "与渔村势力声望达到 10。" },
+  boss_slayer:    { name: "巨兽克星",   desc: "击败岛上的首领。" },
+};
+const QUESTS = {
+  collect_axe: { name: "采集 1 把木斧", goal: 1 },
+  hunt_task:   { name: "猎杀 2 只狼",   goal: 2 },
+};
+const SKILLS = { combat: "战斗", gathering: "采集" };
+// 等级曲线（服务端 levelForXp：L→L+1 所需经验 = round(baseXp × growth^(L-1))）
+const XP_CURVE = { baseXp: 100, growth: 1.5, maxLevel: 20 };
+// 物品耐久上限（协议只同步 Inventory.<i>.durability 当前值，不同步上限）
+const DURABILITY_MAX = {
+  axe: 60, pickaxe: 40, shell_armor: 80, spear: 50, stone_axe: 150, throwing_spear: 30,
+};
+// 环境相位（季节）名
+const PHASE_NAMES = { mild: "温和", dry: "干旱", wet: "潮湿", storm: "风暴" };
+// 首领类 kind（解锁条件 progressAtLeast 的目标为首领时显示「需击败首领」）
+const BOSS_KINDS = new Set(["boss_alpha"]);
+// 可投掷物品（game/items/*.json 声明了 throw 档案的 kind；当前仅投掷矛）
+const THROWABLE_KINDS = new Set(["throwing_spear"]);
+// 投掷本地冷却（毫秒）：静态内嵌自 game/items/throwing_spear.json 的 throw.cooldownMs。
+// ⚠️ Cooldown 组件不同步（存档跳过瞬态组件），故冷却只做本地提示，服务端仍有自己的冷却。
+const THROW_COOLDOWN_MS = 900;
+// 逻辑帧率（game.json tickRate）：剩余 tick → 秒
+const TICK_RATE = 20;
+
+/* ---------- 解锁条件 → 中文提示（配方 unlock.condition / 成就 condition） ---------- */
+// 形如 "inPhase:storm" → 「需风暴季」；"progressAtLeast:boss_alpha:1" → 「需击败首领」
+function unlockHint(condition) {
+  if (!condition) return "";
+  const parts = String(condition).split(":");
+  const kind = parts[0];
+  if (kind === "inPhase") return `需${PHASE_NAMES[parts[1]] || parts[1]}季`;
+  if (kind === "progressAtLeast") {
+    const target = parts[1];
+    if (BOSS_KINDS.has(target)) return "需击败首领";
+    return `需推进「${target}」${parts[2] ? " ×" + parts[2] : ""}`;
+  }
+  if (kind === "factionRepAtLeast") return `需声望 ${parts[1]} ≥ ${parts[2]}`;
+  return `条件：${condition}`;
+}
+
+// 等级累计经验（达到 level 所需的累计 XP）：Σ round(baseXp × growth^(i-1))，i 从 1 到 level-1
+function xpAtLevel(level) {
+  let sum = 0;
+  for (let i = 1; i < level; i++) {
+    sum += Math.max(1, Math.round(XP_CURVE.baseXp * Math.pow(XP_CURVE.growth, i - 1)));
+  }
+  return sum;
+}
+
 // 背包槽选择键位（规格 §P3）：1-9,0,-,= → 槽 0-11
 const SLOT_KEYS = { "1":0,"2":1,"3":2,"4":3,"5":4,"6":5,"7":6,"8":7,"9":8,"0":9,"-":10,"=":11 };
 const SLOT_KEY_LABELS = ["1","2","3","4","5","6","7","8","9","0","-","="];
@@ -558,6 +752,16 @@ let lastHourSeen = null, dayCount = 1;
 let activeCat = "all";                  // 当前页签分类
 let selectedRecipe = RECIPES[0].id;     // 当前选中配方
 
+// 容器搜刮面板状态（纯 UI）：当前打开的容器 NetworkId
+let lootTargetId = null;
+// 投掷瞄准状态（纯 UI）：瞄准中标记、鼠标屏幕坐标、本地冷却到期时间戳
+let aiming = false;
+let aimScreen = { x: 0, y: 0 };
+let throwReadyAt = 0;
+// 已见成就 id 集合（用于「新解锁」判定与 toast）
+const seenAchievements = new Set();
+let achievementBaselineDone = false;    // 首轮同步只建基线、不弹 toast
+
 let camX = 0, camY = 0;   // 相机左上角世界坐标（跟随自身实体居中，不做边界钳制，规格 §P1-7）
 
 /* ============================================================================
@@ -582,6 +786,9 @@ const craftNameEl = document.getElementById("craftName");
 const craftDescEl = document.getElementById("craftDesc");
 const craftMatsEl = document.getElementById("craftMats");
 const craftBuildEl = document.getElementById("craftBuild");
+const craftJobsEl = document.getElementById("craftJobs");
+const craftUnlockEl = document.getElementById("craftUnlock");
+const craftRefuelEl = document.getElementById("craftRefuel");
 const questsEl = document.getElementById("quests");
 const questListEl = document.getElementById("questList");
 const invBarEl = document.getElementById("invBar");
@@ -590,6 +797,15 @@ const dlgEl = document.getElementById("dlg");
 const dlgTitleEl = document.getElementById("dlgTitle");
 const dlgOptionsEl = document.getElementById("dlgOptions");
 const craftEl = document.getElementById("craft");
+const lootEl = document.getElementById("loot");
+const lootTitleEl = document.getElementById("lootTitle");
+const lootBodyEl = document.getElementById("lootBody");
+const growthEl = document.getElementById("growth");
+const growthBodyEl = document.getElementById("growthBody");
+const toastsEl = document.getElementById("toasts");
+const aimLayerEl = document.getElementById("aimLayer");
+const aimCrossEl = document.getElementById("aimCross");
+const aimBannerEl = document.getElementById("aimBanner");
 const logEl = document.getElementById("log");
 
 function resizeCanvas() {
@@ -887,6 +1103,16 @@ function selfLevel() {
 function isBuildableEntity(e) {
   return has(e, "Placeable.footprintW") || has(e, "Placeable.footprintH") ||
          has(e, "Placeable.canCollide") || has(e, "CraftingStation.stationType");
+}
+
+// 自身到某实体的距离（像素）；坐标缺失时返回 Infinity（视作不可达）
+function distanceToEntity(e) {
+  const selfEnt = selfEntity();
+  if (!selfEnt || !e) return Infinity;
+  const sx = num(selfEnt, "Transform.x"), sy = num(selfEnt, "Transform.y");
+  const ex = num(e, "Transform.x"), ey = num(e, "Transform.y");
+  if (sx === undefined || sy === undefined || ex === undefined || ey === undefined) return Infinity;
+  return Math.hypot(ex - sx, ey - sy);
 }
 
 function drawEntity(e) {
@@ -1262,6 +1488,21 @@ function frame() {
     }
   }
   for (const e of drawList) drawEntity(e);
+  // 投掷瞄准：自身 → 瞄准点的虚线 + 落点圆环（世界单位，随缩放）
+  if (aiming && selfEnt) {
+    const sx = num(selfEnt, "Transform.x"), sy = num(selfEnt, "Transform.y");
+    if (sx !== undefined && sy !== undefined) {
+      const aw = screenToWorld(aimScreen.x, aimScreen.y);
+      ctx.save();
+      ctx.setLineDash([2.5, 2.5]);
+      ctx.strokeStyle = "rgba(216,169,78,.85)";
+      ctx.lineWidth = 0.6;
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(aw.x, aw.y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(aw.x, aw.y, 3.2, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+  }
   ctx.setTransform(1, 0, 0, 1, 0, 0); // 复位：夜幕遮罩与暖光在屏幕空间合成
 
   // ---- 昼夜氛围：入夜叠深蓝遮罩 + 以自身为中心挖暖色光圈
@@ -1456,26 +1697,102 @@ function findNearestContainer() {
   return best;
 }
 
-// 键位入口：搜刮最近容器（逐槽取回非空槽位；失败无回执，以背包状态为准）
+// 键位入口（R）：搜刮最近容器 → 打开「搜刮」面板（逐槽取回 / 全部取回）
+// 空容器或无容器只给提示文案，不弹空面板。
 function lootNearestContainer() {
   const target = findNearestContainer();
   if (!target) { log("附近没有可搜刮的容器"); return; }
-  const selfEnt = selfEntity();
-  const sx = num(selfEnt, "Transform.x"), sy = num(selfEnt, "Transform.y");
-  const tx = num(target, "Transform.x"), ty = num(target, "Transform.y");
-  if (sx === undefined || sy === undefined || tx === undefined || ty === undefined) return;
-  const dist = Math.hypot(tx - sx, ty - sy);
+  const dist = distanceToEntity(target);
   if (dist > CONTAINER_RANGE) { log(`容器太远（${Math.round(dist)}px > ${CONTAINER_RANGE}px），走近再搜刮`); return; }
-  let n = 0;
-  for (let i = 0; i < 16; i++) {
-    const kind = str(target, `Inventory.${i}.kind`);
-    const count = num(target, `Inventory.${i}.count`);
-    if (!kind || !count) continue;
-    lootFromContainer(target.id, i);
-    n++;
+  if (containerSlots(target).length === 0) { log("容器是空的"); return; }
+  lootTargetId = target.id;
+  lootEl.classList.remove("hidden");
+  renderLootPanel();
+  log(`打开容器（NetworkId=${target.id}，距离 ${Math.round(dist)}px）`);
+}
+
+// 容器槽位清单（读容器的 Inventory 展平 key：Inventory.<i>.kind/count/durability）
+function containerSlots(e) {
+  const slots = [];
+  if (!e) return slots;
+  for (let i = 0; i < 32; i++) {
+    const kind = str(e, `Inventory.${i}.kind`);
+    const count = num(e, `Inventory.${i}.count`);
+    if (kind === undefined && count === undefined) break; // 索引连续，扫描到尽头即止
+    if (!kind) continue;                                 // 空槽占位（kind=""）跳过
+    slots.push({ slot: i, kind, count: count ?? 0, durability: num(e, `Inventory.${i}.durability`) });
   }
+  return slots;
+}
+
+// 容器显示名（kind → 中文；尸体/木箱等未登记 kind 回退原始 id）
+function containerLabel(e) {
+  const k = kindOf(e);
+  if (k === "corpse") return "尸体";
+  if (k && ITEM_TABLE[k]) return itemName(k);
+  return k ? `容器 ${k}` : "容器";
+}
+
+// 按 NetworkId 在可见实体表里找实体（容器面板按 id 保持目标）
+function findEntityByNetworkId(id) {
+  return collectEntities().find((e) => e.id === id) || null;
+}
+
+// 渲染搜刮面板：名称 + 数量 + 耐久条 + 「取回」按钮
+// ⚠️ 只在内容变化时重建 DOM（避免 150ms 刷新打断玩家点击）
+let lootSig = "";
+function renderLootPanel() {
+  if (lootEl.classList.contains("hidden")) return;
+  const target = lootTargetId !== null ? findEntityByNetworkId(lootTargetId) : null;
+  if (!target) { closeLootPanel(); return; }
+  const slots = containerSlots(target);
+  const dist = distanceToEntity(target);
+  lootTitleEl.textContent = `搜 刮 · ${containerLabel(target)} · ${Math.round(dist)}px`;
+  const sig = slots.map((s) => `${s.slot}:${s.kind}:${s.count}:${s.durability ?? ""}`).join("|");
+  if (sig === lootSig) return;   // 内容未变 → 不重建（保住按钮可点）
+  lootSig = sig;
+  if (!slots.length) {
+    lootBodyEl.innerHTML = `<div class="gEmpty">容器已空了</div>`;
+    return;
+  }
+  lootBodyEl.innerHTML = slots.map((s) => {
+    const max = DURABILITY_MAX[s.kind];
+    const dur = (s.durability !== undefined && max)
+      ? `<span class="lootDur${s.durability / max < 0.34 ? " low" : ""}" title="耐久 ${Math.round(s.durability)}/${max}">` +
+        `<i style="width:${Math.max(0, Math.min(100, Math.round((s.durability / max) * 100)))}%"></i></span>`
+      : "";
+    return `<div class="lootRow">` +
+      `<span class="lootDot" style="background:${itemColor(s.kind)}"></span>` +
+      `<span class="lootName">${itemName(s.kind)}</span>` +
+      `<span class="lootCnt">×${s.count}</span>${dur}` +
+      `<button class="btnWood" data-slot="${s.slot}">取回</button></div>`;
+  }).join("");
+  lootBodyEl.querySelectorAll("button[data-slot]").forEach((b) => {
+    b.addEventListener("click", () => lootFromContainer(lootTargetId, Number(b.dataset.slot)));
+  });
+}
+
+// 关闭搜刮面板
+function closeLootPanel() {
+  lootEl.classList.add("hidden");
+  lootTargetId = null;
+  lootSig = "";
+}
+
+// 全部取回：把当前容器的所有非空槽逐个取回（命令失败无回执，以背包为准）
+function lootAllFromContainer() {
+  if (lootTargetId === null) { log("没有打开的容器"); return; }
+  const target = findEntityByNetworkId(lootTargetId);
+  if (!target) { log("容器已不可见"); closeLootPanel(); return; }
+  const dist = distanceToEntity(target);
+  if (dist > CONTAINER_RANGE) { log(`容器太远（${Math.round(dist)}px），走近再取回`); return; }
+  let n = 0;
+  for (const s of containerSlots(target)) { lootFromContainer(target.id, s.slot); n++; }
   if (n === 0) log("容器是空的");
 }
+document.getElementById("lootClose").addEventListener("click", closeLootPanel);
+document.getElementById("lootCloseBtn").addEventListener("click", closeLootPanel);
+document.getElementById("lootAll").addEventListener("click", lootAllFromContainer);
 
 /* ---------- 取消延时制作：craft-cancel{recipe} ---------- */
 function cancelCraft(recipe) {
@@ -1504,12 +1821,12 @@ function refuelStation(networkId) {
   log(`加燃料 NetworkId=${networkId}`);
 }
 
-// 键位入口：给最近的燃料型站点加燃料
-function refuelNearestStation() {
+// 最近的燃料型站点（带 LightSource 的实体；crafting.json 的 fuel.items 决定可加的燃料）
+function findNearestFuelStation() {
   const selfEnt = selfEntity();
-  if (!selfEnt) { log("自身实体未同步"); return; }
+  if (!selfEnt) return null;
   const sx = num(selfEnt, "Transform.x"), sy = num(selfEnt, "Transform.y");
-  if (sx === undefined || sy === undefined) return;
+  if (sx === undefined || sy === undefined) return null;
   let best = null, bestD = Infinity;
   for (const e of collectEntities()) {
     if (!has(e, "LightSource.radius") && !has(e, "LightSource.fuelRemainingMs")) continue;
@@ -1518,10 +1835,19 @@ function refuelNearestStation() {
     const d = Math.hypot(ex - sx, ey - sy);
     if (d < bestD) { bestD = d; best = e; }
   }
-  if (!best) { log("附近没有可加燃料的站点"); return; }
+  return best ? { entity: best, dist: bestD } : null;
+}
+
+// 键位入口：给最近的燃料型站点加燃料
+function refuelNearestStation() {
+  const found = findNearestFuelStation();
+  if (!found) { log("附近没有可加燃料的站点"); return; }
   // 服务端加油射程＝crafting.json 的 stationRange，超出静默拒绝
-  if (bestD > STATION_RANGE) { log(`站点太远（${Math.round(bestD)}px > ${STATION_RANGE}px），走近再加燃料`); return; }
-  refuelStation(best.id);
+  if (found.dist > STATION_RANGE) {
+    log(`站点太远（${Math.round(found.dist)}px > ${STATION_RANGE}px），走近再加燃料`);
+    return;
+  }
+  refuelStation(found.entity.id);
 }
 
 /* ---------- 投掷：throw{x,y}（世界坐标瞄准点） ---------- */
@@ -1554,6 +1880,88 @@ function throwAtTarget() {
   throwAt(sx + facing.x * PLACE_DIST, sy + facing.y * PLACE_DIST);
 }
 
+/* ---------- 投掷瞄准模式（Q）：鼠标准星 → 世界坐标 → throw{x,y} ---------- */
+// 屏幕坐标 → 世界坐标（画布可能与 CSS 像素有缩放，按 rect 归一）
+function screenToWorld(sx, sy) {
+  const rect = canvas.getBoundingClientRect();
+  const px = (sx - rect.left) * (canvas.width / (rect.width || canvas.width));
+  const py = (sy - rect.top) * (canvas.height / (rect.height || canvas.height));
+  return { x: camX + px / ZOOM, y: camY + py / ZOOM };
+}
+// 本地投掷冷却剩余秒数（Cooldown 组件不同步，本地计时只作提示）
+function throwCooldownLeft() {
+  return Math.max(0, (throwReadyAt - Date.now()) / 1000);
+}
+// 进入瞄准模式：服务端要求「武器槽」装备带 throw 档案的物品，故先确保已装备
+function enterAimMode() {
+  const selfEnt = selfEntity();
+  if (!selfEnt) { log("自身实体未同步"); return; }
+  const selKind = slotKind(selectedSlot);
+  let throwable = "", throwSlot = -1;
+  if (THROWABLE_KINDS.has(selKind)) { throwable = selKind; throwSlot = selectedSlot; }
+  else {
+    // 回退：武器槽已装备的可投掷物品
+    const eq = num(selfEnt, "Equipment.weaponSlot");
+    if (eq !== undefined && eq >= 0) {
+      const k = str(selfEnt, `Inventory.${eq}.kind`);
+      if (THROWABLE_KINDS.has(k)) { throwable = k; throwSlot = eq; }
+    }
+  }
+  if (!throwable) { log("没有可投掷的武器：选中投掷矛后再按 Q"); return; }
+  const eqIdx = num(selfEnt, "Equipment.weaponSlot");
+  if (eqIdx !== throwSlot) {
+    sendCommand({ type: "equip", slot: throwSlot }); // 先装备（服务端权威，无回执）
+    log(`已装备 ${itemName(throwable)}（槽 ${throwSlot}）`);
+  }
+  aiming = true;
+  aimLayerEl.classList.remove("hidden");
+  aimCrossEl.classList.remove("hidden");
+  aimBannerEl.classList.remove("hidden");
+  // 鼠标还没动过时，准星落在屏幕中心
+  if (!mouseMoved) { aimScreen = { x: window.innerWidth / 2, y: window.innerHeight / 2 }; }
+  aimCrossEl.style.left = `${aimScreen.x}px`;
+  aimCrossEl.style.top = `${aimScreen.y}px`;
+  document.body.style.cursor = "none";   // 瞄准时隐藏系统光标（准星替代）
+  updateAimBanner();
+  log("瞄准中：移动鼠标选点，左键投掷，Esc 取消");
+}
+// 退出瞄准模式
+function exitAimMode() {
+  if (!aiming) return;
+  aiming = false;
+  aimLayerEl.classList.add("hidden");
+  aimCrossEl.classList.add("hidden");
+  aimBannerEl.classList.add("hidden");
+  document.body.style.cursor = "";
+}
+// 瞄准提示条（显示冷却剩余）
+function updateAimBanner() {
+  if (!aiming) return;
+  const left = throwCooldownLeft();
+  aimBannerEl.textContent = left > 0
+    ? `瞄准中 · 冷却 ${left.toFixed(1)} 秒 · 左键投掷 · Esc 取消`
+    : "瞄准中 · 移动鼠标选点 · 左键投掷 · Esc 取消";
+}
+// 鼠标跟随：更新准星位置与屏幕坐标
+let mouseMoved = false;
+window.addEventListener("mousemove", (ev) => {
+  mouseMoved = true;
+  aimScreen = { x: ev.clientX, y: ev.clientY };
+  if (!aiming) return;
+  aimCrossEl.style.left = `${ev.clientX}px`;
+  aimCrossEl.style.top = `${ev.clientY}px`;
+});
+// 点击画布：发送 throw{x,y}（世界坐标 = 鼠标位置换算）
+canvas.addEventListener("click", (ev) => {
+  if (!aiming) return;
+  const left = throwCooldownLeft();
+  if (left > 0) { log(`投掷冷却中（还剩 ${left.toFixed(1)} 秒）`); return; }
+  const w = screenToWorld(ev.clientX, ev.clientY);
+  throwAt(Math.round(w.x), Math.round(w.y));
+  throwReadyAt = Date.now() + THROW_COOLDOWN_MS;  // 本地冷却（服务端另有冷却）
+  exitAimMode();
+});
+
 function toggleCraftPanel() {
   craftEl.classList.toggle("hidden");
   if (!craftEl.classList.contains("hidden")) refreshCraftPanel(selfEntity()); // 打开即刷新材料置灰
@@ -1572,6 +1980,7 @@ window.addEventListener("keydown", (ev) => {
   if (ev.repeat) return;
   if (k === "e") { edgeInteract = true; return; }
   if (k === "t") { edgeTalk = true; return; }
+  if (k === "escape") { if (aiming) exitAimMode(); return; }  // Esc：取消投掷瞄准
   if (k in SLOT_KEYS) { selectedSlot = SLOT_KEYS[k]; return; }
   switch (k) {
     case "f": useSelected(); break;
@@ -1579,11 +1988,15 @@ window.addEventListener("keydown", (ev) => {
     case "c": toggleCraftPanel(); break;
     case "b": placeSelected(); break;
     case "x": deconstructNearest(); break;
-    // —— 本轮新增键位（命令已接线，面板后续再做）——
-    case "r": lootNearestContainer(); break;   // 搜刮最近容器
+    // —— 本轮新增键位（命令已接线 + 面板）——
+    case "r": lootNearestContainer(); break;   // 搜刮最近容器（打开搜刮面板）
     case "y": cancelCurrentCraft(); break;     // 取消进行中的合成
     case "u": refuelNearestStation(); break;   // 给最近站点加燃料
-    case "q": throwAtTarget(); break;          // 朝最近敌怪投掷
+    case "q":                                // 投掷：持投掷矛 → 瞄准模式，否则朝最近敌怪
+      if (aiming) { exitAimMode(); break; }
+      if (THROWABLE_KINDS.has(slotKind(selectedSlot))) enterAimMode();
+      else throwAtTarget();
+      break;
     case "k": moveSlotTo(selectedSlot, (selectedSlot + 1) % DEFAULT_SLOT_COUNT); break; // 与下一槽换位
   }
 });
@@ -1638,29 +2051,38 @@ function buildCraftTabs() {
   }
 }
 
-// 刷新合成面板：页签高亮 / 配方格（不足置暗加锁）/ 详情（材料计数，不足红色）/ 建造按钮
+// 刷新合成面板：页签高亮 / 配方格（不足置暗加锁；有解锁条件另标虚线）/ 详情 / 制作中 / 建造按钮
+// ⚠️ 配方格只在「内容签名」变化时重建（150ms 刷新若整表重建会打断玩家点击）
+let craftGridSig = "";
 function refreshCraftPanel(selfEnt) {
   const totals = inventoryTotals(selfEnt);
   craftTabsEl.querySelectorAll("button").forEach((b) =>
     b.classList.toggle("active", b.dataset.cat === activeCat && !craftEl.classList.contains("hidden")));
   craftCatsEl.querySelectorAll("button").forEach((b) =>
     b.classList.toggle("active", b.dataset.cat === activeCat));
-  // 配方格阵列
-  recipeGridEl.innerHTML = "";
+  // 配方格阵列（签名 = 分类 + 选中 + 材料总量 + 解锁标记）
   const list = RECIPES.filter((r) => activeCat === "all" || (RECIPE_CATS[r.id] || "tool") === activeCat);
-  for (const r of list) {
-    const ok = r.in.every(([k, c]) => (totals[k] || 0) >= c);
-    const cell = document.createElement("div");
-    cell.className = "recipeCell" + (ok ? "" : " locked") + (r.id === selectedRecipe ? " sel" : "");
-    cell.textContent = r.out.map(([k, c]) => (c > 1 ? `${itemName(k)}×${c}` : itemName(k))).join(" + ");
-    cell.title = r.id;
-    cell.addEventListener("click", () => { selectedRecipe = r.id; refreshCraftPanel(selfEntity()); });
-    recipeGridEl.appendChild(cell);
+  const sig = `${activeCat}|${selectedRecipe}|${JSON.stringify(totals)}|${list.map((r) => (r.unlock ? 1 : 0)).join("")}`;
+  if (sig !== craftGridSig) {
+    craftGridSig = sig;
+    recipeGridEl.innerHTML = "";
+    for (const r of list) {
+      const ok = r.in.every(([k, c]) => (totals[k] || 0) >= c);
+      const cell = document.createElement("div");
+      // locked = 材料不足（置暗）；unlck = 有解锁条件（虚线框，仍可点击——服务端裁决）
+      cell.className = "recipeCell" + (ok ? "" : " locked") + (r.unlock ? " unlck" : "") +
+        (r.id === selectedRecipe ? " sel" : "");
+      cell.textContent = r.out.map(([k, c]) => (c > 1 ? `${itemName(k)}×${c}` : itemName(k))).join(" + ");
+      cell.title = r.unlock ? `${r.id} · ${unlockHint(r.unlock)}` : r.id;
+      cell.addEventListener("click", () => { selectedRecipe = r.id; refreshCraftPanel(selfEntity()); });
+      recipeGridEl.appendChild(cell);
+    }
   }
   // 详情区
   const r = RECIPES.find((x) => x.id === selectedRecipe) || RECIPES[0];
   craftNameEl.textContent = `${r.out.map(([k, c]) => `${itemName(k)}×${c}`).join(" + ")} ［${r.id}］`;
   craftDescEl.textContent = RECIPE_DESC[r.id] || "——";
+  craftUnlockEl.textContent = r.unlock ? `🔒 ${unlockHint(r.unlock)}（仍可尝试，由服务端裁决）` : "";
   craftMatsEl.innerHTML = r.in.map(([k, c]) => {
     const have = totals[k] || 0;
     return `<span class="mat ${have >= c ? "ok" : "lack"}">${itemName(k)} ${have}/${c}</span>`;
@@ -1670,6 +2092,67 @@ function refreshCraftPanel(selfEnt) {
     sendCommand({ type: "craft", recipe: r.id }); // craft 命令只发 recipe id
     log(`合成请求：${r.id}（失败无回执，以背包状态为准）`);
   };
+  // 制作中任务条
+  renderCraftJobs(selfEnt);
+  // 加燃料按钮：靠近燃料型站点时才出现（U 键同效）
+  const station = findNearestFuelStation();
+  craftRefuelEl.classList.toggle("hidden", !station);
+  craftRefuelEl.onclick = () => refuelNearestStation();
+}
+
+/* ---------- 制作中任务（Crafting.<i>.recipeId/remainingTicks/progress/suspended） ---------- */
+function craftJobs(selfEnt) {
+  const jobs = [];
+  if (!selfEnt) return jobs;
+  for (let i = 0; i < 8; i++) {
+    const recipeId = str(selfEnt, `Crafting.${i}.recipeId`);
+    if (recipeId === undefined) break;               // 索引连续，无任务即止
+    if (!recipeId) continue;
+    jobs.push({
+      recipeId,
+      remaining: num(selfEnt, `Crafting.${i}.remainingTicks`) ?? 0,
+      progress: num(selfEnt, `Crafting.${i}.progress`) ?? 0,
+      suspended: (num(selfEnt, `Crafting.${i}.suspended`) ?? 0) === 1,
+    });
+  }
+  return jobs;
+}
+// 渲染制作中任务条：DOM 只在配方集合变化时重建，进度/时间原地更新（保住「取消」按钮可点）
+let craftJobIds = "";
+function renderCraftJobs(selfEnt) {
+  const jobs = craftJobs(selfEnt);
+  const ids = jobs.map((j) => j.recipeId).join("|");
+  if (ids !== craftJobIds) {
+    craftJobIds = ids;
+    if (!jobs.length) { craftJobsEl.innerHTML = ""; return; }
+    craftJobsEl.innerHTML = `<div class="gSecTitle">制 作 中</div>` + jobs.map((j) => {
+      const rec = RECIPES.find((r) => r.id === j.recipeId);
+      const outName = rec ? rec.out.map(([k, c]) => `${itemName(k)}×${c}`).join(" + ") : j.recipeId;
+      return `<div class="jobRow">` +
+        `<div class="jobName"><span>${outName}</span><span class="jobId">${j.recipeId}</span></div>` +
+        `<div class="gBar"><i class="jobFill" style="width:0%"></i></div>` +
+        `<div class="jobMeta"><span class="jobMetaText">—</span>` +
+        `<button class="btnWood" data-recipe="${j.recipeId}">取消</button></div></div>`;
+    }).join("");
+    craftJobsEl.querySelectorAll("button[data-recipe]").forEach((b) => {
+      b.addEventListener("click", () => cancelCraft(b.dataset.recipe)); // craft-cancel{recipe}
+    });
+  }
+  // 原地更新进度条与剩余时间
+  jobs.forEach((j, i) => {
+    const row = craftJobsEl.querySelectorAll(".jobRow")[i];
+    if (!row) return;
+    const pct = Math.max(0, Math.min(1, j.progress)) * 100;
+    const fill = row.querySelector(".jobFill");
+    if (fill) fill.style.width = `${pct}%`;
+    const txt = row.querySelector(".jobMetaText");
+    if (txt) {
+      txt.className = "jobMetaText" + (j.suspended ? " jobSuspended" : "");
+      txt.textContent = j.suspended
+        ? "等待产出（背包满/站点失效）"
+        : `进度 ${Math.round(pct)}% · 剩余 ${(j.remaining / TICK_RATE).toFixed(1)} 秒`;
+    }
+  });
 }
 buildCraftTabs();
 
@@ -1776,12 +2259,90 @@ function buildQuests(selfEnt) {
       const st = num(selfEnt, `Quest.${i}.state`);
       const cnt = num(selfEnt, `Quest.${i}.count`);
       if (qid === undefined && st === undefined && cnt === undefined) break;
-      items.push(`<div class="qItem"><span class="qName">${qid ?? "?"}</span> ` +
+      const meta = qid ? QUESTS[qid] : null;
+      const name = meta ? meta.name : (qid ?? "?");
+      items.push(`<div class="qItem" title="${qid ?? ""}"><span class="qName">${name}</span> ` +
         `<span class="qState s${st ?? 0}">[${QUEST_STATE_TEXT[st] ?? st}]</span>` +
         (cnt !== undefined && cnt > 0 ? ` <span class="qCnt">进度 ${cnt}</span>` : "") + `</div>`);
     }
   }
   questListEl.innerHTML = items.length ? items.join("") : `<div class="qEmpty">暂无任务</div>`;
+}
+
+/* ---------- 右上成长面板（Progression.* / Achievements.* 动态 key） ---------- */
+function buildGrowth(selfEnt) {
+  if (!selfEnt) { growthBodyEl.innerHTML = `<div class="gEmpty">—</div>`; return; }
+  const parts = [];
+
+  // ① 等级与经验（Progression.totalXp / Progression.level）
+  const totalXp = num(selfEnt, "Progression.totalXp") ?? 0;
+  const level = num(selfEnt, "Progression.level") ?? 1;
+  const need = Math.max(1, Math.round(XP_CURVE.baseXp * Math.pow(XP_CURVE.growth, level - 1)));
+  const into = Math.max(0, totalXp - xpAtLevel(level));
+  const pct = Math.max(0, Math.min(100, Math.round((into / need) * 100)));
+  parts.push(`<div class="gSec"><div class="gSecTitle">等级</div>` +
+    `<div class="gRow"><span>等级</span><span>Lv.${level}</span></div>` +
+    `<div class="gBar"><i style="width:${pct}%"></i></div>` +
+    `<div class="gRow"><span class="gDim">本级经验</span><span>${into} / ${need}</span></div>` +
+    `<div class="gRow"><span class="gDim">累计经验</span><span>${totalXp}</span></div></div>`);
+
+  // ② 技能（Progression.skill.<id>.xp / .level；技能名来自静态表）
+  const skills = new Map();
+  selfEnt.values?.forEach((v, k) => {
+    const m = /^Progression\.skill\.(.+)\.(xp|level)$/.exec(k);
+    if (!m) return;
+    const cur = skills.get(m[1]) || { xp: 0, level: 1 };
+    cur[m[2]] = v;
+    skills.set(m[1], cur);
+  });
+  const skillRows = [...skills.entries()].map(([id, s]) => {
+    const nm = SKILLS[id] || id;
+    // 技能经验同样是累计值：本级进度 = 累计 − 达到本级所需累计
+    const sNeed = Math.max(1, Math.round(XP_CURVE.baseXp * Math.pow(XP_CURVE.growth, s.level - 1)));
+    const sInto = Math.max(0, s.xp - xpAtLevel(s.level));
+    const spct = Math.max(0, Math.min(100, Math.round((sInto / sNeed) * 100)));
+    return `<div class="gRow"><span>${nm}</span><span>Lv.${s.level} · ${s.xp} 经验</span></div>` +
+      `<div class="gBar"><i style="width:${spct}%"></i></div>`;
+  }).join("");
+  parts.push(`<div class="gSec"><div class="gSecTitle">技能</div>` +
+    (skillRows || `<div class="gEmpty">暂无技能</div>`) + `</div>`);
+
+  // ③ 已解锁成就（Achievements.<id> = 1）
+  const unlocked = unlockedAchievementIds(selfEnt);
+  const achRows = unlocked.length
+    ? unlocked.map((id) => `<span class="gTag" title="${ACHIEVEMENTS[id]?.desc ?? id}">${ACHIEVEMENTS[id]?.name ?? id}</span>`).join("")
+    : `<div class="gEmpty">暂无成就</div>`;
+  parts.push(`<div class="gSec"><div class="gSecTitle">成就</div>${achRows}</div>`);
+
+  growthBodyEl.innerHTML = parts.join("");
+}
+
+// 已解锁成就 id 列表（Achievements.<id> 数值 1）
+function unlockedAchievementIds(selfEnt) {
+  const ids = [];
+  selfEnt?.values?.forEach((v, k) => {
+    if (k.startsWith("Achievements.") && v === 1) ids.push(k.slice("Achievements.".length));
+  });
+  return ids;
+}
+
+/* ---------- 成就 toast：新解锁时弹一次（首轮同步只建基线，不弹） ---------- */
+function toast(msg) {
+  const d = document.createElement("div");
+  d.className = "toast";
+  d.textContent = msg;
+  toastsEl.appendChild(d);
+  setTimeout(() => { d.classList.add("out"); setTimeout(() => d.remove(), 600); }, 2600);
+}
+function detectNewAchievements(selfEnt) {
+  if (!selfEnt) return;
+  for (const id of unlockedAchievementIds(selfEnt)) {
+    if (seenAchievements.has(id)) continue;
+    seenAchievements.add(id);
+    // 第一轮只记录基线（重连时既有成就不再弹）；之后新出现的才算「新解锁」
+    if (achievementBaselineDone) toast(`成就解锁：${ACHIEVEMENTS[id]?.name ?? id}`);
+  }
+  achievementBaselineDone = true;
 }
 
 /* ---------- 对话选项（自身实体存在 Dialogue.{i}.option 时渲染竖排按钮，协议 §4.6） ---------- */
@@ -1815,10 +2376,14 @@ function updateHud() {
   statusGroupEl.classList.toggle("hidden", !connected);
   craftTabsEl.classList.toggle("hidden", !connected);
   questsEl.classList.toggle("hidden", !connected);
+  growthEl.classList.toggle("hidden", !connected);
   if (!connected) {
     invBarEl.innerHTML = "";
     equipBarEl.innerHTML = "";
     dlgEl.classList.add("hidden");
+    growthBodyEl.innerHTML = "";
+    closeLootPanel();
+    exitAimMode();
     return;
   }
 
@@ -1861,6 +2426,12 @@ function updateHud() {
   // ---- 右缘任务面板 ----
   buildQuests(selfEnt);
 
+  // ---- 右上成长面板（等级/经验/技能/成就） ----
+  buildGrowth(selfEnt);
+
+  // ---- 成就新解锁检测（弹一次 toast） ----
+  detectNewAchievements(selfEnt);
+
   // ---- 对话选项 ----
   buildDialogue(selfEnt);
 
@@ -1871,6 +2442,12 @@ function updateHud() {
     // 面板关闭时也要清掉页签高亮
     craftTabsEl.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
   }
+
+  // ---- 搜刮面板（打开时刷新槽位与距离；内容未变不重建，保住「取回」按钮可点） ----
+  if (!lootEl.classList.contains("hidden")) renderLootPanel();
+
+  // ---- 瞄准提示条（冷却剩余秒数） ----
+  updateAimBanner();
 }
 setInterval(updateHud, 150);
 </script>

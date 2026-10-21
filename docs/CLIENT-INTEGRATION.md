@@ -33,8 +33,22 @@ const room = await client.joinOrCreate<RoomState>("game");
 ### 1.3 重连语义
 
 - 服务端定时持久化（周期由 server 规则 `saveIntervalMs` 配置，见 `game/rules/server.json`）。重启后世界从存档恢复。
-- **断线即销毁玩家实体**（不是保留）：重连进房间 = 按出生规则**新建**实体落点，进度以**最近一次存档**为准（存档周期内的最后一段进度会丢，见 §7）。
-- NetworkId 仅在**服务端重启后读档恢复**的场景复用：恢复出的玩家实体由加入流程复用绑定（NetworkId 保留存档值）；正常运行期间的断线重连产生**新实体、新 NetworkId**。
+- **断线保留（缺省 5 分钟）**：会话断开后玩家实体**不立即销毁**，而是挂上「离线保留」标记继续存在（位置、背包、进度原样保留）。保留时长由 server 规则 `offlineRetentionTicks` 配置（**缺省 = tickRate × 300 秒**，即 20 tick/s 下 6000 tick ≈ 5 分钟）；配 `0` 表示关闭保留、恢复「断线即销毁」行为。
+- **凭 networkId 复用（推荐客户端做法）**：客户端把断线前自己的 networkId 存到本地（localStorage），再次 join 时作为**可选 join 参数**回传：
+
+  ```ts
+  const saved = Number(localStorage.getItem("minClient.networkId"));
+  const room = await client.joinOrCreate(
+    "game",
+    Number.isInteger(saved) && saved > 0 ? { networkId: saved } : undefined,
+  );
+  ```
+
+  服务端**严格按该 networkId 匹配**「未到期的保留实体」：命中 → **复用同一实体**（同一 NetworkId、背包/进度不丢，返回的 `PlayerState.entityId` 与断线前一致）；未命中（未提供 / 已到期 / 不存在）→ 按出生规则**新建**实体。**绝不**按 FIFO 把他人或已过期的旧实体绑给新客户端。客户端据此判定「已恢复角色」还是「新角色」。
+- 保留期内的实体对**所有**在线玩家**不可见**（不进状态快照），因此保留中的角色不会出现在别人的视野里；到期由服务端清扫销毁。
+- 保留标记**随存档入档**：服务端重启后仍在保留期内的玩家实体依然保留（读档时恢复标记与到期 tick），重连窗口跨重启有效。
+
+> 早期版本文档写「断线即销毁、重连新建」——**已过时**，以本节为准。
 
 ---
 
@@ -77,14 +91,25 @@ const room = await client.joinOrCreate<RoomState>("game");
 | `consume` | `slot: number` | 食用背包 `slot` 槽物品（恢复生存需求） |
 | `drop` | `slot: number` | 丢弃背包 `slot` 槽物品（生成地面掉落物实体） |
 | `transfer` | `slot: number`, `toSlot: number` | 背包槽间移动/堆叠 |
+| `transfer` | `target: number`（容器 NetworkId）, `slot: number` | **从容器取回**：把容器实体（尸体等）的 `slot` 槽物品移入本人背包（给 `target` 即为取回语义；不给 `target` 则是背包内换槽） |
 | `craft` | `recipe: string` | 合成（`recipe` 引用 crafting 配置定义的配方 id，见 §4.4） |
+| `craft-cancel` | `recipe: string` | 取消进行中的延时制作（按配方 id 取消；退料原子——退料放不下则整条拒绝） |
+| `refuel` | `target?: number`（站点 NetworkId） | 给燃料型站点加燃料（`target` 缺省＝射程内最近的燃料站点） |
 | `equip` | `slot: number` | 穿戴背包 `slot` 槽物品 |
 | `place` | `slot: number`, `x: number`, `y: number` | 放置 kit 物品 → 生成建筑实体（世界坐标） |
 | `deconstruct` | `target: number` | 拆除自己放置的建筑（target = 实体 NetworkId） |
+| `throw` | `x?: number`, `y?: number`（世界坐标） | 投掷**武器槽**中声明了投掷档案的物品；瞄准点优先，缺省按最近敌人/移动朝向回退 |
 | `dialogue` | `option: number` | 推进当前对话（选项索引，见 §4.6） |
 | `offer` | `offer: TradeParty[]`, `ttlTicks?: number` | 发起交易：提交各方条款，发起方本人视为已确认 |
 | `offer-accept` | `offerId: number` | 确认目标报价（全部参与方确认后成交） |
 | `offer-cancel` | `offerId: number` | 取消目标报价 |
+
+命令补充说明：
+
+- `transfer{target,slot}`：服务端校验**同图 + 同层 + 射程**（取回距离 = place 规则 `containerRange`，缺省 64px）；背包满时按物品堆叠规则塞入，溢出部分留在容器。
+- `craft-cancel{recipe}`：只取消**该配方**的进行中制作；退料（材料回背包）失败则整条取消被拒（不产生半成品）。
+- `refuel{target}`：消耗背包中的燃料物品（物品表由 crafting 规则的 `fuel.items` 定义），站点燃料值增长；射程 = crafting 规则 `stationRange`。
+- `throw{x,y}`：要求**武器槽**装备的物品带投掷档案（速度/寿命/半径/伤害/冷却由物品配置的 `throw` 段定义）；命中/寿命结束即销毁，服务端有独立冷却（客户端本地冷却只是提示）。
 
 `offer` 的 `offer` 参数是交易条款数组（`TradeParty[]`），每项形如：
 
@@ -147,12 +172,13 @@ Colyseus Schema 增量同步（补丁 + 全量握手）。**客户端必须声�
 | `id` | uint32 | NetworkId（稳定标识，实体一生不变；同实体复用，重建不产生新 id） |
 | `values` | map\<string, number\> | 数值字段，key = `"组件.字段"` |
 | `stringValues` | map\<string, string\> | 字符串字段，key = `"组件.字段"` |
+| `level` | int8 | 实体所在**离散层号**（0 起，缺省 0；楼层/多层的实体分层标识）。**末尾追加**——既有 `id`/`values`/`stringValues` 的字段索引不变，旧客户端前三项照常解码（只是读不到 `level`） |
 
 **字段 key 约定**：
 - SoA 标量：`"Transform.x"`、`"Health.current"`、`"Collider.shape"`（0=圆形 1=矩形）
 - AoS 展平：`"Needs.0.name"`、`"Inventory.3.kind"`、`"Quest.0.state"`、`"Dialogue.0.option"`
 - 组件索引位置稳定；**空槽有占位值**（如 `"Inventory.3.kind"` = `""`），"key 存在"不代表"有货"
-- 同步是增量 diff：字段消失时（如对话结束、需求槽缩短）key 会被删除，读取注意 `undefined`
+- 同步是增量 diff：字段消失时（如对话结束、需求槽缩短、容器被清空）key 会被删除，读取注意 `undefined`
 
 ### 3.4 客户端 Schema 定义（可直接复制）
 
@@ -166,6 +192,7 @@ export class EntityState extends Schema {
   @type("uint32") id: number = 0;
   @type({ map: "number" }) values = new MapSchema<number>();
   @type({ map: "string" }) stringValues = new MapSchema<string>();
+  @type("int8") level: number = 0;   // 末尾追加：实体离散层号（0 起，缺省 0）
 }
 
 export class PlayerState extends Schema {
@@ -184,6 +211,8 @@ export class RoomState extends Schema {
 ```
 
 > 协议破坏性变更：`RoomState` 已移除 `mapId` 与 `entities`（旧字段顺序对齐的客户端会错位解码）；`PlayerState` 新增 `mapId`。字段**顺序**是线协议的一部分——客户端声明必须与服务端一致（见 §3.4 顶部提示），旧客户端解码新流会错位、需升级。
+>
+> **兼容性说明（`EntityState.level`）**：`level` 是**末尾追加**字段，既有 `id` / `values` / `stringValues` 三项的**字段索引不变**——旧客户端在结构上仍能解码新流（只是读不到层号）；新客户端连旧服务端则缺 `level`（按 0 处理即可）。
 
 （非 TS/JS 客户端：以本表字段名/类型/顺序为准，用各自语言的 @colyseus/schema 绑定声明。）
 
@@ -194,31 +223,41 @@ export class RoomState extends Schema {
 | 组件 | key 形态 | 语义 |
 |------|----------|------|
 | Transform | `Transform.x`, `Transform.y` | 世界坐标（像素） |
+| Kind | `Kind.value` | 实体种类（原型 kind 字符串，如 `corpse` / `tree` / `boss_alpha`）——**客户端辨识实体的首选依据**（见 §3.6） |
 | Health | `Health.current` | 当前血量（生物） |
 | Collider | `Collider.shape`, `Collider.radius` | 碰撞形状：0=圆形 1=矩形 |
 | Size | `Size.w`, `Size.h` | 尺寸 |
 | Needs | `Needs.{i}.name/current/max` | 生存需求（条目集与 name 由 needs 规则定义，见 `game/rules/needs.json`；任一为 0 持续扣血） |
 | Inventory | `Inventory.{i}.kind/count` | 背包槽（容量由玩家原型配置定义；空槽 kind=`""` 占位） |
+| Inventory | `Inventory.{i}.durability` | 槽位**当前耐久**（**仅逐实例有耐久的物品写键**；耐久上限不在协议内，由物品配置 `maxDurability` 定义） |
 | ItemMeta | `ItemMeta.kind/count` | 地面掉落物 |
+| ItemMeta | `ItemMeta.durability` | 地面掉落物当前耐久（同上，仅有耐久的物品写键） |
 | ResourceNode | `ResourceNode.remaining` | 资源点剩余量；0 = 已枯竭（**实体不消失**；`regenMs=0` 永不自动恢复，>0 按毫秒回满） |
 | Equipment | `Equipment.weaponSlot/toolSlot/armorSlot` | 装备槽引用的**背包槽索引**（-1=空） |
 | CraftingStation | `CraftingStation.stationType` | 合成站类型 id（类型语义由 crafting 配置定义；当前示例：0=通用，1=光源站点） |
 | LightSource | `LightSource.radius/fuelRemainingMs` | 光源半径与剩余燃料（≤0 熄灭） |
 | Placeable | `Placeable.footprintW/footprintH/canCollide` | 放置物占用/阻挡信息 |
+| Structure | `Structure.role/connectLow/connectHigh/connectDir` | 建造角色（1=楼板 / 2=墙 / 3=连接器）与连接器连接区间、方向 |
+| Passage | `Passage.open` | 可开合屏障（门）状态：1=放行 / 0=阻挡 |
 | GridOccupancy | `GridOccupancy.cellX/cellY/cellW/cellH` | 建筑占用的网格 |
 | Portal | `Portal.targetMap/x/y` | 传送门：目标地图与落点 |
 | Dialogue | `Dialogue.npcId/treeId/nodeId/{i}.option` | 玩家对话会话（仅对话中出现的 key，见 §4.6） |
 | DialogueSource | `DialogueSource.treeId` | NPC 挂载的对话树 id |
 | Quest | `Quest.{i}.questId/state/count` | 玩家任务（state：0未接/1进行/2可交/3完成） |
 | Relation | `Relation.{i}.npcKind/value` | 与 NPC 的好感值 |
+| Progression | `Progression.totalXp/level` | 累计经验与服务端派生的角色等级 |
+| Progression | `Progression.skill.{skillId}.xp/level` | 按技能 id 展开的技能经验/等级（skillId 由 progression 规则配置约定） |
+| Achievements | `Achievements.{achievementId}` | 已解锁成就（数值 **1 = 已解锁**；id 由 achievements 规则配置约定） |
+| Crafting | `Crafting.{i}.recipeId`（stringValues）、`Crafting.{i}.remainingTicks/progress/suspended`（values） | **进行中的制作**：`recipeId`=配方 id、`remainingTicks`=距完成剩余 tick（0=到点）、`progress`=时间进度 0–1（挂起时恒 1）、`suspended`=1 表示到点但产出条件未满足（背包满/站点失效）；任务完成/取消后整条消失 |
 
 ### 3.6 实体辨识（客户端如何知道"这是什么"）
 
-服务端**不发送**实体种类字段；客户端按同步字段组合辨识：
+服务端**会下发实体种类字段** `Kind.value`（原型 kind 字符串，见 §3.5）。客户端应**优先按 `Kind.value` 分类**；只有拿不到 `Kind.value`（旧服务端 / 某些无 kind 原型）时，才回退到「同步字段组合」启发式。
 
 | 特征 | 判定 |
 |------|------|
-| `ResourceNode.remaining` | 资源点（可采集） |
+| `Kind.value` | **首选**：直接给出种类（资源点/敌怪/NPC/尸体/建造物/首领/传送门…） |
+| `ResourceNode.remaining` | 资源点（可采集）——无 kind 时的兜底 |
 | `ItemMeta.kind` | 地面物品（可拾取） |
 | `DialogueSource.treeId` | NPC（可对话） |
 | `Health.current`（无其他特征） | 敌怪（可攻击） |
@@ -226,6 +265,8 @@ export class RoomState extends Schema {
 | `CraftingStation.stationType` + `LightSource.*` | 光源型合成站（带燃料与照亮半径的合成站点） |
 | `Portal.targetMap` | 传送门 |
 | `Placeable.*` | 建筑 |
+
+> 容器（可搜刮实体，如尸体）的判定：`Kind.value === "corpse"`，或该实体带 `Inventory.0.kind`（且不是玩家实体）。容器的物品清单经 `Inventory.{i}.kind/count/durability` 同步（§3.5），客户端据此渲染搜刮面板并用 `transfer{target,slot}` 取回（§2.2）。
 
 ---
 
@@ -241,11 +282,17 @@ export class RoomState extends Schema {
 | 拾取 | 无操作（走近自动） | 地面物品消失 → `Inventory` 计数增加 | 自动拾取 + 防瞬回保护（落地后短暂不可拾，框架行为） |
 | 对话 | `input` talk → `command dialogue` | 见 §4.6 | 对话半径 = dialogue 规则 `talkRange`（未配置用框架缺省）；talk 路由半径同 interaction 配置 |
 | 合成 | `command craft` | 消耗材料 → 产出入包（缺料/满包/站点不符零副作用） | 配方集由 `game/rules/crafting.json` 定义（§4.4）；站点判定半径 = crafting 规则 `stationRange` |
+| 延时制作 | 被动（`Crafting.{i}.*` 同步） | 制作计时推进，到点后产出（背包满/站点失效则挂起，`suspended=1`） | 制作时长 = 配方的 `durationTicks`；延时/解锁条件见 §4.4 |
+| 取消制作 | `command craft-cancel` | 取消进行中的制作并退料（退料放不下则整条拒绝） | 制作时长/条件同 crafting 配置 |
+| 容器取回 | `command transfer{target,slot}` | 容器槽物品 → 本人背包 | 取回距离 = place 规则 `containerRange`（缺省 64px）；同图/同层校验 |
+| 加燃料 | `command refuel` | 消耗背包燃料物品 → 站点 `LightSource.fuelRemainingMs` 增长 | 射程 = crafting 规则 `stationRange`；燃料物品表 = crafting 规则 `fuel.items` |
+| 投掷 | `command throw{x,y}` | 武器槽投掷档案物品 → 投射物实体（直线飞行、命中/寿命结束销毁） | 投掷参数（速度/寿命/半径/伤害/冷却）由物品配置 `throw` 段定义；冷却由服务端裁决（Cooldown 组件**不同步**） |
 | 装备 | `command equip` | `Equipment` 三槽更新，攻击/采集加成即时生效 | 槽位 weapon/tool/armor 是协议形状；加成数值由物品配置（`game/items/`）定义 |
 | 食用/丢弃 | `command consume/drop` | 需求恢复 / 地面掉物 | 食用恢复量由物品配置（`game/items/`）定义 |
 | 放置 | `command place` | 校验后消耗 1 个 kit → 生成建筑实体 | 放置距离/网格吸附由 place 规则（`game/rules/place.json`）配置 |
 | 拆除 | `command deconstruct` | 仅放置者可拆、范围校验、不返还材料 | 范围同 place 规则 `placeRange` |
 | 任务 | 对话选项触发 | 见 §4.7 | 任务定义见 `game/quests/`，经对话树（`game/dialogues/`）选项效果挂接 |
+| 成长/成就 | 被动（`Progression.*` / `Achievements.*` 同步） | 经验累计 → 等级/技能等级派生；成就解锁写入世界账本并投影到玩家实体 | 曲线与技能由 `game/rules/progression.json` 定义；成就由 `game/rules/achievements.json` 定义（见 §4.8） |
 | 昼夜 | 被动 | `hour/phase` 每帧同步 | 夜晚区间/昼夜周期由 daynight 规则（`game/rules/daynight.json`）配置 |
 | 场景切换 | 走近传送门 | 该玩家 `PlayerState.mapId` 变化、实体集切换（玩家自身保留；其他玩家不受影响） | 传送门实体由地图配置/演化规则产出（同步形状见 `Portal.targetMap/x/y`） |
 
@@ -273,12 +320,14 @@ export class RoomState extends Schema {
 - `craft` 命令的 `recipe` 参数引用 crafting 配置（`game/rules/crafting.json`）的 `recipes[].id`；每条配方的消耗/产出/站点要求全部由该配置定义，**协议不枚举配方**。
 - 客户端**不应内置配方清单**。如需展示配方列表：由宿主游戏注入配置，或等服务端后续提供配方查询端点；最小客户端做法是按配置文件静态生成或由开发者手动维护。
 - 站点要求（`stationType`）语义由 crafting 配置定义（当前示例：0=通用/无站点要求，其他值对应具体站点类型）。
+- **延时制作**：`durationTicks` 非 0 的配方在制作期间挂出 `Crafting.{i}.*`（§3.5）；`craft-cancel{recipe}` 按配方 id 取消（同一配方同一时刻至多一个任务）。
+- **解锁条件**：配方可带 `unlock.condition`（条件串，如 `inPhase:storm`、`progressAtLeast:<kind>:<n>`）。条件语义由配置约定，**服务端裁决**——客户端可把条件渲染成提示，但**不要**据此禁止发命令（命令失败无回执，见 §2.2）。
 
 ### 4.5 建造
 
 - `place` 消耗 1 个 kit 类物品生成建筑实体（放置距离/网格吸附由 place 规则 `game/rules/place.json` 配置）。
 - 建筑默认是静态阻挡（是否阻挡由实体配置的碰撞属性决定）；`deconstruct` 仅放置者可拆。
-- 建筑实体带 `Placeable.*` / `GridOccupancy.*` key（占用网格由服务端吸附计算，客户端只读）。
+- 建筑实体带 `Placeable.*` / `GridOccupancy.*` key（占用网格由服务端吸附计算，客户端只读）；带层结构的建造物另有 `Structure.*`（角色/连接器）与 `Passage.open`（可开合屏障）key。
 
 ### 4.6 对话
 
@@ -293,6 +342,24 @@ export class RoomState extends Schema {
 - 任务挂在玩家实体上：`Quest.{i}.questId/state/count`。
 - 接取/提交都通过**对话选项效果**触发（不是独立命令）。
 - 进度：collect 型随背包变化实时更新；kill 型击杀目标后更新；`state=2`（可交）时回到 NPC 对话选提交选项 → 消耗任务物品 + 发奖励 + 好感 + `state=3`（完成）。
+- 任务 id 与任务名称的对应关系由 `game/quests/quests.json` 定义，**协议只同步 id**——客户端展示中文名需自行映射（静态表或宿主注入）。
+
+### 4.8 成长、成就与容器（静态表 vs 协议）
+
+**协议只同步「数值与 id」，不枚举内容**——客户端要显示中文名/图标/描述时，需自备静态表（来自 `game/` 配置，随配置漂移）：
+
+| 展示内容 | 协议来源（id / 数值） | 静态表来源（名称/描述） |
+|----------|----------------------|------------------------|
+| 角色等级与经验 | `Progression.totalXp` / `Progression.level` | 等级曲线 `game/rules/progression.json`（`curve`：baseXp / growth / maxLevel） |
+| 技能等级与经验 | `Progression.skill.{skillId}.xp` / `.level` | 技能 id 与中文名 `game/rules/progression.json`（`skills`） |
+| 已解锁成就 | `Achievements.{achievementId}` = 1 | 成就 id/名称/描述 `game/rules/achievements.json` |
+| 任务名称与目标 | `Quest.{i}.questId` / `.state` / `.count` | 任务 id/名称/目标 `game/quests/quests.json` |
+| 容器物品清单 | `Inventory.{i}.kind/count/durability` | 物品名/色标/耐久上限 `game/items/*.json`（**耐久上限不在协议内**，只同步当前值） |
+| 配方名称与解锁条件 | `Crafting.{i}.recipeId` | 配方表与 `unlock.condition` `game/rules/crafting.json` |
+
+- 等级曲线语义：等级 L（1 起）升到 L+1 所需经验 = `round(baseXp × growth^(L-1))`；**累计**经验跨级累加，服务端按此派生 `level`。客户端若要画经验条，须用同一公式换算「本级进度」。
+- 成就解锁是**世界级事实**（随存档恢复），按实体投影到玩家实体（`Achievements.<id>` = 1）；客户端可用「key 由无到有」判定**新解锁**并提示（重连时既有成就不应重复提示）。
+- 容器的 `Inventory.{i}.*` 与玩家背包同形（空槽 kind=`""` 占位）；取回走 `transfer{target,slot}`（§2.2）。
 
 ---
 
@@ -499,13 +566,14 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 
 ## 6. 对接清单（Checklist）
 
-1. 声明 §3.4 的 Schema（字段名/类型/顺序严格一致）。
-2. `joinOrCreate("game")`，记 `room.sessionId`。
+1. 声明 §3.4 的 Schema（字段名/类型/顺序严格一致；`EntityState.level` 在末尾）。
+2. `joinOrCreate("game")`，记 `room.sessionId`；如需断线复用角色，把自己的 networkId 存本地并在 join 参数回传（§1.3）。
 3. 每帧发 `input`（seq 递增，速度不超过 server 规则上限）；按键边沿发 interact/attack/talk。
-4. 渲染：遍历自己的 `players.get(room.sessionId).visibleEntities`（唯一实体来源）。
-5. 按 §3.6 辨识实体种类，按 §3.5 读字段。
+4. 渲染：遍历自己的 `players.get(room.sessionId).visibleEntities`（唯一实体来源）；按 `EntityState.level` 过滤异层实体。
+5. 按 §3.6 辨识实体种类（优先 `Kind.value`），按 §3.5 读字段。
 6. UI 操作 → `command`（§2.2），失败以状态回退为准。
 7. 用 `/maps/runtime` 拉取地图几何快照，初始化地图渲染与碰撞（出生点不在几何模型，不从地图数据取）。
+8. 需要展示中文名/进度条时，按 §4.8 备静态表（成就/任务/技能/物品/配方），并随 `game/` 配置漂移手动同步。
 
 ---
 
@@ -518,5 +586,7 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 | 实体表为空 | 实体恒在自己 `visibleEntities`（首帧后才开始填充）；若持续为空，检查是否同一地图/半径内无实体、或 Schema 声明顺序与服务端不一致 |
 | 控制台报 `"refId not found"`、实体字段偶发消失 | 上游解码 bug（core 0.17.43）：`visibleEntities` 混入空壳实体，按 §3.2 末尾的兜底规则逐实体过滤即可容忍；服务端升级 colyseus 后消除 |
 | 命令"没反应" | 命令失败无回执：缺料/满包/频率超限/距离不够，观察状态确认 |
-| 断线重进后实体变了 | 服务端重启恢复存档，未到存档周期的最后变更会丢（周期由 server 规则 `saveIntervalMs` 配置） |
+| 投掷"没反应" | 武器槽装备的物品没有投掷档案（服务端要求 `throw` 段）；或服务端冷却未结束（Cooldown 不同步，客户端只能用本地计时提示） |
+| 断线重进后角色变了 | 正常：未命中保留实体（未回传 networkId / 已超保留期）→ 新建角色；命中则复用原角色（§1.3）。服务端重启恢复存档时，未到存档周期的最后变更仍会丢（周期由 server 规则 `saveIntervalMs` 配置） |
 | 换图后实体全变 | 正常：该玩家 `PlayerState.mapId` 变化 = 该玩家场景切换，实体集随图切换（玩家自身保留）；其他玩家不受影响 |
+| 看不到别的玩家/自己的旧角色 | 处于**断线保留期**的实体不进任何快照（对所有客户端不可见），保留期约 5 分钟后才被清扫 |
