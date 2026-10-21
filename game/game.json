@@ -64,6 +64,7 @@
   "netSync": {
     "fields": [
       { "component": "Transform", "fields": ["x", "y"] },
+      { "component": "Kind", "fields": ["value"] },
       { "component": "Health", "fields": ["current"] },
       { "component": "Collider", "fields": ["shape", "radius"] },
       { "component": "Size", "fields": ["w", "h"] },

@@ -12,7 +12,7 @@
  */
 import type { GameWorld } from "world";
 import {
-  Needs, Inventory, ItemMeta, ResourceNode, Portal,
+  Kind, Needs, Inventory, ItemMeta, ResourceNode, Portal,
   Dialogue, DialogueSource, Quest, Relation, Progression,
 } from "components";
 import { Achievements } from "components/achievements";
@@ -112,6 +112,14 @@ registerAosSyncAdapter("ItemMeta", (_world, eid, fields) => {
       }
     }
   }
+  return out;
+});
+
+/** 内建适配器：Kind（原型种类字符串；客户端据此区分树/矿/狼/建筑等）。 */
+registerAosSyncAdapter("Kind", (_world, eid, fields) => {
+  const out = empty();
+  const kind = Kind[eid];
+  if (kind && fields.includes("value")) out.strings["Kind.value"] = kind;
   return out;
 });
 

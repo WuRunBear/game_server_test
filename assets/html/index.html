@@ -10,13 +10,25 @@
   生成依据（严格照做）：
     1. docs/MINIMAL-CLIENT-SPEC.md —— 生成规格（硬性约束 / P0-P4 必实现行为 / 坑 K1-K8 / 验收清单）
     2. docs/CLIENT-INTEGRATION.md —— 协议契约（Schema 字段顺序 §3.4 / 消息形状 §2 / HTTP 端点 §5.2 / 特征辨识 §3.6）
-  本版改动【仅限视觉层】：DOM 结构、CSS、Canvas 绘制（地面配色/抖动/昼夜遮罩/实体描边阴影/相机 3× 缩放）。
-  协议与逻辑【逐字未动】：Schema defineTypes、joinOrCreate("game")、地图拉取与校验、
-  input 发送循环（50ms / seq 递增 / 32px/s / 边沿触发）、全部 command 键位与载荷形状、
-  实体辨识 classify、K1 空壳兜底、me() 判空、服务端权威（无预测/插值）。
+  本轮改动【协议内核】（视觉层与既有键位不变）：
+    ① Schema 增 EntityState.level(int8，末尾追加——字段顺序即线协议)；
+    ② 实体辨识改为 Kind.value 优先（kindOf），无 Kind 时回退「同步字段组合」启发式；
+    ③ 按 level 过滤渲染（异层不画）+ HUD 显示当前层号；
+    ④ 新增实体形状：corpse(可搜刮容器)、boss_alpha(醒目体型)、
+       Structure.role=1 楼板 / 2 墙 / 3 连接器(楼梯)、Passage.open 门开合两态、
+       tree/rock/berry_bush/shell_node/driftwood/wolf/spider/boar/rabbit/crab/frog/tentacle 分形；
+    ⑤ 接通新命令（只发命令，本轮不做面板）：transfer{target}(容器取回)、
+       transfer{slot,toSlot}、craft-cancel、refuel、throw；
+    ⑥ 重连：自己的 networkId 存 localStorage，连接时作为 join 参数传入，
+       断线保留期内可复用角色；断开后自动重连一次；
+    ⑦ 物品静态表同步 game/items/*.json 当前 29 种（中文名/色标/用途分类）。
+  保留不动：视觉风格与 DOM 结构、地图拉取与校验、input 发送循环
+  （50ms / seq 递增 / 32px/s / 边沿触发）、既有 command 键位与载荷形状、
+  K1 空壳兜底、me() 判空、服务端权威（无预测/插值）。
   视觉参照《饥荒》界面：深棕木质面板 + 米黄描边 + 衬线字体 + 暗角；
   右上圆形昼夜钟 + 液位徽章组；底部木质热键条 + 右端 3 装备槽；左缘合成页签轨 + 展开大面板。
-  明确不做（规格 §4）：美术/动画/音频、客户端预测与插值、断线重连、移动端、i18n、测试、打包。
+  明确不做（规格 §4）：美术/动画/音频、客户端预测与插值、移动端、i18n、测试、打包。
+  （断线重连本轮已做：networkId 复用 + 自动重连一次。）
   运行方式（坑 K5 CORS）：用静态服务器把本页跑在 http://localhost:5173
     （如 `npx serve -l 5173` 或 `python3 -m http.server 5173`），
     或在服务端 .env 配置 CORS_ORIGINS=<本页地址> 后重启服务端。
@@ -113,6 +125,7 @@
   .badge .num { position: absolute; bottom: 3px; width: 100%; text-align: center;
     font-size: 12px; font-weight: bold; color: #f3e9cf; text-shadow: 0 1px 2px #000; }
   #mapIdText { font-size: 11px; color: var(--ink-dim); letter-spacing: 1px; text-shadow: 0 1px 2px #000; }
+  #levelText { font-size: 12px; color: var(--beige); letter-spacing: 1px; text-shadow: 0 1px 2px #000; }
 
   /* ---------- 左缘合成页签轨 ---------- */
   #craftTabs { position: fixed; left: 8px; top: 50%; transform: translateY(-50%); z-index: 10;
@@ -192,7 +205,8 @@
   #bottomWrap { position: fixed; bottom: 8px; left: 50%; transform: translateX(-50%);
     z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 4px; }
   #hint { font-size: 11px; color: rgba(201,182,137,.75); letter-spacing: 1px;
-    text-shadow: 0 1px 2px #000; white-space: nowrap; }
+    text-shadow: 0 1px 2px #000; white-space: normal; max-width: 94vw;
+    text-align: center; line-height: 1.5; }
   #hotbarRow { display: flex; gap: 10px; align-items: center; }
   #invBar { display: flex; gap: 4px; }
   #equipBar { display: flex; gap: 4px; padding-left: 10px;
@@ -209,7 +223,9 @@
     box-shadow: inset 0 0 0 1px var(--gold), 0 0 10px rgba(216,169,78,.65); }
   .slot .key { position: absolute; top: 1px; left: 3px; font-size: 9px; color: var(--ink-dim); }
   .slot .kind { display: block; font-size: 9px; text-align: center; line-height: 1.15;
-    word-break: break-all; padding: 8px 2px 0; color: var(--ink); }
+    word-break: break-all; padding: 8px 2px 0 12px; color: var(--ink); }
+  .slot .dot { position: absolute; left: 5px; top: 50%; margin-top: -3px;
+    width: 6px; height: 6px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,.55); }
   .slot .cnt { position: absolute; right: 3px; bottom: 1px; font-size: 11px; font-weight: bold;
     color: #f3e9cf; text-shadow: 0 1px 2px #000; }
   .slot .eqTag { position: absolute; top: 1px; left: 3px; font-size: 9px; color: var(--beige-dim); }
@@ -242,6 +258,7 @@
   <div id="clockText">—</div>
   <div id="badges"></div>
   <div id="mapIdText">—</div>
+  <div id="levelText">层 L0</div>
 </div>
 
 <!-- 左缘合成页签轨（点击页签展开合成面板；C 键开关保留） -->
@@ -278,7 +295,7 @@
 
 <!-- 底部操作提示 + 热键条（12 背包槽 + 右端 3 装备槽） -->
 <div id="bottomWrap">
-  <div id="hint">WASD 移动 · E 采集 · 空格 攻击 · T 对话 · C 合成 · F 食用/装备 · G 丢弃 · B 放置 · X 拆除 · 1-9/0/-/= 选槽</div>
+  <div id="hint">WASD 移动 · E 采集 · 空格 攻击 · T 对话 · C 合成 · F 食用/装备 · G 丢弃 · B 放置 · X 拆除 · R 搜刮容器 · Y 取消合成 · U 加燃料 · Q 投掷 · K 换槽 · 1-9/0/-/= 选槽</div>
   <div id="hotbarRow">
     <div id="invBar"></div>
     <div id="equipBar"></div>
@@ -303,6 +320,7 @@ defineTypes(EntityState, {
   id:           "uint32",          // NetworkId
   values:       { map: "number" }, // 数值字段，key="组件.字段"
   stringValues: { map: "string" }, // 字符串字段，key="组件.字段"
+  level:        "int8",            // 实体所在离散层号（末尾追加，字段顺序即线协议）
 });
 class PlayerState extends Schema {}
 defineTypes(PlayerState, {
@@ -355,44 +373,63 @@ const GROUND_COLOR_FALLBACK = "#33352c";
 /* ============================================================================
  * 合成配方表（规格 §P3）：⚠️ 静态内嵌自 game/rules/crafting.json，随配置漂移，需手动同步！
  * 协议不枚举配方（协议 §4.4），客户端无法拉取配方清单；craft 命令只发 recipe id。
- * in/out 形如 [kind, count]；station 为站点类型要求（0/缺省=通用，1=光源站点，见 crafting 配置）。
- * 当前同步点：crafting.json 共 11 条配方（wood_axe … furniture_kit）。
+ * in/out 形如 [kind, count]；station 为站点类型要求（0/缺省=通用，1=光源站点，见 crafting 配置）；
+ * dur 为延时制作 tick 数（缺省=即时）。
+ * 当前同步点：crafting.json 共 18 条配方（wood_axe … boss_cleaver）。
  * ==========================================================================*/
 const RECIPES = [
-  { id: "wood_axe",      in: [["wood", 2]],                          out: [["axe", 1]] },
-  { id: "stone_axe",     in: [["wood", 1], ["stone", 1]],            out: [["stone_axe", 1]] },
-  { id: "spear",         in: [["wood", 2], ["stone", 1]],            out: [["spear", 1]] },
-  { id: "berry_pie",     in: [["berry", 3]],                         out: [["berry_pie", 1]] },
-  { id: "cooked_meat",   in: [["raw_meat", 1]],                      out: [["cooked_meat", 1]], station: 1 },
-  { id: "campfire_kit",  in: [["wood", 3], ["stone", 2]],            out: [["campfire_kit", 1]] },
-  { id: "wall_kit",      in: [["wood", 2], ["stone", 1]],            out: [["wall_kit", 1]] },
-  { id: "floor_kit",     in: [["wood", 1]],                          out: [["floor_kit", 1]] },
-  { id: "door_kit",      in: [["wood", 2], ["stone", 1]],            out: [["door_kit", 1]] },
-  { id: "fence_kit",     in: [["wood", 2]],                          out: [["fence_kit", 1]] },
-  { id: "furniture_kit", in: [["wood", 2], ["stone", 2]],            out: [["furniture_kit", 1]] },
+  { id: "wood_axe",       in: [["wood", 2]],                                 out: [["axe", 1]] },
+  { id: "stone_axe",      in: [["wood", 1], ["stone", 1]],                   out: [["stone_axe", 1]] },
+  { id: "pickaxe",        in: [["wood", 2], ["stone", 2]],                   out: [["pickaxe", 1]] },
+  { id: "spear",          in: [["wood", 2], ["stone", 1]],                   out: [["spear", 1]] },
+  { id: "throwing_spear", in: [["wood", 2], ["stone", 1]],                   out: [["throwing_spear", 1]], dur: 30 },
+  { id: "shell_spear",    in: [["plank", 1], ["shell", 3]],                  out: [["shell_spear", 1]], station: 1, dur: 40 },
+  { id: "boss_cleaver",   in: [["boss_core", 1], ["stone", 5], ["plank", 2]], out: [["boss_cleaver", 1]], dur: 60 },
+  { id: "shell_armor",    in: [["shell", 3], ["plank", 1]],                  out: [["shell_armor", 1]], station: 1, dur: 40 },
+  { id: "berry_pie",      in: [["berry", 3]],                                out: [["berry_pie", 1]] },
+  { id: "cooked_meat",    in: [["raw_meat", 1]],                             out: [["cooked_meat", 1]], station: 1 },
+  { id: "plank",          in: [["wood", 2]],                                 out: [["plank", 1]] },
+  { id: "campfire_kit",   in: [["wood", 3], ["stone", 2]],                   out: [["campfire_kit", 1]] },
+  { id: "wall_kit",       in: [["wood", 2], ["stone", 1]],                   out: [["wall_kit", 1]] },
+  { id: "floor_kit",      in: [["wood", 1]],                                 out: [["floor_kit", 1]] },
+  { id: "fence_kit",      in: [["wood", 2]],                                 out: [["fence_kit", 1]] },
+  { id: "door_kit",       in: [["plank", 2]],                                out: [["door_kit", 1]], station: 1, dur: 30 },
+  { id: "furniture_kit",  in: [["plank", 2], ["stone", 1]],                  out: [["furniture_kit", 1]], station: 1, dur: 20 },
+  { id: "stairs_up_kit",  in: [["plank", 2], ["stone", 2]],                  out: [["stairs_up_kit", 1]], dur: 40 },
+  { id: "stairs_down_kit", in: [["plank", 2], ["stone", 1]],                 out: [["stairs_down_kit", 1]], dur: 30 },
 ];
 
 // 以下两张表为【纯展示元数据】（不改配方数据本身，不参与协议）：
 // 配方 → 合成页签分类；配方 → 一行描述文字（截图 2 详情区用）。
 const RECIPE_CATS = {
-  wood_axe: "tool", stone_axe: "tool", spear: "tool",
+  wood_axe: "tool", stone_axe: "tool", pickaxe: "tool", spear: "tool",
+  throwing_spear: "tool", shell_spear: "tool", boss_cleaver: "tool", shell_armor: "tool",
   berry_pie: "food", cooked_meat: "food",
   campfire_kit: "fire",
-  wall_kit: "build", floor_kit: "build", door_kit: "build",
-  fence_kit: "build", furniture_kit: "build",
+  wall_kit: "build", floor_kit: "build", door_kit: "build", fence_kit: "build",
+  furniture_kit: "build", stairs_up_kit: "build", stairs_down_kit: "build",
+  plank: "build",
 };
 const RECIPE_DESC = {
   wood_axe: "两块木头绑成的粗斧，砍树必备。",
   stone_axe: "木柄石刃，更结实耐用的斧头。",
+  pickaxe: "石制镐头，开采矿石效率翻倍。",
   spear: "木杆石尖的长矛，用于自卫。",
+  throwing_spear: "可投掷的长矛，远距离袭敌。",
+  shell_spear: "贝壳磨尖的矛，风暴天才能制作。",
+  boss_cleaver: "巨兽核心锻造的重型剁刀，伤害惊人。",
+  shell_armor: "贝壳拼成的护甲，减免伤害。",
   berry_pie: "三份浆果烤成的派，填饱肚子。",
   cooked_meat: "烤熟的肉，需要在光源站点旁烹制。",
+  plank: "把木头加工成木板，建筑材料。",
   campfire_kit: "木石篝火套件，放置后照亮黑夜。",
   wall_kit: "木石墙体套件，按 B 放置建造。",
   floor_kit: "木地板套件，铺出一块干燥地面。",
-  door_kit: "可通行的木门套件。",
   fence_kit: "简易木栅栏，圈出一小块地。",
+  door_kit: "可通行的木门套件，需要光源站点。",
   furniture_kit: "桌椅家具套件，让营地像样一点。",
+  stairs_up_kit: "向上连接楼层的楼梯套件。",
+  stairs_down_kit: "向下连接楼层的楼梯套件。",
 };
 // 合成页签（左缘竖轨 + 面板顶部分类行共用，字符图标）
 const CATS = [
@@ -403,11 +440,53 @@ const CATS = [
   { id: "build", ico: "🏠", label: "建筑" },
 ];
 
-// F 键「食物→consume / 工具→equip」的物品分类启发式（协议不下发物品类型，见协议 §4.1：
-// 客户端不应内置物品清单 —— 但规格 §P3 要求 F 区分两者，故用此启发式集合，
-// ⚠️ 随 game/items 配置漂移，需手动同步。不在集合内的按食物处理发 consume，
-// 材料类 consume 会失败且无回执（坑 K4），属可接受行为）。
-const TOOL_KINDS = new Set(["axe", "stone_axe", "spear"]);
+/* ============================================================================
+ * 物品静态表：⚠️ 静态内嵌自 game/items/*.json（当前 29 种），随配置漂移需手动同步！
+ * name = 中文显示名；color = 色标（背包槽圆点 / 掉落物标签）；
+ * cat  = 用途分类：tool 工具 / weapon 武器 / armor 护甲 / food 食物 /
+ *                    material 材料 / place 放置套件；
+ * consume = 配置里带 consume 段（可食用），否则 F 键只提示不可直接使用。
+ * ==========================================================================*/
+const ITEM_TABLE = {
+  axe:              { name: "木斧",     color: "#8a6a3a", cat: "tool",     consume: false },
+  pickaxe:          { name: "镐",       color: "#7a7a86", cat: "tool",     consume: false },
+  stone_axe:        { name: "石斧",     color: "#6e7a8a", cat: "tool",     consume: false },
+  spear:            { name: "长矛",     color: "#9a7a4a", cat: "weapon",   consume: false },
+  throwing_spear:   { name: "投掷矛",   color: "#a08258", cat: "weapon",   consume: false },
+  shell_spear:      { name: "贝壳矛",   color: "#b8a882", cat: "weapon",   consume: false },
+  boss_cleaver:     { name: "巨兽剁刀", color: "#c04a3a", cat: "weapon",   consume: false },
+  shell_armor:      { name: "贝壳甲",   color: "#a89a78", cat: "armor",    consume: false },
+  berry:            { name: "浆果",     color: "#8a4a6a", cat: "food",     consume: true },
+  berry_pie:        { name: "浆果派",   color: "#b06a4a", cat: "food",     consume: true },
+  cooked_meat:      { name: "熟肉",     color: "#a4643c", cat: "food",     consume: true },
+  raw_meat:         { name: "生肉",     color: "#b0645c", cat: "food",     consume: true },
+  rotten:           { name: "腐肉",     color: "#6a5a3a", cat: "food",     consume: true },
+  water:            { name: "水袋",     color: "#4a7a9a", cat: "food",     consume: true },
+  wood:             { name: "木头",     color: "#6e5230", cat: "material", consume: false },
+  plank:            { name: "木板",     color: "#7a5a36", cat: "material", consume: false },
+  twig:             { name: "树枝",     color: "#8a7a52", cat: "material", consume: false },
+  sap:              { name: "树液",     color: "#c2a13c", cat: "material", consume: false },
+  stone:            { name: "石头",     color: "#7a7a72", cat: "material", consume: false },
+  shell:            { name: "贝壳",     color: "#d8c9a8", cat: "material", consume: false },
+  boss_core:        { name: "巨兽核心", color: "#a04a6a", cat: "material", consume: false },
+  campfire_kit:     { name: "篝火套件", color: "#d8863c", cat: "place",    consume: false },
+  wall_kit:         { name: "墙套件",   color: "#8a7a5a", cat: "place",    consume: false },
+  floor_kit:        { name: "地板套件", color: "#7a6a4a", cat: "place",    consume: false },
+  door_kit:         { name: "门套件",   color: "#96754a", cat: "place",    consume: false },
+  fence_kit:        { name: "栅栏套件", color: "#8a7048", cat: "place",    consume: false },
+  furniture_kit:    { name: "家具套件", color: "#9a7a5a", cat: "place",    consume: false },
+  stairs_up_kit:    { name: "上楼套件", color: "#7a8a9a", cat: "place",    consume: false },
+  stairs_down_kit:  { name: "下楼套件", color: "#6a7a8a", cat: "place",    consume: false },
+};
+
+// F 键「食用/装备」分类由物品静态表推导（协议不下发物品类型，见协议 §4.1）。
+// 分类之外的材料不发命令——材料直接 consume 必然失败且无回执（坑 K4），只给提示。
+const EQUIP_KINDS = new Set(Object.keys(ITEM_TABLE).filter((k) => ["tool", "weapon", "armor"].includes(ITEM_TABLE[k].cat)));
+const PLACE_KINDS = new Set(Object.keys(ITEM_TABLE).filter((k) => ITEM_TABLE[k].cat === "place"));
+const CONSUMABLE_KINDS = new Set(Object.keys(ITEM_TABLE).filter((k) => ITEM_TABLE[k].consume));
+// 物品 kind → 中文名 / 色标（表外物品回退原始 kind）
+function itemName(kind) { return (kind && ITEM_TABLE[kind]?.name) || kind || ""; }
+function itemColor(kind) { return (kind && ITEM_TABLE[kind]?.color) || "#8f7f5c"; }
 
 // 背包槽选择键位（规格 §P3）：1-9,0,-,= → 槽 0-11
 const SLOT_KEYS = { "1":0,"2":1,"3":2,"4":3,"5":4,"6":5,"7":6,"8":7,"9":8,"0":9,"-":10,"=":11 };
@@ -421,17 +500,25 @@ const EQUIP_SLOTS = [
   { key: "armorSlot",  tag: "甲", label: "护甲" },
 ];
 
-// 实体辨识配色/标签（规格 §P0 表 + 协议 §3.6）；种类语义不变，整体降饱和以贴合饥荒氛围
+// 实体辨识配色/标签（分类来自 kindOf/classify；种类语义不变，整体降饱和以贴合饥荒氛围）
 const ENTITY_STYLE = {
   self:     { color: "#3b9aa8", label: "你"  },  // 自己：暗青 + 高亮圈
   player:   { color: "#3b9aa8", label: "👤" },  // 其他玩家（Health + Needs）
   enemy:    { color: "#a83c3c", label: "敌"  },  // 敌怪（仅 Health）：暗红
+  boss:     { color: "#8a2f2f", label: "BOSS" },// Boss：更深红 + 体型放大
   npc:      { color: "#5d8a4a", label: "NPC" },  // NPC（DialogueSource.treeId）：暗绿
   resource: { color: "#7a5a36", label: null  },  // 资源点：暗棕，标签=剩余量（运行时填）
   item:     { color: "#c2a13c", label: null  },  // 地面物品：暗黄，标签=kind（运行时填）
   station:  { color: "#b06a2e", label: "🔥" },  // 光源型合成站（CraftingStation+LightSource）：暗橙
   portal:   { color: "#7a5a9a", label: "门"  },  // 传送门（Portal.targetMap）：暗紫
   building: { color: "#7a7268", label: null  },  // 建筑（Placeable.*）：灰褐，无标签
+  corpse:   { color: "#6a5646", label: "容器" },// 尸体＝可搜刮容器：木箱色
+  wall:     { color: "#8a7250", label: null  },  // 墙（Structure.role=2）
+  floor:    { color: "#6e5a40", label: null  },  // 楼板（Structure.role=1）
+  door:     { color: "#96754a", label: null  },  // 门（Structure.role=2 + Passage）
+  fence:    { color: "#8a7048", label: null  },  // 栅栏
+  furniture:{ color: "#9a7a5a", label: null  },  // 家具
+  connector:{ color: "#7a8a9a", label: null  },  // 连接器/楼梯（Structure.role=3）
   other:    { color: "#5a5a5a", label: "?"  },  // 未识别兜底
 };
 
@@ -445,6 +532,14 @@ const keysDown = new Set();           // 当前按下的移动键
 let facing = { x: 0, y: 1 };          // 面朝方向（最近一次移动方向；默认朝下）
 let edgeInteract = false, edgeAttack = false, edgeTalk = false; // E/空格/T 边沿触发标记（坑 K3）
 let selectedSlot = 0;                 // 当前选中背包槽
+
+// 重连复用：自己的 networkId 存 localStorage，连接时作为 join 参数传入，
+// 命中服务端「断线保留实体」时复用同一角色（进度不丢）。
+const LS_NETWORK_ID = "minClient.networkId";
+let requestedNetworkId = null;  // 本次连接请求复用的 networkId（null=新角色）
+let restoredRole = false;       // 服务端是否复用了断线保留的角色
+let autoReconnectUsed = false;  // 自动重连配额（每次手动连接重置，只自动重连一次）
+let lastEntityId = 0;           // 最近一次同步到的自己的 entityId（用于状态栏角色标记）
 
 let currentMap = null;    // 当前应用的地图数据 {key,version,grid,tiles,walkable}
 let mapCanvas = null;     // 地图离屏预渲染画布（地面底色 + 阻挡覆盖层）
@@ -479,6 +574,7 @@ const clockCtx2d = clockCanvas.getContext("2d");
 const clockTextEl = document.getElementById("clockText");
 const badgesEl = document.getElementById("badges");
 const mapIdTextEl = document.getElementById("mapIdText");
+const levelTextEl = document.getElementById("levelText");
 const craftTabsEl = document.getElementById("craftTabs");
 const craftCatsEl = document.getElementById("craftCats");
 const recipeGridEl = document.getElementById("recipeGrid");
@@ -546,7 +642,9 @@ function selfEntity() {
 /* ============================================================================
  * 连接（规格 §P0）
  * ==========================================================================*/
-async function connect() {
+async function connect(isAuto = false) {
+  // 手动连接重置「自动重连一次」配额（自动重连自身不再续配额，避免死循环）
+  if (!isAuto) autoReconnectUsed = false;
   const ep = endpointInput.value.trim() || "ws://localhost:3000";
   localStorage.setItem("minClient.endpoint", ep); // 记住上次输入（规格 §1 约束 5）
   httpBase = ep.replace(/^ws:/, "http:").replace(/^wss:/, "https:"); // HTTP 基址派生
@@ -554,17 +652,30 @@ async function connect() {
   connectBtn.disabled = true;
   try {
     const client = new Colyseus.Client(ep);
+    // 重连复用：把上次自己的 networkId 存 localStorage，连接时作为 join 参数传入；
+    // 服务端命中「断线保留实体」时复用同一角色（进度不丢），未命中则新建角色。
+    const saved = Number(localStorage.getItem(LS_NETWORK_ID));
+    const joinOptions = Number.isInteger(saved) && saved > 0 ? { networkId: saved } : undefined;
+    requestedNetworkId = joinOptions ? saved : null;
     // ⚠️ 坑 K8：不传自定义 rootSchema（第 3 参），由服务端反射自动解码
-    room = await client.joinOrCreate("game");
+    room = await client.joinOrCreate("game", joinOptions);
     seq = 0;          // 新会话 seq 重新从 1 起
     lastMapId = "";   // 触发首图加载
+    lastEntityId = 0; // 角色标记待首次同步后判定
     joinTick = null; joinHour = null; lastHourSeen = null; dayCount = 1; // 「第 N 天」本地近似重置
     setStatus(`已连接 · sessionId=${room.sessionId}`);
-    log(`已加入房间 game，sessionId=${room.sessionId}`);
+    log(`已加入房间 game，sessionId=${room.sessionId}` +
+      (requestedNetworkId ? `（请求复用 networkId=${requestedNetworkId}）` : ""));
     room.onLeave((code) => {
-      setStatus(`已断开（code=${code}）。按规格不做自动重连，可手动重连`);
+      setStatus(`已断开（code=${code}）`);
       log(`连接断开（code=${code}）`);
       room = null;
+      // 断线自动重连一次（配额外不再自动重连，可手动点「连接」）
+      if (!autoReconnectUsed) {
+        autoReconnectUsed = true;
+        log("断开后自动重连一次…");
+        setTimeout(() => { if (!room) connect(true); }, 1500);
+      }
     });
     room.onError((code, msg) => log(`房间错误 ${code}: ${msg}`));
   } catch (err) {
@@ -575,7 +686,7 @@ async function connect() {
     connectBtn.disabled = false;
   }
 }
-connectBtn.addEventListener("click", connect);
+connectBtn.addEventListener("click", () => connect(false));
 endpointInput.value = localStorage.getItem("minClient.endpoint") || "ws://localhost:3000";
 endpointInput.addEventListener("keydown", (ev) => { if (ev.key === "Enter") connect(); });
 
@@ -707,11 +818,44 @@ function prerenderMap() {
 }
 
 /* ============================================================================
- * 实体辨识（规格 §P0 表 + 协议 §3.6：服务端不发种类字段，按同步字段组合辨识）
+ * 实体辨识（协议 §3.6）：服务端下发 Kind.value（原型 kind 字符串）时优先按 kind 分类；
+ * 没有 Kind 的实体回退「同步字段组合」启发式。
+ * kindOf(e) —— 读 stringValues["Kind.value"]，取不到返回 ""。
  * ==========================================================================*/
+function kindOf(e) { return str(e, "Kind.value") || ""; }
+
+// kind → 分类（未登记的 kind 走下方启发式回退）
+const KIND_CLASS = {
+  // 资源点
+  tree: "resource", rock: "resource", gold_rock: "resource", berry_bush: "resource",
+  shell_node: "resource", driftwood: "resource", mushroom: "resource", reed: "resource",
+  carrot_patch: "resource", water_pool: "resource",
+  // 地面掉落物
+  item: "item",
+  // 角色
+  player: "player", villager: "npc",
+  // 敌怪
+  wolf: "enemy", spider: "enemy", boar: "enemy", rabbit: "enemy", crab: "enemy",
+  frog: "enemy", tentacle: "enemy", nest_spider: "enemy", nest_frog: "enemy",
+  boss_alpha: "boss",
+  // 尸体＝可搜刮容器
+  corpse: "corpse",
+  // 建造物（Structure.role：1 楼板 / 2 墙 / 3 连接器）
+  wall: "wall", wall_upper: "wall", floor: "floor", floor_upper: "floor",
+  door: "door", fence: "fence", furniture: "furniture",
+  stairs_up: "connector", stairs_down: "connector",
+  campfire: "station",
+  // 传送门
+  portal: "portal", portal_back: "portal", portal_ruins: "portal",
+  portal_ruins_back: "portal", portal_swamp: "portal", portal_swamp_back: "portal",
+};
+
 function classify(e) {
   const p = me();
-  if (p && e.id === p.entityId) return "self";                                   // 自己
+  if (p && e.id === p.entityId) return "self";                                     // 自己
+  const k = kindOf(e);
+  if (k && KIND_CLASS[k]) return KIND_CLASS[k];                                     // kind 优先
+  // —— 无 kind（或 kind 未登记）时的启发式回退 ——
   if (has(e, "ResourceNode.remaining")) return "resource";                       // 资源点
   if (has(e, "ItemMeta.kind")) return "item";                                    // 地面物品
   if (has(e, "DialogueSource.treeId")) return "npc";                             // NPC
@@ -726,6 +870,25 @@ function classify(e) {
   return "other";
 }
 
+/* ---------- 层号（EntityState.level，int8；缺省 0） ---------- */
+function levelOf(e) {
+  const v = e && e.level;
+  return typeof v === "number" ? v : 0;
+}
+// 自己所在层号（找不到自身实体时按 0 处理）
+function selfLevel() {
+  const p = me();
+  if (!p) return 0;
+  const self = collectEntities().find((e) => e.id === p.entityId);
+  return self ? levelOf(self) : 0;
+}
+
+// 可拆除的建造物（按 Placeable / 合成站组件判定，不依赖 classify 分类细化）
+function isBuildableEntity(e) {
+  return has(e, "Placeable.footprintW") || has(e, "Placeable.footprintH") ||
+         has(e, "Placeable.canCollide") || has(e, "CraftingStation.stationType");
+}
+
 function drawEntity(e) {
   const x = num(e, "Transform.x"), y = num(e, "Transform.y"); // Transform.x/y 是中心坐标（规格 §P0-5）
   if (x === undefined || y === undefined) return;
@@ -733,8 +896,9 @@ function drawEntity(e) {
   const viewW = canvas.width / ZOOM, viewH = canvas.height / ZOOM;
   if (x < camX - 64 || y < camY - 64 || x > camX + viewW + 64 || y > camY + viewH + 64) return;
 
-  const kind = classify(e);
-  const style = ENTITY_STYLE[kind];
+  const cls = classify(e);
+  const rawKind = kindOf(e);
+  const style = ENTITY_STYLE[cls] || ENTITY_STYLE.other;
 
   // 形状：Collider.shape 0=圆（radius）、1=矩形（Size.w/h）；缺省按半径 8 圆处理
   const shape = num(e, "Collider.shape");
@@ -748,32 +912,22 @@ function drawEntity(e) {
   ctx.ellipse(x, y + h / 2, Math.max(6, w * 0.45), Math.max(3, w * 0.18), 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // 实体色块 + 深棕描边：线宽按世界单位给（1 世界 px ≈ 屏上 3px），缩放后仍是清晰粗描边
-  ctx.fillStyle = style.color;
-  ctx.strokeStyle = "#241a10";
-  ctx.lineWidth = 1;
-  if (shape === 1) {
-    ctx.fillRect(x - w / 2, y - h / 2, w, h);
-    ctx.strokeRect(x - w / 2, y - h / 2, w, h);
-  } else {
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-  }
+  // 实体本体：按分类/种类给形状区分（描边线宽按世界单位给：1 世界 px ≈ 屏上 3px）
+  drawBody(e, cls, rawKind, style, x, y, w, h, r, shape);
+
   // 自己：额外高亮圈（保留；圈距与线宽同样按世界单位）
-  if (kind === "self") {
+  if (cls === "self") {
     ctx.strokeStyle = "#8adce0";
     ctx.lineWidth = 0.7;
     ctx.beginPath();
     ctx.arc(x, y, r + 1.5, 0, Math.PI * 2);
     ctx.stroke();
   }
-  // 标签（资源点=剩余量；地面物品=kind；建筑无标签）—— 衬线米色 + 深色描影。
+  // 标签（资源点=剩余量；地面物品=物品名；容器=搜刮提示）—— 衬线米色 + 深色描影。
   // 字号按世界单位给：5 世界 px ≈ 屏上 15px，随缩放放大、保持可读。
   let label = style.label;
-  if (kind === "resource") label = String(num(e, "ResourceNode.remaining") ?? "");
-  if (kind === "item") label = str(e, "ItemMeta.kind") || "";
+  if (cls === "resource") label = String(num(e, "ResourceNode.remaining") ?? "");
+  if (cls === "item") label = itemName(str(e, "ItemMeta.kind"));
   if (label) {
     ctx.font = "5px Georgia, 'STKaiti', KaiTi, serif";
     ctx.textAlign = "center";
@@ -781,6 +935,229 @@ function drawEntity(e) {
     ctx.fillText(label, x + 0.35, y - r - 1.6);
     ctx.fillStyle = "#e8dcc0";
     ctx.fillText(label, x, y - r - 2);
+  }
+}
+
+/* ---------- 实体本体绘制：按分类/种类分形（世界单位，随相机缩放） ---------- */
+function drawBody(e, cls, rawKind, style, x, y, w, h, r, shape) {
+  ctx.fillStyle = style.color;
+  ctx.strokeStyle = "#241a10";
+  ctx.lineWidth = 1;
+  const hw = w / 2, hh = h / 2;
+
+  // —— 建筑类：按 Structure.role / Passage.open 分形 ——
+  if (cls === "floor") {                    // 楼板（role=1）：扁平木板 + 板缝
+    ctx.globalAlpha = 0.8;
+    ctx.fillRect(x - hw, y - hh, w, h);
+    ctx.strokeRect(x - hw, y - hh, w, h);
+    ctx.globalAlpha = 1;
+    ctx.beginPath();
+    ctx.moveTo(x - hw, y); ctx.lineTo(x + hw, y);
+    ctx.moveTo(x, y - hh); ctx.lineTo(x, y + hh);
+    ctx.stroke();
+    return;
+  }
+  if (cls === "wall") {                     // 墙（role=2）：竖向砖纹
+    ctx.fillRect(x - hw, y - hh, w, h);
+    ctx.strokeRect(x - hw, y - hh, w, h);
+    ctx.beginPath();
+    ctx.moveTo(x - hw, y); ctx.lineTo(x + hw, y);
+    ctx.moveTo(x, y - hh); ctx.lineTo(x, y + hh);
+    ctx.stroke();
+    return;
+  }
+  if (cls === "fence") {                    // 栅栏：两立柱 + 横杆
+    ctx.fillRect(x - hw, y - hh * 0.8, 2, h * 0.8);
+    ctx.fillRect(x + hw - 2, y - hh * 0.8, 2, h * 0.8);
+    ctx.strokeRect(x - hw, y - hh * 0.35, w, 2);
+    return;
+  }
+  if (cls === "furniture") {                // 家具：桌面 + 桌腿
+    ctx.fillRect(x - hw, y - hh * 0.45, w, h * 0.5);
+    ctx.strokeRect(x - hw, y - hh * 0.45, w, h * 0.5);
+    ctx.fillRect(x - hw + 1, y + hh * 0.05, 2, h * 0.4);
+    ctx.fillRect(x + hw - 3, y + hh * 0.05, 2, h * 0.4);
+    return;
+  }
+  if (cls === "door") {                     // 门：open=1 画门框（放行），open=0 画实心门板
+    if (num(e, "Passage.open") === 1) {
+      ctx.strokeStyle = "#c9b689"; ctx.lineWidth = 1.2;
+      ctx.strokeRect(x - hw, y - hh, 2, h);
+      ctx.strokeRect(x + hw - 2, y - hh, 2, h);
+      ctx.strokeStyle = "#241a10"; ctx.lineWidth = 1;
+    } else {
+      ctx.fillRect(x - hw, y - hh, w, h);
+      ctx.strokeRect(x - hw, y - hh, w, h);
+      ctx.fillStyle = "#c9b689";           // 门把手
+      ctx.fillRect(x + hw - 4, y - 1, 2, 2);
+    }
+    return;
+  }
+  if (cls === "connector") {               // 连接器/楼梯（role=3）：三级台阶 + 上下箭头
+    const down = num(e, "Structure.connectDir") === 1;
+    ctx.beginPath();
+    for (let i = 0; i < 3; i++) {
+      const sx = x - hw + (w / 3) * i;
+      ctx.rect(sx, y + hh - (h / 3) * (i + 1), w / 3, (h / 3) * (i + 1));
+    }
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#c9b689";
+    const ay = down ? y + hh + 3 : y - hh - 1;
+    ctx.beginPath();
+    ctx.moveTo(x, ay + (down ? 2 : -2));
+    ctx.lineTo(x - 2.5, ay + (down ? -1 : 1));
+    ctx.lineTo(x + 2.5, ay + (down ? -1 : 1));
+    ctx.closePath(); ctx.fill();
+    return;
+  }
+  if (cls === "corpse") {                  // 尸体＝可搜刮容器：木箱 + 盖沿 + 锁扣
+    const bw = Math.max(w, 14), bh = Math.max(h, 12);
+    ctx.fillRect(x - bw / 2, y - bh / 2, bw, bh);
+    ctx.strokeRect(x - bw / 2, y - bh / 2, bw, bh);
+    ctx.beginPath();
+    ctx.moveTo(x - bw / 2, y - bh / 2 + bh * 0.32);
+    ctx.lineTo(x + bw / 2, y - bh / 2 + bh * 0.32);
+    ctx.stroke();
+    ctx.fillStyle = "#c9b689";
+    ctx.fillRect(x - 1.5, y - bh / 2 + bh * 0.12, 3, bh * 0.16);
+    return;
+  }
+  if (cls === "boss") {                    // Boss：体型放大 + 危险光环
+    const R = r * 1.8;
+    ctx.strokeStyle = "#d86a5a"; ctx.lineWidth = 0.9;
+    ctx.beginPath(); ctx.arc(x, y, R + 2.5, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = "#241a10"; ctx.lineWidth = 1;
+    ctx.fillStyle = style.color;
+    ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#f3e9cf";             // 眼
+    ctx.beginPath(); ctx.arc(x - R * 0.35, y - R * 0.25, 1.2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + R * 0.35, y - R * 0.25, 1.2, 0, Math.PI * 2); ctx.fill();
+    return;
+  }
+
+  // —— 生物/资源类：按 kind 分形 ——
+  switch (rawKind) {
+    case "tree": {                         // 树：三角树冠 + 树干
+      ctx.fillStyle = "#4a5a2c";
+      ctx.beginPath();
+      ctx.moveTo(x, y - r * 1.4);
+      ctx.lineTo(x + r * 1.1, y + r * 0.5);
+      ctx.lineTo(x - r * 1.1, y + r * 0.5);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#4a3820";
+      ctx.fillRect(x - 1, y + r * 0.4, 2, r * 0.8);
+      return;
+    }
+    case "rock": case "gold_rock": {       // 岩石：多边形（金矿带金点）
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const rr = r * (i % 2 === 0 ? 1 : 0.82);
+        const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      if (rawKind === "gold_rock") {
+        ctx.fillStyle = "#d8a94e";
+        ctx.fillRect(x + r * 0.3, y - r * 0.4, 2, 2);
+      }
+      return;
+    }
+    case "berry_bush": case "mushroom": case "reed": case "carrot_patch": {
+      // 灌木/蘑菇/芦苇/菜地：绿丛 + 果实点缀
+      ctx.fillStyle = "#4e6a34";
+      ctx.beginPath(); ctx.arc(x - r * 0.4, y, r * 0.7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x + r * 0.45, y + r * 0.15, r * 0.6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = rawKind === "carrot_patch" ? "#d8863c" : "#a83c5c";
+      ctx.beginPath(); ctx.arc(x, y - r * 0.45, 1.4, 0, Math.PI * 2); ctx.fill();
+      return;
+    }
+    case "shell_node": {                   // 贝壳：扇形 + 放射纹
+      ctx.beginPath();
+      ctx.arc(x, y + r * 0.5, r, Math.PI, 0);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.beginPath();
+      for (let i = -2; i <= 2; i++) {
+        ctx.moveTo(x, y + r * 0.5);
+        ctx.lineTo(x + i * r * 0.35, y + r * 0.5 - r * 0.85);
+      }
+      ctx.stroke();
+      return;
+    }
+    case "driftwood": {                    // 浮木：横卧木条
+      ctx.fillStyle = "#6e6152";
+      ctx.fillRect(x - r * 1.2, y - r * 0.35, r * 2.4, r * 0.7);
+      ctx.strokeRect(x - r * 1.2, y - r * 0.35, r * 2.4, r * 0.7);
+      return;
+    }
+    case "tentacle": {                     // 触手：波动曲线
+      ctx.strokeStyle = "#6a3a5a"; ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      for (let i = 0; i <= 12; i++) {
+        const t = i / 12;
+        const px = x + (t - 0.5) * r * 2;
+        const py = y + Math.sin(t * Math.PI * 2) * r * 0.55;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+      ctx.strokeStyle = "#241a10"; ctx.lineWidth = 1;
+      return;
+    }
+    case "frog": {                         // 青蛙：扁椭圆 + 双眼
+      ctx.beginPath(); ctx.ellipse(x, y, r * 1.1, r * 0.8, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#f3e9cf";
+      ctx.beginPath(); ctx.arc(x - r * 0.45, y - r * 0.55, 1.1, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + r * 0.45, y - r * 0.55, 1.1, 0, Math.PI * 2); ctx.fill();
+      return;
+    }
+    case "crab": {                         // 螃蟹：横椭圆 + 双螯
+      ctx.beginPath(); ctx.ellipse(x, y, r * 1.2, r * 0.75, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = "#241a10"; ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(x - r * 1.1, y - r * 0.4); ctx.lineTo(x - r * 1.6, y - r * 0.9);
+      ctx.moveTo(x + r * 1.1, y - r * 0.4); ctx.lineTo(x + r * 1.6, y - r * 0.9);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      return;
+    }
+    case "spider": {                       // 蜘蛛：圆腹 + 四足
+      ctx.beginPath(); ctx.arc(x, y, r * 0.75, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath();
+      for (let i = 0; i < 4; i++) {
+        const sx = i < 2 ? -1 : 1;
+        const k = i % 2;
+        ctx.moveTo(x + sx * r * 0.6, y + (k - 0.5) * r * 0.8);
+        ctx.lineTo(x + sx * r * 1.3, y + (k - 0.5) * r * 1.6);
+      }
+      ctx.stroke();
+      return;
+    }
+    case "rabbit": {                       // 兔子：椭圆身 + 长耳
+      ctx.beginPath(); ctx.ellipse(x, y + r * 0.2, r * 0.8, r * 0.6, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(x - r * 0.25, y - r * 0.75, r * 0.18, r * 0.5, -0.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(x + r * 0.25, y - r * 0.75, r * 0.18, r * 0.5, 0.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      return;
+    }
+    case "wolf": case "boar": {            // 狼/野猪：长身 + 头
+      ctx.beginPath(); ctx.ellipse(x, y, r * 1.2, r * 0.75, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x + r * 0.9, y - r * 0.25, r * 0.45, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      return;
+    }
+    case "villager": {                     // 村民：身体 + 头
+      ctx.fillRect(x - r * 0.6, y - r * 0.2, r * 1.2, r * 1.2);
+      ctx.strokeRect(x - r * 0.6, y - r * 0.2, r * 1.2, r * 1.2);
+      ctx.beginPath(); ctx.arc(x, y - r * 0.6, r * 0.45, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      return;
+    }
+    default: {                             // 默认：矩形（shape=1）或圆形
+      if (shape === 1) {
+        ctx.fillRect(x - hw, y - hh, w, h);
+        ctx.strokeRect(x - hw, y - hh, w, h);
+      } else {
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      }
+      return;
+    }
   }
 }
 
@@ -855,6 +1232,10 @@ function frame() {
   }
   const list = collectEntities();
   const selfEnt = p ? list.find((e) => e.id === p.entityId) : undefined;
+  // 实体绘制：只画同层实体（异层不画）；同层内自己最后画（压在最上层）
+  const myLevel = selfEnt ? levelOf(selfEnt) : 0;
+  const drawList = list.filter((e) => levelOf(e) === myLevel);
+  if (p) drawList.sort((a, b) => (a.id === p.entityId ? 1 : 0) - (b.id === p.entityId ? 1 : 0));
   // 相机：自身实体居中（不做边界钳制，规格 §P1-7）；可视尺寸 = 画布 CSS 像素 / ZOOM，缩放比不随窗口变
   const viewW = canvas.width / ZOOM, viewH = canvas.height / ZOOM;
   if (selfEnt) {
@@ -880,7 +1261,7 @@ function frame() {
       ctx.drawImage(mapCanvas, vx0, vy0, vx1 - vx0, vy1 - vy0, vx0, vy0, vx1 - vx0, vy1 - vy0);
     }
   }
-  for (const e of list) drawEntity(e);
+  for (const e of drawList) drawEntity(e);
   ctx.setTransform(1, 0, 0, 1, 0, 0); // 复位：夜幕遮罩与暖光在屏幕空间合成
 
   // ---- 昼夜氛围：入夜叠深蓝遮罩 + 以自身为中心挖暖色光圈
@@ -972,22 +1353,27 @@ function slotKind(slot) {
 function useSelected() {
   const kind = slotKind(selectedSlot);
   if (!kind) { log("选中槽为空"); return; }
-  if (kind.endsWith("_kit")) { log(`${kind} 是放置套件，按 B 放置`); return; }
-  // 启发式分类（见 TOOL_KINDS 注释）：工具/武器→equip，其余→consume
-  if (TOOL_KINDS.has(kind)) {
+  // 分类依据物品静态表（见 ITEM_TABLE 注释）：放置套件→提示 B；工具/武器/护甲→equip；
+  // 可食物→consume；材料既不可用也不可吃，只提示（consume 必然失败且无回执，坑 K4）。
+  if (PLACE_KINDS.has(kind) || kind.endsWith("_kit")) { log(`${itemName(kind)} 是放置套件，按 B 放置`); return; }
+  if (EQUIP_KINDS.has(kind)) {
     sendCommand({ type: "equip", slot: selectedSlot });
-    log(`装备 ${kind}（槽 ${selectedSlot}）`);
-  } else {
-    sendCommand({ type: "consume", slot: selectedSlot });
-    log(`食用/使用 ${kind}（槽 ${selectedSlot}）`);
+    log(`装备 ${itemName(kind)}（槽 ${selectedSlot}）`);
+    return;
   }
+  if (CONSUMABLE_KINDS.has(kind)) {
+    sendCommand({ type: "consume", slot: selectedSlot });
+    log(`食用/使用 ${itemName(kind)}（槽 ${selectedSlot}）`);
+    return;
+  }
+  log(`${itemName(kind)} 是材料，无法直接使用`);
 }
 
 function dropSelected() {
   const kind = slotKind(selectedSlot);
   if (!kind) { log("选中槽为空"); return; }
   sendCommand({ type: "drop", slot: selectedSlot });
-  log(`丢弃 ${kind}（槽 ${selectedSlot}）`);
+  log(`丢弃 ${itemName(kind)}（槽 ${selectedSlot}）`);
 }
 
 function placeSelected() {
@@ -1001,7 +1387,7 @@ function placeSelected() {
   const tx = Math.round(x + facing.x * PLACE_DIST);
   const ty = Math.round(y + facing.y * PLACE_DIST);
   sendCommand({ type: "place", slot: selectedSlot, x: tx, y: ty });
-  log(`放置 ${kind} → (${tx}, ${ty})`);
+  log(`放置 ${itemName(kind)} → (${tx}, ${ty})`);
 }
 
 function deconstructNearest() {
@@ -1009,10 +1395,10 @@ function deconstructNearest() {
   if (!selfEnt) { log("自身实体未同步"); return; }
   const sx = num(selfEnt, "Transform.x"), sy = num(selfEnt, "Transform.y");
   if (sx === undefined || sy === undefined) return;
-  // 从可见实体表找最近 Placeable.* 建筑（规格 §P3）
+  // 从可见实体表找最近可拆除建造物（按 Placeable/合成站组件判定，不依赖 classify 分类）
   let best = null, bestD = Infinity;
   for (const e of collectEntities()) {
-    if (classify(e) !== "building" && classify(e) !== "station") continue;
+    if (!isBuildableEntity(e)) continue;
     const ex = num(e, "Transform.x"), ey = num(e, "Transform.y");
     if (ex === undefined || ey === undefined) continue;
     const d = Math.hypot(ex - sx, ey - sy);
@@ -1021,6 +1407,151 @@ function deconstructNearest() {
   if (!best) { log("附近没有可拆除的建筑"); return; }
   sendCommand({ type: "deconstruct", target: best.id });
   log(`拆除最近建筑（NetworkId=${best.id}，距离 ${Math.round(bestD)}px）`);
+}
+
+/* ---------- 背包内换槽：transfer{slot,toSlot}（同背包两槽原子交换/移动） ---------- */
+function moveSlotTo(slot, toSlot) {
+  if (!Number.isInteger(slot) || !Number.isInteger(toSlot)) { log("槽位参数无效"); return; }
+  if (slot === toSlot) { log("源槽与目标槽相同"); return; }
+  sendCommand({ type: "transfer", slot, toSlot });
+  log(`换槽 ${slot} → ${toSlot}`);
+}
+
+/* ---------- 容器取回：transfer{target,slot}（target=容器 networkId） ---------- */
+// 客户端的距离提示阈值：镜像服务端配置（rules/place.json 的 containerRange
+// 缺省 64px、rules/crafting.json 的 stationRange 当前 64px）。
+// 超出服务端静默拒绝且无回执，客户端先做距离提示，避免空发命令。
+const CONTAINER_RANGE = 64;  // 容器（尸体等）交互距离上限
+const STATION_RANGE = 64;    // 合成/加燃料站点交互距离上限
+// 从容器实体（尸体等）的指定槽取回物品到本人背包；服务端校验同图/同层/距离。
+function lootFromContainer(containerNetworkId, slot) {
+  if (!Number.isInteger(containerNetworkId) || containerNetworkId <= 0) { log("容器 id 无效"); return; }
+  if (!Number.isInteger(slot) || slot < 0) { log("容器槽位无效"); return; }
+  sendCommand({ type: "transfer", target: containerNetworkId, slot });
+  log(`搜刮容器 NetworkId=${containerNetworkId} 槽 ${slot}`);
+}
+
+// 容器实体判定：kind=corpse，或带 Inventory 槽位（非玩家实体）
+function isContainerEntity(e) {
+  const k = kindOf(e);
+  if (k === "corpse") return true;
+  if (k === "player") return false;
+  return !!(e.stringValues?.has("Inventory.0.kind") || e.values?.has("Inventory.0.kind"));
+}
+
+// 最近的容器实体（尸体优先，其次任意带背包的容器）
+function findNearestContainer() {
+  const selfEnt = selfEntity();
+  if (!selfEnt) return null;
+  const sx = num(selfEnt, "Transform.x"), sy = num(selfEnt, "Transform.y");
+  if (sx === undefined || sy === undefined) return null;
+  let best = null, bestD = Infinity;
+  for (const e of collectEntities()) {
+    if (!isContainerEntity(e)) continue;
+    const ex = num(e, "Transform.x"), ey = num(e, "Transform.y");
+    if (ex === undefined || ey === undefined) continue;
+    const d = Math.hypot(ex - sx, ey - sy);
+    if (d < bestD) { bestD = d; best = e; }
+  }
+  return best;
+}
+
+// 键位入口：搜刮最近容器（逐槽取回非空槽位；失败无回执，以背包状态为准）
+function lootNearestContainer() {
+  const target = findNearestContainer();
+  if (!target) { log("附近没有可搜刮的容器"); return; }
+  const selfEnt = selfEntity();
+  const sx = num(selfEnt, "Transform.x"), sy = num(selfEnt, "Transform.y");
+  const tx = num(target, "Transform.x"), ty = num(target, "Transform.y");
+  if (sx === undefined || sy === undefined || tx === undefined || ty === undefined) return;
+  const dist = Math.hypot(tx - sx, ty - sy);
+  if (dist > CONTAINER_RANGE) { log(`容器太远（${Math.round(dist)}px > ${CONTAINER_RANGE}px），走近再搜刮`); return; }
+  let n = 0;
+  for (let i = 0; i < 16; i++) {
+    const kind = str(target, `Inventory.${i}.kind`);
+    const count = num(target, `Inventory.${i}.count`);
+    if (!kind || !count) continue;
+    lootFromContainer(target.id, i);
+    n++;
+  }
+  if (n === 0) log("容器是空的");
+}
+
+/* ---------- 取消延时制作：craft-cancel{recipe} ---------- */
+function cancelCraft(recipe) {
+  if (!recipe) { log("未指定合成配方"); return; }
+  sendCommand({ type: "craft-cancel", recipe });
+  log(`取消合成：${recipe}`);
+}
+
+// 键位入口：取消自己当前进行中的合成（取 Crafting.0.recipeId）
+function cancelCurrentCraft() {
+  const selfEnt = selfEntity();
+  if (!selfEnt) { log("自身实体未同步"); return; }
+  for (let i = 0; i < 8; i++) {
+    const recipe = str(selfEnt, `Crafting.${i}.recipeId`);
+    if (!recipe) continue;
+    cancelCraft(recipe);
+    return;
+  }
+  log("当前没有进行中的合成");
+}
+
+/* ---------- 加燃料：refuel{target}（target=站点 networkId） ---------- */
+function refuelStation(networkId) {
+  if (!Number.isInteger(networkId) || networkId <= 0) { log("站点 id 无效"); return; }
+  sendCommand({ type: "refuel", target: networkId });
+  log(`加燃料 NetworkId=${networkId}`);
+}
+
+// 键位入口：给最近的燃料型站点加燃料
+function refuelNearestStation() {
+  const selfEnt = selfEntity();
+  if (!selfEnt) { log("自身实体未同步"); return; }
+  const sx = num(selfEnt, "Transform.x"), sy = num(selfEnt, "Transform.y");
+  if (sx === undefined || sy === undefined) return;
+  let best = null, bestD = Infinity;
+  for (const e of collectEntities()) {
+    if (!has(e, "LightSource.radius") && !has(e, "LightSource.fuelRemainingMs")) continue;
+    const ex = num(e, "Transform.x"), ey = num(e, "Transform.y");
+    if (ex === undefined || ey === undefined) continue;
+    const d = Math.hypot(ex - sx, ey - sy);
+    if (d < bestD) { bestD = d; best = e; }
+  }
+  if (!best) { log("附近没有可加燃料的站点"); return; }
+  // 服务端加油射程＝crafting.json 的 stationRange，超出静默拒绝
+  if (bestD > STATION_RANGE) { log(`站点太远（${Math.round(bestD)}px > ${STATION_RANGE}px），走近再加燃料`); return; }
+  refuelStation(best.id);
+}
+
+/* ---------- 投掷：throw{x,y}（世界坐标瞄准点） ---------- */
+function throwAt(x, y) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) { log("投掷坐标无效"); return; }
+  sendCommand({ type: "throw", x, y });
+  log(`投掷 → (${Math.round(x)}, ${Math.round(y)})`);
+}
+
+// 键位入口：瞄准最近的敌怪投掷；无目标则朝面朝方向投掷
+function throwAtTarget() {
+  const selfEnt = selfEntity();
+  if (!selfEnt) { log("自身实体未同步"); return; }
+  const sx = num(selfEnt, "Transform.x"), sy = num(selfEnt, "Transform.y");
+  if (sx === undefined || sy === undefined) return;
+  let best = null, bestD = Infinity;
+  for (const e of collectEntities()) {
+    const cls = classify(e);
+    if (cls !== "enemy" && cls !== "boss") continue;
+    const ex = num(e, "Transform.x"), ey = num(e, "Transform.y");
+    if (ex === undefined || ey === undefined) continue;
+    const d = Math.hypot(ex - sx, ey - sy);
+    if (d < bestD) { bestD = d; best = e; }
+  }
+  if (best) {
+    throwAt(num(best, "Transform.x"), num(best, "Transform.y"));
+    return;
+  }
+  // 无目标：朝面朝方向投掷（距离同放置 32px）
+  throwAt(sx + facing.x * PLACE_DIST, sy + facing.y * PLACE_DIST);
 }
 
 function toggleCraftPanel() {
@@ -1048,6 +1579,12 @@ window.addEventListener("keydown", (ev) => {
     case "c": toggleCraftPanel(); break;
     case "b": placeSelected(); break;
     case "x": deconstructNearest(); break;
+    // —— 本轮新增键位（命令已接线，面板后续再做）——
+    case "r": lootNearestContainer(); break;   // 搜刮最近容器
+    case "y": cancelCurrentCraft(); break;     // 取消进行中的合成
+    case "u": refuelNearestStation(); break;   // 给最近站点加燃料
+    case "q": throwAtTarget(); break;          // 朝最近敌怪投掷
+    case "k": moveSlotTo(selectedSlot, (selectedSlot + 1) % DEFAULT_SLOT_COUNT); break; // 与下一槽换位
   }
 });
 window.addEventListener("keyup", (ev) => {
@@ -1115,19 +1652,20 @@ function refreshCraftPanel(selfEnt) {
     const ok = r.in.every(([k, c]) => (totals[k] || 0) >= c);
     const cell = document.createElement("div");
     cell.className = "recipeCell" + (ok ? "" : " locked") + (r.id === selectedRecipe ? " sel" : "");
-    cell.textContent = r.out.map(([k, c]) => (c > 1 ? `${k}×${c}` : k)).join(" + ");
+    cell.textContent = r.out.map(([k, c]) => (c > 1 ? `${itemName(k)}×${c}` : itemName(k))).join(" + ");
     cell.title = r.id;
     cell.addEventListener("click", () => { selectedRecipe = r.id; refreshCraftPanel(selfEntity()); });
     recipeGridEl.appendChild(cell);
   }
   // 详情区
   const r = RECIPES.find((x) => x.id === selectedRecipe) || RECIPES[0];
-  craftNameEl.textContent = `${r.out.map(([k, c]) => `${k}×${c}`).join(" + ")} ［${r.id}］`;
+  craftNameEl.textContent = `${r.out.map(([k, c]) => `${itemName(k)}×${c}`).join(" + ")} ［${r.id}］`;
   craftDescEl.textContent = RECIPE_DESC[r.id] || "——";
   craftMatsEl.innerHTML = r.in.map(([k, c]) => {
     const have = totals[k] || 0;
-    return `<span class="mat ${have >= c ? "ok" : "lack"}">${k} ${have}/${c}</span>`;
-  }).join("") + (r.station ? `<span class="mat station">需光源站点（类型 ${r.station}）</span>` : "");
+    return `<span class="mat ${have >= c ? "ok" : "lack"}">${itemName(k)} ${have}/${c}</span>`;
+  }).join("") + (r.station ? `<span class="mat station">需光源站点（类型 ${r.station}）</span>` : "") +
+    (r.dur ? `<span class="mat">延时 ${r.dur} tick</span>` : "");
   craftBuildEl.onclick = () => {
     sendCommand({ type: "craft", recipe: r.id }); // craft 命令只发 recipe id
     log(`合成请求：${r.id}（失败无回执，以背包状态为准）`);
@@ -1203,9 +1741,11 @@ function buildHotbar(selfEnt) {
   slots.forEach((s, i) => {
     const d = document.createElement("div");
     d.className = "slot" + (s.kind ? "" : " empty") + (i === selectedSlot ? " sel" : "");
-    d.title = s.kind || "空";
+    d.title = s.kind ? `${itemName(s.kind)}（${s.kind}）` : "空";
+    // 中文名 + 色标圆点（物品静态表）；原始 kind 保留在 title 里
     d.innerHTML = `<span class="key">${SLOT_KEY_LABELS[i] ?? i}</span>` +
-      (s.kind ? `<span class="kind">${s.kind}</span>` +
+      (s.kind ? `<span class="dot" style="background:${itemColor(s.kind)}"></span>` +
+        `<span class="kind">${itemName(s.kind)}</span>` +
         (s.count > 1 ? `<span class="cnt">${s.count}</span>` : "") : "");
     d.addEventListener("click", () => { selectedSlot = i; });
     invBarEl.appendChild(d);
@@ -1218,9 +1758,10 @@ function buildHotbar(selfEnt) {
     const kind = selfEnt && idx >= 0 ? (str(selfEnt, `Inventory.${idx}.kind`) || "") : "";
     const d = document.createElement("div");
     d.className = "slot eq" + (kind ? "" : " empty");
-    d.title = `${eq.label}${kind ? "：" + kind : "（空）"}`;
+    d.title = `${eq.label}${kind ? "：" + itemName(kind) + "（" + kind + "）" : "（空）"}`;
     d.innerHTML = `<span class="eqTag">${eq.tag}</span>` +
-      (kind ? `<span class="kind">${kind}</span>` : "");
+      (kind ? `<span class="dot" style="background:${itemColor(kind)}"></span>` +
+        `<span class="kind">${itemName(kind)}</span>` : "");
     if (idx >= 0) d.addEventListener("click", () => { selectedSlot = idx; });
     equipBarEl.appendChild(d);
   }
@@ -1283,6 +1824,18 @@ function updateHud() {
 
   const selfEnt = selfEntity();
 
+  // ---- 角色身份：自己的 entityId 存 localStorage（断线重连复用）+ 状态栏角色标记 ----
+  if (p.entityId && p.entityId !== lastEntityId) {
+    lastEntityId = p.entityId;
+    localStorage.setItem(LS_NETWORK_ID, String(p.entityId));
+    // 服务端复用了同一个 networkId ⇒ 断线保留期内恢复了原角色
+    restoredRole = requestedNetworkId != null && requestedNetworkId === p.entityId;
+    setStatus(`已连接 · sessionId=${room.sessionId} · ${restoredRole ? "已恢复角色" : "新角色"}`);
+    log(restoredRole
+      ? `已恢复角色（NetworkId=${p.entityId}）`
+      : `新角色（NetworkId=${p.entityId}）`);
+  }
+
   // ---- 昼夜钟：hour/phase 驱动指针；「第 N 天」本地近似（非协议字段） ----
   {
     const hour = room.state.hour ?? 0;
@@ -1295,6 +1848,8 @@ function updateHud() {
     const mm = String(Math.floor((hour % 1) * 60)).padStart(2, "0");
     clockTextEl.textContent = `${hh}:${mm} ${phase === 1 ? "🌙 夜" : "☀ 昼"}`;
     mapIdTextEl.textContent = p.mapId || "—";
+    // 当前层号（EntityState.level；找不到自身实体时按 0）
+    levelTextEl.textContent = `层 L${selfLevel()}`;
   }
 
   // ---- 状态徽章组（HP + Needs 液位徽章） ----
