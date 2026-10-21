@@ -12,7 +12,7 @@
 import { hasComponent } from "bitecs";
 import type { GameWorld } from "framework/world";
 import { Player } from "framework/components/tags";
-import { settle, type SettleTerms } from "framework/economy/settle";
+import { settle, type SettleTerms, type TransferAmount } from "framework/economy/settle";
 
 /** 报价会话状态：pending 协商中 / settled 已结算 / cancelled 已作废 / expired 已过期。 */
 export type OfferStatus = "pending" | "settled" | "cancelled" | "expired";
@@ -23,6 +23,12 @@ export interface OfferSession {
   id: number;
   /** 交易条款（openOffer 时结构化克隆，防调用方后续改动）。 */
   terms: SettleTerms;
+  /**
+   * 发起方 eid（发起本次报价的一方；缺省取条款首方）。
+   *
+   * 摘要输出（协议层）以发起方为视角（给出/收取），故单独记录。
+   */
+  initiator: number;
   /** 创建时的 tick。 */
   createdAtTick: number;
   /** 过期 tick（缺省永不过期；tick ≥ 该值即作废）。 */
@@ -39,20 +45,31 @@ export interface OpenOfferOptions {
   confirmedParties?: number[];
   /** 过期 tick（缺省永不过期）。 */
   expiresTick?: number;
+  /** 发起方 eid（缺省取条款首方；摘要输出以该方为视角）。 */
+  initiator?: number;
 }
 
-/** 判断交易数量条目结构是否合法（容器种类/物品 kind/正整数数量）。 */
+/** 交易数量条目结构是否合法（容器种类可缺省→默认 inventory / kind / 正整数数量）。 */
 function isValidAmount(amount: unknown): boolean {
   if (!amount || typeof amount !== "object") return false;
   const a = amount as { container?: unknown; kind?: unknown; count?: unknown };
   return (
-    (a.container === "inventory" || a.container === "ledger") &&
+    (a.container === undefined || a.container === "inventory" || a.container === "ledger") &&
     typeof a.kind === "string" &&
     a.kind.length > 0 &&
     typeof a.count === "number" &&
     Number.isInteger(a.count) &&
     a.count > 0
   );
+}
+
+/** 数量条目归一：缺省容器 → inventory（协议层允许省略 container 字段）。 */
+function normalizeAmount(amount: TransferAmount): TransferAmount {
+  return {
+    container: amount.container ?? "inventory",
+    kind: amount.kind,
+    count: amount.count,
+  };
 }
 
 /** 判断单方条款结构是否合法（party 正整数 eid；give/take 缺省或合法数组）。 */
@@ -77,6 +94,11 @@ export function isValidSettleTerms(terms: unknown): terms is SettleTerms {
 /** 判断实体是否玩家（有 Player 标签即需显式确认；无玩家确认通道的方即时成立）。 */
 function isPlayerEntity(world: GameWorld, eid: number): boolean {
   return hasComponent(world, eid, Player);
+}
+
+/** 缺省发起方：条款首方（调用方未显式指定 initiator 时）。 */
+function defaultInitiator(terms: SettleTerms): number {
+  return terms[0]?.party ?? 0;
 }
 
 /** 会话是否已全部确认。 */
@@ -114,7 +136,14 @@ export function openOffer(
 
   const session: OfferSession = {
     id: world.nextOfferId++,
-    terms: structuredClone(terms),
+    terms: structuredClone(
+      terms.map((party) => ({
+        ...party,
+        give: party.give?.map(normalizeAmount),
+        take: party.take?.map(normalizeAmount),
+      })),
+    ),
+    initiator: opts?.initiator ?? defaultInitiator(terms),
     createdAtTick: world.time.tick,
     expiresTick: opts?.expiresTick,
     confirmed: new Set<number>(),

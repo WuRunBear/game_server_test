@@ -36,7 +36,7 @@ export { createGameSimulation, GameSimulation } from "framework/simulation/GameS
 export type { SimulationPort } from "framework/simulation/SimulationPort";
 export type {
   PlayerInput, PlayerJoinResult, TickSnapshot, TickResult, DebugSnapshotOptions, PlayerCommand, EntitySnapshot,
-  SimulationOptions,
+  SimulationOptions, OfferSummary,
 } from "framework/simulation/types";
 export { registerAosSyncAdapter, getAosSyncAdapter, type AosSyncAdapter, type AosSyncOutput } from "framework/simulation/aosSyncAdapters";
 export { computeInterest } from "framework/simulation/interest";
@@ -181,3 +181,24 @@ export {
   type RuleModule,
   type RuleModuleEntry,
 } from "framework/api";
+
+// 内容目录（`GET /content` 端点数据源）与展示名登记表
+export {
+  buildContentCatalog,
+  QUEST_STATE_NONE,
+  type ContentCatalog,
+  type ContentItem,
+  type ContentRecipe,
+  type ContentQuest,
+  type ContentAchievement,
+  type ContentPhase,
+  type ContentSkill,
+} from "framework/content/catalog";
+export {
+  registerContentLabel,
+  contentLabelOf,
+  resolveContentLabel,
+  itemLabelOf,
+  resetContentLabels,
+  type ContentLabelScope,
+} from "framework/content/labels";

@@ -8,9 +8,89 @@
  * 地图/实体数据已按玩家拆分：地图 id 在 PlayerState.mapId（per-player maps），
  * 实体同步恒走 per-client 可见表（PlayerState.visibleEntities）。
  */
-import { MapSchema, Schema, type } from "@colyseus/schema";
+import { MapSchema, Schema, StateView, type, view, $filter } from "@colyseus/schema";
 
 import { PlayerState } from "./PlayerState";
+
+/**
+ * 报价摘要表（RoomState.offers 的容器）——按会话相关方做 per-client 可见性裁剪。
+ *
+ * 语义：
+ * - key = 报价会话 id（字符串形式）；value = 条款摘要 JSON 字符串
+ *   （形如 `{"from":<networkId>,"to":<networkId>,"give":[["<kind>",<count>]],
+ *   "take":[["<kind>",<count>]]}`，from/to 为参与方 networkId，视角以发起方
+ *   为基准）；
+ * - **非参与玩家看不到该条**：条目按「本连接是否为该报价的参与方」逐条过滤
+ *   （`$filter` 静态钩子 + 房间侧维护的「会话 → 可见 sessionId 集合」）。
+ *
+ * 过滤机制与 PlayerState.visibleEntities 同源（Colyseus 的 `@view()` 过滤字段）：
+ * - `@view()` 声明的字段不进共享缓存，只走 per-client 编码；
+ * - `$filter` 在 per-client 编码时逐条询问「这条对该连接可见吗」。
+ *
+ * 与 visibleEntities 的差异：visibleEntities 是**每个玩家一份**表（过滤在
+ * 表实例级），本表是**房间一份**表（过滤在条目级）——因此可见性集合由房间
+ * 侧按「参与方 networkId → sessionId」换算后写入本表。
+ */
+export class OfferSummaries extends MapSchema<string> {
+  /**
+   * 报价会话 id → 可见该条的 sessionId 集合（服务端按参与方维护）。
+   *
+   * 键为 offerId 字符串；值为可见 sessionId 集合（空集 = 谁都看不到）。
+   */
+  visibleSessionsByOffer = new Map<string, Set<string>>();
+
+  /**
+   * 该报价条目是否对给定连接可见。
+   *
+   * @param offerId 报价会话 id（字符串）
+   * @param sessionId 连接 sessionId
+   */
+  isVisibleTo(offerId: string, sessionId: string): boolean {
+    return this.visibleSessionsByOffer.get(offerId)?.has(sessionId) ?? false;
+  }
+
+  /**
+   * 覆盖某报价的可见连接集合（房间侧每帧按最新参与方重算）。
+   */
+  setVisibleSessions(offerId: string, sessionIds: Iterable<string>): void {
+    this.visibleSessionsByOffer.set(offerId, new Set(sessionIds));
+  }
+
+  /**
+   * 追加一个可见连接（不覆盖既有集合）。
+   *
+   * 用途：新连接加入时立即登记其可见条目——否则该连接的**初始全量状态**
+   * 里看不到既有条目（条目的 ADD 操作早于其加入，已在其他广播中编码过）。
+   */
+  addVisibleSession(offerId: string, sessionId: string): void {
+    let sessions = this.visibleSessionsByOffer.get(offerId);
+    if (!sessions) {
+      sessions = new Set<string>();
+      this.visibleSessionsByOffer.set(offerId, sessions);
+    }
+    sessions.add(sessionId);
+  }
+
+  /** 移除某报价的可见性登记（报价结束/条目删除时调用）。 */
+  clearVisibleSessions(offerId: string): void {
+    this.visibleSessionsByOffer.delete(offerId);
+  }
+
+  /**
+   * 逐条过滤钩子（Colyseus per-client 编码时调用）。
+   *
+   * - 无 view（共享编码通路）→ false：该表只走 per-client 通路（不落共享缓存）；
+   * - 有 view → 按「该条目对该 sessionId 是否可见」判定。
+   */
+  static [$filter](ref: OfferSummaries, index: number, view: StateView | undefined): boolean {
+    if (!view) return false;
+    const sessionId = (view as unknown as { sessionId?: string }).sessionId;
+    if (!sessionId) return false;
+    const offerId = ref.getIndex(index);
+    if (offerId === undefined) return false;
+    return ref.isVisibleTo(offerId, sessionId);
+  }
+}
 
 /**
  * 单房间的可同步状态（客户端通过 Colyseus 自动接收增量更新）。
@@ -44,4 +124,36 @@ export class RoomState extends Schema {
    */
   @type({ map: PlayerState })
   players: MapSchema<PlayerState> = new MapSchema<PlayerState>();
+
+  /**
+   * 当前天气 id（来自环境派生：environmentAt(world).weatherId）。
+   *
+   * 天气 id 是**配置字符串**（由 game/ 的环境规则定义），框架只做透传，
+   * 不解释其含义；无环境规则时为空串。
+   */
+  @type("string")
+  weatherId: string = "";
+
+  /**
+   * 当前相位 id（来自环境派生：environmentAt(world).phaseId）。
+   *
+   * 相位 id 同样是配置字符串（框架不解释语义）；无环境规则时为空串。
+   */
+  @type("string")
+  phaseId: string = "";
+
+  /**
+   * 当前相位内进度 [0,1)（来自环境派生：environmentAt(world).progress）。
+   */
+  @type("number")
+  phaseProgress: number = 0;
+
+  /**
+   * 进行中的报价摘要表（key=报价会话 id 字符串，value=摘要 JSON 字符串）。
+   *
+   * 逐条按参与方过滤：只有报价的发起方/接收方能看到该条，其他玩家看不到。
+   */
+  @view()
+  @type({ map: "string" })
+  offers: OfferSummaries = new OfferSummaries();
 }

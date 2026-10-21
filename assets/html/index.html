@@ -35,6 +35,22 @@
        技能（Progression.skill.<id>.xp/level）、已解锁成就（Achievements.<id>=1），
        新解锁弹一次 toast（首轮同步只建基线不弹）；
     ⑫ 任务面板改用中文任务名（静态表 ← game/quests/quests.json）。
+    本轮改动【环境与联机扩展】（协议内核与既有键位不变）：
+    ⑬ 天气/季节：读 RoomState.weatherId/phaseId/phaseProgress —— HUD 显示季节名与天气，
+       雨/雾/风暴用 Canvas 粒子 + 屏幕色调表现（轻量，不糊可读性），clear 无效果；
+       积雪按相位近似（/content 的 phases 天气权重 × phaseProgress，纯视觉、客户端本地算）；
+    ⑭ 配方解锁判定：unlock.condition=inPhase:* 时用 phaseId 真实判断是否解锁
+       （替换上一轮的静态提示文案）；progressAtLeast:* 仍只作提示（服务端裁决）；
+    ⑮ 对话正文：显示 Dialogue.text 与 Dialogue.option.<i>.text 选项文案
+       （旧键 Dialogue.<i>.option 保留为兜底）；
+    ⑯ 内容表 /content：启动时与连上后各拉一次，替换内置物品/配方/成就/任务/技能/相位静态表
+       （拉取失败回退内置静态表）；耐久上限改从 /content 取（不再靠内置表）；
+    ⑰ 冷却显示：读 Cooldown.remainingMs，武器槽显示剩余冷却秒数（本地计时作兜底）；
+    ⑱ P2P 交易：V 键打开「交易」面板（附近玩家 + 「我给」「我要」+ 发送报价），
+       RoomState.offers 下发报价摘要 → 面板显示「接受/取消」
+       （offer-accept / offer-cancel，offerId 用 map 键原值字符串）；
+    ⑲ 地图自动刷新：每 ~5 秒查 /maps/meta，version 变化则重拉 /maps/runtime 并重绘
+       （写回焦土等变化可见）。
   保留不动：视觉风格与 DOM 结构、地图拉取与校验、input 发送循环
   （50ms / seq 递增 / 32px/s / 边沿触发）、既有 command 键位与载荷形状、
   K1 空壳兜底、me() 判空、服务端权威（无预测/插值）。
@@ -127,6 +143,11 @@
     display: flex; flex-direction: column; align-items: center; gap: 6px; }
   #clockCanvas { width: 96px; height: 96px; filter: drop-shadow(0 3px 6px rgba(0,0,0,.6)); }
   #clockText { font-size: 12px; color: var(--ink-dim); letter-spacing: 1px; text-shadow: 0 1px 2px #000; }
+  /* 季节与天气（RoomState.weatherId / phaseId / phaseProgress） */
+  #weatherText { font-size: 12px; color: var(--beige); letter-spacing: 1px; text-shadow: 0 1px 2px #000; }
+  #phaseBar { width: 96px; height: 5px; border-radius: 3px; background: #141009;
+    border: 1px solid var(--beige-dim); overflow: hidden; }
+  #phaseBar i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, #6a7a4a, #b9c98e); }
   #badges { display: flex; flex-direction: column; gap: 8px; align-items: center; }
   /* 圆形液位徽章：深色圆底 + 米色描边，内部自底向上液位填充，中心图标 + 数字 */
   .badge { position: relative; width: 46px; height: 46px; border-radius: 50%;
@@ -233,6 +254,10 @@
   #dlgTitle { padding: 7px 12px 5px; font-weight: bold; color: var(--beige);
     letter-spacing: 2px; font-size: 14px; border-bottom: 1px solid rgba(201,182,137,.3); }
   #dlgOptions { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 12px; }
+  /* 对话正文（Dialogue.text：当前节点正文；无正文时隐藏） */
+  #dlgText { padding: 8px 14px 2px; font-size: 13px; line-height: 1.65; color: var(--ink);
+    border-bottom: 1px dashed rgba(201,182,137,.22); margin-bottom: 4px; }
+  #dlgText:empty { display: none; }
   #dlgOptions button { text-align: left; background: #2c2216; border: 1px solid var(--beige-dim);
     color: var(--ink); padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; }
   #dlgOptions button:hover { background: #3d2f1e; border-color: var(--beige); }
@@ -265,6 +290,46 @@
   .slot .cnt { position: absolute; right: 3px; bottom: 1px; font-size: 11px; font-weight: bold;
     color: #f3e9cf; text-shadow: 0 1px 2px #000; }
   .slot .eqTag { position: absolute; top: 1px; left: 3px; font-size: 9px; color: var(--beige-dim); }
+  /* 冷却读秒（Cooldown.remainingMs，服务端权威；本地计时仅兜底） */
+  .slot .cdText { position: absolute; top: 1px; right: 3px; font-size: 10px; color: #e0b45e;
+    text-shadow: 0 1px 2px #000; }
+  .slot.cooling { filter: grayscale(.45) brightness(.85); }
+
+  /* ---------- 交易面板（P2P 报价：附近玩家 + 我给/我要 + 报价收件箱） ---------- */
+  #trade { position: fixed; right: 196px; bottom: 128px; z-index: 30; width: 320px;
+    max-height: 52vh; display: flex; flex-direction: column; }
+  #tradeBody { padding: 8px 12px 6px; overflow-y: auto; flex: 1 1 auto; min-height: 0;
+    font-size: 12px; }
+  .tradeRow { display: flex; align-items: center; gap: 6px; padding: 3px 0;
+    border-bottom: 1px dashed rgba(201,182,137,.18); line-height: 1.4; }
+  .tradeRow:last-child { border-bottom: none; }
+  .tradeName { flex: 1 1 auto; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tradeDist { color: var(--ink-dim); font-size: 11px; flex: none; }
+  .tradeList { min-height: 16px; padding: 2px 0 4px; }
+  .tradeList:empty::after { content: "（空）"; color: var(--ink-dim); font-size: 11px; }
+  .tradeCols { display: flex; gap: 8px; margin-top: 2px; }
+  .tradeCol { flex: 1 1 0; min-width: 0; }
+  .tradeColTitle { color: var(--beige-dim); font-size: 10px; letter-spacing: 1px; margin-bottom: 3px; }
+  .tradePick { display: block; width: 100%; text-align: left; margin-bottom: 3px; padding: 2px 6px;
+    background: #20180f; border: 1px solid var(--beige-dim); color: var(--ink);
+    border-radius: 4px; cursor: pointer; font-size: 11px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .tradePick:hover { background: #3d2f1e; border-color: var(--gold); }
+  .tradePick.sel { border-color: var(--gold); color: var(--gold); }
+  #tradeFoot { display: flex; gap: 8px; padding: 6px 12px 10px; }
+  #tradeFoot button { flex: 1; background: #2c2216; border: 1px solid var(--beige-dim);
+    color: var(--ink); border-radius: 4px; padding: 4px 0; font-size: 12px; cursor: pointer; }
+  #tradeFoot button:hover { background: #3d2f1e; border-color: var(--beige); }
+  #tradeOffers { margin-bottom: 8px; border-bottom: 1px solid rgba(201,182,137,.35); padding-bottom: 6px; }
+  .offerBox { border: 1px solid var(--beige-dim); border-radius: 5px; padding: 5px 8px;
+    margin-bottom: 6px; background: #20180f; }
+  .offerBox.mine { border-color: #8a6a2a; }
+  .offerTitle { color: var(--beige); font-size: 12px; margin-bottom: 2px; }
+  .offerLine { font-size: 11px; color: var(--ink); line-height: 1.55; }
+  .offerBtns { display: flex; gap: 6px; margin-top: 5px; }
+  .offerBtns button { flex: 1; background: #2c2216; border: 1px solid var(--beige-dim);
+    color: var(--ink); border-radius: 4px; padding: 3px 0; font-size: 11px; cursor: pointer; }
+  .offerBtns button:hover { background: #3d2f1e; border-color: var(--gold); color: var(--gold); }
 
   /* ---------- 左下日志（小字半透明，不超过 4 行） ---------- */
   #log { position: fixed; left: 10px; bottom: 8px; z-index: 10; font-size: 11px;
@@ -355,6 +420,8 @@
 <div id="statusGroup" class="hidden">
   <canvas id="clockCanvas" width="96" height="96"></canvas>
   <div id="clockText">—</div>
+  <div id="weatherText">—</div>
+  <div id="phaseBar"><i></i></div>
   <div id="badges"></div>
   <div id="mapIdText">—</div>
   <div id="levelText">层 L0</div>
@@ -378,8 +445,9 @@
     <button id="craftRefuel" class="hidden">加 燃 料</button>
   </div>
   <div class="craft-note">
-    配方静态内嵌自 game/rules/crafting.json（协议不枚举配方，随配置漂移需手动同步）。
-    材料不足置暗仅为客户端提示，成败以服务端状态同步为准（命令失败无回执，坑 K4）。
+    配方表来自服务端 <code>GET /content</code>（拉取失败时用内置静态表兜底）。
+    材料不足置暗仅为客户端提示；解锁条件里 <code>inPhase:*</code> 按当前季节真实判断，
+    其余条件仍由服务端裁决（命令失败无回执，坑 K4）。
   </div>
 </div>
 
@@ -420,12 +488,49 @@
 <!-- 对话面板（规格 P3：自身实体存在 Dialogue.{i}.option 时渲染选项按钮） -->
 <div id="dlg" class="panel hidden">
   <div id="dlgTitle">对话</div>
+  <div id="dlgText"></div>
   <div id="dlgOptions"></div>
+</div>
+
+<!-- 交易面板（V 键：附近玩家 + 我给/我要 + 报价收件箱；offer 协议见协议 §2.2） -->
+<div id="trade" class="panel hidden">
+  <div class="panel-head"><span>交 易</span><button id="tradeClose">×</button></div>
+  <div id="tradeBody">
+    <div class="gSecTitle">报 价 收 件 箱</div>
+    <div id="tradeOffers"></div>
+    <div class="gSecTitle">附 近 玩 家</div>
+    <div id="tradePlayers"></div>
+    <div class="gSecTitle">报 价 条 款</div>
+    <div class="gRow"><span class="gDim">交易对象</span><span id="tradeTarget">未选择</span></div>
+    <div class="tradeColTitle">我 给</div>
+    <div id="tradeGive" class="tradeList"></div>
+    <div class="tradeColTitle">我 要</div>
+    <div id="tradeTake" class="tradeList"></div>
+    <div class="tradeCols">
+      <div class="tradeCol">
+        <div class="tradeColTitle">我 给（点背包物品）</div>
+        <div id="tradeMyItems"></div>
+      </div>
+      <div class="tradeCol">
+        <div class="tradeColTitle">我 要（点物品目录）</div>
+        <div id="tradeCatalog"></div>
+      </div>
+    </div>
+  </div>
+  <div id="tradeFoot">
+    <button id="tradeSend">发 送 报 价</button>
+    <button id="tradeClear">清 空</button>
+  </div>
+  <div class="craft-note">
+    报价命令 <code>offer{offer:[{party,give,take}]}</code>：party 为 networkId，
+    give/take 为 <code>[{kind,count}]</code>。对方确认用 <code>offer-accept{offerId}</code>，
+    撤销用 <code>offer-cancel{offerId}</code>。命令失败无回执，以背包变化为准。
+  </div>
 </div>
 
 <!-- 底部操作提示 + 热键条（12 背包槽 + 右端 3 装备槽） -->
 <div id="bottomWrap">
-  <div id="hint">WASD 移动 · E 采集 · 空格 攻击 · T 对话 · C 合成 · F 食用/装备 · G 丢弃 · B 放置 · X 拆除 · R 搜刮容器 · Y 取消合成 · U 加燃料 · Q 投掷（持投掷矛＝瞄准，Esc 取消） · K 换槽 · 1-9/0/-/= 选槽</div>
+  <div id="hint">WASD 移动 · E 采集 · 空格 攻击 · T 对话 · C 合成 · F 食用/装备 · G 丢弃 · B 放置 · X 拆除 · R 搜刮容器 · Y 取消合成 · U 加燃料 · Q 投掷（持投掷矛＝瞄准，Esc 取消） · V 交易 · K 换槽 · 1-9/0/-/= 选槽</div>
   <div id="hotbarRow">
     <div id="invBar"></div>
     <div id="equipBar"></div>
@@ -506,8 +611,10 @@ const GROUND_COLOR_FALLBACK = "#33352c";
  * in/out 形如 [kind, count]；station 为站点类型要求（0/缺省=通用，1=光源站点，见 crafting 配置）；
  * dur 为延时制作 tick 数（缺省=即时）。
  * 当前同步点：crafting.json 共 19 条配方（wood_axe … boss_cleaver）。
- * unlock = 配方的解锁条件串（crafting.json 的 unlock.condition），仅作中文提示，
- * 仍可点击——解锁与否由服务端裁决（命令失败无回执，坑 K4）。
+ * unlock = 配方的解锁条件串（crafting.json 的 unlock.condition）：
+ *   inPhase:* → 客户端用 RoomState.phaseId 真实判断是否解锁（见 unlockMet）；
+ *   其余条件（progressAtLeast 等）只能提示，最终由服务端裁决（命令失败无回执，坑 K4）。
+ * —— 本轮起：/content 的 recipes 到位后由服务端内容表接管，本表保留为兜底。
  * ==========================================================================*/
 const RECIPES = [
   { id: "wood_axe",       in: [["wood", 2]],                                 out: [["axe", 1]] },
@@ -572,22 +679,46 @@ const CATS = [
   { id: "build", ico: "🏠", label: "建筑" },
 ];
 
+/* ---------- 配方表读取（/content 优先，内置静态表兜底） ---------- */
+// 内置配方补上描述（RECIPE_DESC），统一用 desc 字段
+for (const r of RECIPES) if (!r.desc) r.desc = RECIPE_DESC[r.id] || "";
+// 生效配方表：/content 已加载则用它，否则用内置静态表
+function recipeList() {
+  return (CONTENT.loaded && CONTENT.recipes.length) ? CONTENT.recipes : RECIPES;
+}
+function recipeById(id) {
+  return recipeList().find((r) => r.id === id) || null;
+}
+// 配方分类：优先内置分类表；/content 新配方按产出物品的用途推导
+function recipeCategory(r) {
+  if (!r) return "tool";
+  if (RECIPE_CATS[r.id]) return RECIPE_CATS[r.id];
+  const outKind = Array.isArray(r.out) && r.out.length ? r.out[0][0] : "";
+  const cat = ITEM_TABLE[outKind]?.cat || "tool";
+  if (cat === "food") return "food";
+  if (cat === "place" || cat === "material") return "build";
+  return "tool";
+}
+
 /* ============================================================================
  * 物品静态表：⚠️ 静态内嵌自 game/items/*.json（当前 29 种），随配置漂移需手动同步！
  * name = 中文显示名；color = 色标（背包槽圆点 / 掉落物标签）；
  * cat  = 用途分类：tool 工具 / weapon 武器 / armor 护甲 / food 食物 /
  *                    material 材料 / place 放置套件；
  * consume = 配置里带 consume 段（可食用），否则 F 键只提示不可直接使用。
+ * —— 本轮起：/content 到位后，物品的**数据字段**（maxDurability / consume /
+ *    equip / place / throw 等）以服务端内容表为准，本表退化为「显示元数据 +
+ *    兜底数据」。中文名与色标不在 /content 内，仍由本表提供。
  * ==========================================================================*/
 const ITEM_TABLE = {
-  axe:              { name: "木斧",     color: "#8a6a3a", cat: "tool",     consume: false },
-  pickaxe:          { name: "镐",       color: "#7a7a86", cat: "tool",     consume: false },
-  stone_axe:        { name: "石斧",     color: "#6e7a8a", cat: "tool",     consume: false },
-  spear:            { name: "长矛",     color: "#9a7a4a", cat: "weapon",   consume: false },
-  throwing_spear:   { name: "投掷矛",   color: "#a08258", cat: "weapon",   consume: false },
-  shell_spear:      { name: "贝壳矛",   color: "#b8a882", cat: "weapon",   consume: false },
-  boss_cleaver:     { name: "巨兽剁刀", color: "#c04a3a", cat: "weapon",   consume: false },
-  shell_armor:      { name: "贝壳甲",   color: "#a89a78", cat: "armor",    consume: false },
+  axe:              { name: "木斧",     color: "#8a6a3a", cat: "tool",     consume: false, maxDurability: 60,  equip: true },
+  pickaxe:          { name: "镐",       color: "#7a7a86", cat: "tool",     consume: false, maxDurability: 40,  equip: true },
+  stone_axe:        { name: "石斧",     color: "#6e7a8a", cat: "tool",     consume: false, maxDurability: 150, equip: true },
+  spear:            { name: "长矛",     color: "#9a7a4a", cat: "weapon",   consume: false, maxDurability: 50,  equip: true },
+  throwing_spear:   { name: "投掷矛",   color: "#a08258", cat: "weapon",   consume: false, maxDurability: 30,  equip: true, throw: true },
+  shell_spear:      { name: "贝壳矛",   color: "#b8a882", cat: "weapon",   consume: false, equip: true },
+  boss_cleaver:     { name: "巨兽剁刀", color: "#c04a3a", cat: "weapon",   consume: false, equip: true },
+  shell_armor:      { name: "贝壳甲",   color: "#a89a78", cat: "armor",    consume: false, maxDurability: 80,  equip: true },
   berry:            { name: "浆果",     color: "#8a4a6a", cat: "food",     consume: true },
   berry_pie:        { name: "浆果派",   color: "#b06a4a", cat: "food",     consume: true },
   cooked_meat:      { name: "熟肉",     color: "#a4643c", cat: "food",     consume: true },
@@ -601,23 +732,101 @@ const ITEM_TABLE = {
   stone:            { name: "石头",     color: "#7a7a72", cat: "material", consume: false },
   shell:            { name: "贝壳",     color: "#d8c9a8", cat: "material", consume: false },
   boss_core:        { name: "巨兽核心", color: "#a04a6a", cat: "material", consume: false },
-  campfire_kit:     { name: "篝火套件", color: "#d8863c", cat: "place",    consume: false },
-  wall_kit:         { name: "墙套件",   color: "#8a7a5a", cat: "place",    consume: false },
-  floor_kit:        { name: "地板套件", color: "#7a6a4a", cat: "place",    consume: false },
-  door_kit:         { name: "门套件",   color: "#96754a", cat: "place",    consume: false },
-  fence_kit:        { name: "栅栏套件", color: "#8a7048", cat: "place",    consume: false },
-  furniture_kit:    { name: "家具套件", color: "#9a7a5a", cat: "place",    consume: false },
-  stairs_up_kit:    { name: "上楼套件", color: "#7a8a9a", cat: "place",    consume: false },
-  stairs_down_kit:  { name: "下楼套件", color: "#6a7a8a", cat: "place",    consume: false },
+  campfire_kit:     { name: "篝火套件", color: "#d8863c", cat: "place",    consume: false, place: true },
+  wall_kit:         { name: "墙套件",   color: "#8a7a5a", cat: "place",    consume: false, place: true },
+  floor_kit:        { name: "地板套件", color: "#7a6a4a", cat: "place",    consume: false, place: true },
+  door_kit:         { name: "门套件",   color: "#96754a", cat: "place",    consume: false, place: true },
+  fence_kit:        { name: "栅栏套件", color: "#8a7048", cat: "place",    consume: false, place: true },
+  furniture_kit:    { name: "家具套件", color: "#9a7a5a", cat: "place",    consume: false, place: true },
+  stairs_up_kit:    { name: "上楼套件", color: "#7a8a9a", cat: "place",    consume: false, place: true },
+  stairs_down_kit:  { name: "下楼套件", color: "#6a7a8a", cat: "place",    consume: false, place: true },
 };
 
-// F 键「食用/装备」分类由物品静态表推导（协议不下发物品类型，见协议 §4.1）。
+/* ============================================================================
+ * 服务端内容表（GET /content）——权威内容源，本轮新增。
+ * 形状（协议约定，服务端另一条并行 lane 提供）：
+ *   { items:[{kind,maxStack,maxDurability,toolType,consume,equip,place,spoilTicks,value,throw}],
+ *     recipes:[{id,inputs:[[kind,count]],outputs:[[kind,count]],stationType,durationTicks,unlock,desc}],
+ *     quests:[{id,state,count,title,desc}],
+ *     achievements:[{id,title,desc,condition,reward}],
+ *     phases:[{id,durationTicks,weather:[{id,weight}],modifiers:{...}}],
+ *     skills:[{id,label}] }
+ * 拉取失败（端点未上线 / 网络不通）→ CONTENT.loaded 保持 false，全程用内置静态表兜底。
+ * ==========================================================================*/
+const CONTENT = {
+  loaded: false,
+  items: new Map(),       // kind → 物品数据（/content 形状）
+  recipes: [],            // 归一化配方（in/out/station/dur/unlock/desc）
+  quests: new Map(),      // id → {id,state,count,title,desc}
+  achievements: new Map(),// id → {id,title,desc,condition,reward}
+  phases: new Map(),      // id → {id,durationTicks,weather,modifiers}
+  skills: new Map(),      // id → {id,label}
+};
+
+/* 物品数据读取：优先 /content，其次内置静态表（统一成同一形状）。 */
+function itemMeta(kind) {
+  if (!kind) return null;
+  const c = CONTENT.items.get(kind);
+  if (c) return c;
+  const b = ITEM_TABLE[kind];
+  if (!b) return null;
+  return {
+    kind,
+    maxStack: 1,
+    maxDurability: b.maxDurability,
+    toolType: b.toolType,
+    consume: !!b.consume,
+    equip: b.equip ? { slot: b.cat } : undefined,
+    place: b.place ? { kind: kind } : undefined,
+    spoilTicks: undefined,
+    value: undefined,
+    throw: b.throw ? { cooldownMs: THROW_COOLDOWN_MS } : undefined,
+  };
+}
+
+// 物品耐久上限：/content 优先（协议只同步当前耐久，不同步上限）
+function durabilityMax(kind) {
+  const m = itemMeta(kind);
+  return m && m.maxDurability ? m.maxDurability : undefined;
+}
+
+// F 键「食用/装备」分类：由物品数据推导（协议不下发物品类型，见协议 §4.1）。
 // 分类之外的材料不发命令——材料直接 consume 必然失败且无回执（坑 K4），只给提示。
-const EQUIP_KINDS = new Set(Object.keys(ITEM_TABLE).filter((k) => ["tool", "weapon", "armor"].includes(ITEM_TABLE[k].cat)));
-const PLACE_KINDS = new Set(Object.keys(ITEM_TABLE).filter((k) => ITEM_TABLE[k].cat === "place"));
-const CONSUMABLE_KINDS = new Set(Object.keys(ITEM_TABLE).filter((k) => ITEM_TABLE[k].consume));
-// 物品 kind → 中文名 / 色标（表外物品回退原始 kind）
-function itemName(kind) { return (kind && ITEM_TABLE[kind]?.name) || kind || ""; }
+let EQUIP_KINDS = new Set();
+let PLACE_KINDS = new Set();
+let CONSUMABLE_KINDS = new Set();
+let THROWABLE_KINDS = new Set();
+// 重新推导分类集合：/content 已加载时以其为准，否则用内置静态表（兜底）。
+function rebuildContentDerived() {
+  EQUIP_KINDS = new Set();
+  PLACE_KINDS = new Set();
+  CONSUMABLE_KINDS = new Set();
+  THROWABLE_KINDS = new Set();
+  if (CONTENT.loaded && CONTENT.items.size) {
+    for (const [kind, m] of CONTENT.items) {
+      if (m.equip) EQUIP_KINDS.add(kind);
+      if (m.place) PLACE_KINDS.add(kind);
+      if (m.consume) CONSUMABLE_KINDS.add(kind);
+      if (m.throw) THROWABLE_KINDS.add(kind);
+    }
+    return;
+  }
+  for (const kind of Object.keys(ITEM_TABLE)) {
+    const b = ITEM_TABLE[kind];
+    if (["tool", "weapon", "armor"].includes(b.cat)) EQUIP_KINDS.add(kind);
+    if (b.cat === "place") PLACE_KINDS.add(kind);
+    if (b.consume) CONSUMABLE_KINDS.add(kind);
+    if (b.throw) THROWABLE_KINDS.add(kind);
+  }
+}
+rebuildContentDerived();
+// 物品 kind → 中文名 / 色标（/content 提供 name/label 时优先；否则用内置表；表外回退原始 kind）
+function itemName(kind) {
+  if (!kind) return "";
+  const c = CONTENT.items.get(kind);
+  if (c && (c.name || c.label)) return c.name || c.label;
+  return (ITEM_TABLE[kind]?.name) || kind;
+}
 function itemColor(kind) { return (kind && ITEM_TABLE[kind]?.color) || "#8f7f5c"; }
 
 /* ============================================================================
@@ -626,9 +835,9 @@ function itemColor(kind) { return (kind && ITEM_TABLE[kind]?.color) || "#8f7f5c"
  *   QUESTS       ← game/quests/quests.json（id → 任务名/目标）
  *   SKILLS       ← game/rules/progression.json（skillId → 中文名）
  *   XP_CURVE     ← game/rules/progression.json 的 curve（服务端按同公式派生等级）
- *   DURABILITY_MAX ← game/items/*.json 的 maxDurability（协议只同步当前耐久）
  *   PHASE_NAMES  ← game/rules/environment.json 的 phases[].id（季节/相位名）
- * 协议不枚举这些内容（§4.4/§4.7 同理），客户端按 id 自行映射显示。
+ * —— 本轮起：这些内容在 /content 到位后由服务端内容表接管（见 CONTENT），
+ *    本表保留为**兜底**（端点未上线 / 拉取失败时继续可用）。
  * ==========================================================================*/
 const ACHIEVEMENTS = {
   village_friend: { name: "渔村的熟人", desc: "与渔村势力声望达到 10。" },
@@ -641,21 +850,68 @@ const QUESTS = {
 const SKILLS = { combat: "战斗", gathering: "采集" };
 // 等级曲线（服务端 levelForXp：L→L+1 所需经验 = round(baseXp × growth^(L-1))）
 const XP_CURVE = { baseXp: 100, growth: 1.5, maxLevel: 20 };
-// 物品耐久上限（协议只同步 Inventory.<i>.durability 当前值，不同步上限）
-const DURABILITY_MAX = {
-  axe: 60, pickaxe: 40, shell_armor: 80, spear: 50, stone_axe: 150, throwing_spear: 30,
-};
-// 环境相位（季节）名
+// 环境相位（季节）名 —— /content 的 phases 不含显示名，名称仍由本表映射
 const PHASE_NAMES = { mild: "温和", dry: "干旱", wet: "潮湿", storm: "风暴" };
+// 天气名（RoomState.weatherId → 中文）
+const WEATHER_NAMES = { clear: "晴", rain: "雨", fog: "雾", drought: "旱", storm: "风暴", snow: "雪", blizzard: "暴雪" };
 // 首领类 kind（解锁条件 progressAtLeast 的目标为首领时显示「需击败首领」）
 const BOSS_KINDS = new Set(["boss_alpha"]);
-// 可投掷物品（game/items/*.json 声明了 throw 档案的 kind；当前仅投掷矛）
-const THROWABLE_KINDS = new Set(["throwing_spear"]);
 // 投掷本地冷却（毫秒）：静态内嵌自 game/items/throwing_spear.json 的 throw.cooldownMs。
-// ⚠️ Cooldown 组件不同步（存档跳过瞬态组件），故冷却只做本地提示，服务端仍有自己的冷却。
+// ⚠️ 本地计时只是提示——服务端 Cooldown.remainingMs 同步后以服务端读数为准。
 const THROW_COOLDOWN_MS = 900;
 // 逻辑帧率（game.json tickRate）：剩余 tick → 秒
 const TICK_RATE = 20;
+
+/* ---------- 内容表读取助手（/content 优先，内置静态表兜底） ---------- */
+// 成就名 / 描述
+function achievementName(id) {
+  const c = CONTENT.achievements.get(id);
+  if (c) return c.title || c.name || id;
+  return (ACHIEVEMENTS[id]?.name) || id;
+}
+function achievementDesc(id) {
+  const c = CONTENT.achievements.get(id);
+  if (c) return c.desc || c.description || "";
+  return ACHIEVEMENTS[id]?.desc || "";
+}
+// 任务名（任务状态/进度仍以协议 Quest.* 为准，/content 只提供标题与说明）
+function questTitle(id) {
+  const c = CONTENT.quests.get(id);
+  if (c) return c.title || c.name || id;
+  return QUESTS[id]?.name || id;
+}
+function questDesc(id) {
+  const c = CONTENT.quests.get(id);
+  if (c) return c.desc || c.description || "";
+  return "";
+}
+// 技能名
+function skillLabel(id) {
+  const c = CONTENT.skills.get(id);
+  if (c) return c.label || c.name || id;
+  return SKILLS[id] || id;
+}
+// 相位信息（/content 优先；内置相位表兜底）
+function phaseInfo(id) {
+  if (!id) return null;
+  return CONTENT.phases.get(id) || BUILTIN_PHASES[id] || null;
+}
+function phaseName(id) {
+  if (!id) return "—";
+  const c = CONTENT.phases.get(id);
+  if (c && (c.name || c.label)) return c.name || c.label;
+  return PHASE_NAMES[id] || id;
+}
+function weatherName(id) { return (id && (WEATHER_NAMES[id] || id)) || ""; }
+
+/* 内置相位表（兜底）：game/rules/environment.json 的相位与天气权重。
+   /content 到位后由服务端内容表接管。 */
+const BUILTIN_PHASES = {
+  mild:  { id: "mild",  durationTicks: 24000, weather: [{ id: "clear", weight: 5 }, { id: "rain", weight: 2 }, { id: "fog", weight: 1 }] },
+  dry:   { id: "dry",   durationTicks: 18000, weather: [{ id: "clear", weight: 7 }, { id: "drought", weight: 2 }] },
+  wet:   { id: "wet",   durationTicks: 18000, weather: [{ id: "rain", weight: 6 }, { id: "fog", weight: 2 }, { id: "clear", weight: 1 }] },
+  storm: { id: "storm", durationTicks: 12000, weather: [{ id: "storm", weight: 5 }, { id: "rain", weight: 3 }] },
+};
 
 /* ---------- 解锁条件 → 中文提示（配方 unlock.condition / 成就 condition） ---------- */
 // 形如 "inPhase:storm" → 「需风暴季」；"progressAtLeast:boss_alpha:1" → 「需击败首领」
@@ -671,6 +927,37 @@ function unlockHint(condition) {
   }
   if (kind === "factionRepAtLeast") return `需声望 ${parts[1]} ≥ ${parts[2]}`;
   return `条件：${condition}`;
+}
+
+/* ---------- 当前环境（RoomState 新字段：weatherId / phaseId / phaseProgress） ---------- */
+// 环境读数：缺失时返回空串 / 0（老服务端无此字段 → 无天气表现）
+const envState = { weatherId: "", phaseId: "", phaseProgress: 0 };
+function currentPhaseId() { return envState.phaseId || ""; }
+// 解锁条件本地判定：true=已解锁 / false=未解锁 / null=无法本地判断（服务端裁决）
+function unlockMet(condition) {
+  if (!condition) return true;
+  const parts = String(condition).split(":");
+  if (parts[0] === "inPhase") {
+    const cur = currentPhaseId();
+    if (!cur) return null;          // 服务端未下发相位 → 只能提示
+    return cur === parts[1];
+  }
+  return null;                      // progressAtLeast / factionRepAtLeast 等由服务端裁决
+}
+// 解锁提示文案：inPhase 用真实相位判断，其余仍为静态提示
+function unlockStatusText(condition) {
+  if (!condition) return "";
+  const met = unlockMet(condition);
+  const parts = String(condition).split(":");
+  const cur = currentPhaseId();
+  const curName = cur ? phaseName(cur) : "未知";
+  if (parts[0] === "inPhase") {
+    const need = PHASE_NAMES[parts[1]] || parts[1];
+    if (met === true) return `✅ 当前${curName}季 · 已解锁`;
+    if (met === false) return `🔒 需${need}季（当前：${curName}季）`;
+    return `🔒 需${need}季`;
+  }
+  return `🔒 ${unlockHint(condition)}（服务端裁决）`;
 }
 
 // 等级累计经验（达到 level 所需的累计 XP）：Σ round(baseXp × growth^(i-1))，i 从 1 到 level-1
@@ -776,6 +1063,8 @@ const statusGroupEl = document.getElementById("statusGroup");
 const clockCanvas = document.getElementById("clockCanvas");
 const clockCtx2d = clockCanvas.getContext("2d");
 const clockTextEl = document.getElementById("clockText");
+const weatherTextEl = document.getElementById("weatherText");
+const phaseBarEl = document.getElementById("phaseBar");
 const badgesEl = document.getElementById("badges");
 const mapIdTextEl = document.getElementById("mapIdText");
 const levelTextEl = document.getElementById("levelText");
@@ -795,7 +1084,16 @@ const invBarEl = document.getElementById("invBar");
 const equipBarEl = document.getElementById("equipBar");
 const dlgEl = document.getElementById("dlg");
 const dlgTitleEl = document.getElementById("dlgTitle");
+const dlgTextEl = document.getElementById("dlgText");
 const dlgOptionsEl = document.getElementById("dlgOptions");
+const tradeEl = document.getElementById("trade");
+const tradePlayersEl = document.getElementById("tradePlayers");
+const tradeTargetEl = document.getElementById("tradeTarget");
+const tradeGiveEl = document.getElementById("tradeGive");
+const tradeTakeEl = document.getElementById("tradeTake");
+const tradeMyItemsEl = document.getElementById("tradeMyItems");
+const tradeCatalogEl = document.getElementById("tradeCatalog");
+const tradeOffersEl = document.getElementById("tradeOffers");
 const craftEl = document.getElementById("craft");
 const lootEl = document.getElementById("loot");
 const lootTitleEl = document.getElementById("lootTitle");
@@ -828,10 +1126,11 @@ function log(msg) {
 }
 
 /* ---------- 实体字段读取助手（协议 §3.3：values 数值 / stringValues 字符串） ---------- */
-// 注意：空壳实体（坑 K1）连 values/stringValues 都不存在，这里全部可选链兜底
-function num(e, key) { const v = e.values?.get(key); return v === undefined ? undefined : v; }
-function str(e, key) { const v = e.stringValues?.get(key); return v === undefined ? undefined : v; }
-function has(e, key) { return e.values?.get(key) !== undefined || e.stringValues?.get(key) !== undefined; }
+// 注意：空壳实体（坑 K1）连 values/stringValues 都不存在，这里全部可选链兜底；
+// 实体本身也可能未同步（undefined）——一律返回 undefined，不抛异常。
+function num(e, key) { if (!e) return undefined; const v = e.values?.get(key); return v === undefined ? undefined : v; }
+function str(e, key) { if (!e) return undefined; const v = e.stringValues?.get(key); return v === undefined ? undefined : v; }
+function has(e, key) { if (!e) return false; return e.values?.get(key) !== undefined || e.stringValues?.get(key) !== undefined; }
 
 /* ---------- 自身玩家状态 / 实体收集（坑 K1：visibleEntities 是唯一实体来源） ---------- */
 function me() {
@@ -882,6 +1181,8 @@ async function connect(isAuto = false) {
     setStatus(`已连接 · sessionId=${room.sessionId}`);
     log(`已加入房间 game，sessionId=${room.sessionId}` +
       (requestedNetworkId ? `（请求复用 networkId=${requestedNetworkId}）` : ""));
+    // 连上后再拉一次内容表（httpBase 可能与启动时不同；失败自动沿用内置静态表）
+    void fetchContent();
     room.onLeave((code) => {
       setStatus(`已断开（code=${code}）`);
       log(`连接断开（code=${code}）`);
@@ -907,8 +1208,159 @@ endpointInput.value = localStorage.getItem("minClient.endpoint") || "ws://localh
 endpointInput.addEventListener("keydown", (ev) => { if (ev.key === "Enter") connect(); });
 
 /* ============================================================================
+ * 内容表（GET /content）——服务端权威内容（物品 / 配方 / 任务 / 成就 / 相位 / 技能）。
+ * 启动时拉一次（用地址栏的服务端基址），连上后再拉一次（httpBase 可能已变）。
+ * 端点未上线 / 拉取失败 → CONTENT.loaded 保持 false，全程沿用内置静态表（兜底）。
+ * ==========================================================================*/
+// 数值兜底：非有限数用缺省值
+function numOr(v, dft) { return typeof v === "number" && Number.isFinite(v) ? v : dft; }
+
+// [kind,count] 与 [{kind,count}] 两种写法统一归一为 [{kind,count}]
+function normAmounts(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const it of list) {
+    if (Array.isArray(it)) {
+      const kind = it[0] !== undefined && it[0] !== null ? String(it[0]) : "";
+      const count = numOr(it[1], 0);
+      if (kind && count > 0) out.push({ kind, count });
+    } else if (it && typeof it === "object") {
+      const kind = it.kind !== undefined && it.kind !== null ? String(it.kind) : "";
+      const count = numOr(it.count, 0);
+      if (kind && count > 0) out.push({ kind, count });
+    }
+  }
+  return out;
+}
+
+// 归一化配方为内部形状（in/out 为 [kind,count] 对；station/dur/unlock/desc 同内置表）
+function normRecipe(r) {
+  if (!r || typeof r !== "object" || !r.id) return null;
+  const pairs = (list) => normAmounts(list).map((a) => [a.kind, a.count]);
+  const unlockRaw = r.unlock;
+  const unlock = typeof unlockRaw === "string" ? unlockRaw
+    : (unlockRaw && typeof unlockRaw === "object" ? (unlockRaw.condition || unlockRaw.cond || "") : "");
+  return {
+    id: String(r.id),
+    in: pairs(r.inputs ?? r.input),
+    out: pairs(r.outputs ?? r.output),
+    station: numOr(r.stationType ?? r.station, 0),
+    dur: numOr(r.durationTicks ?? r.dur, 0),
+    unlock: unlock,
+    desc: r.desc || r.description || "",
+  };
+}
+
+// 应用内容表：逐段覆盖（缺字段的段保留旧值，不清空已加载内容）
+function applyContent(data) {
+  if (!data || typeof data !== "object") return;
+  if (Array.isArray(data.items)) {
+    const map = new Map();
+    for (const it of data.items) {
+      if (!it || typeof it !== "object" || !it.kind) continue;
+      const kind = String(it.kind);
+      map.set(kind, {
+        kind,
+        name: it.name || it.label || undefined,
+        maxStack: numOr(it.maxStack, 1),
+        maxDurability: numOr(it.maxDurability, 0) || undefined,
+        toolType: it.toolType || undefined,
+        consume: !!it.consume,
+        equip: it.equip || undefined,
+        place: it.place || undefined,
+        spoilTicks: numOr(it.spoilTicks, 0) || undefined,
+        value: numOr(it.value, 0) || undefined,
+        throw: it.throw || undefined,
+      });
+    }
+    if (map.size) CONTENT.items = map;
+  }
+  if (Array.isArray(data.recipes)) {
+    const list = data.recipes.map(normRecipe).filter(Boolean);
+    if (list.length) CONTENT.recipes = list;
+  }
+  if (Array.isArray(data.quests)) {
+    const map = new Map();
+    for (const q of data.quests) if (q && q.id) map.set(String(q.id), q);
+    if (map.size) CONTENT.quests = map;
+  }
+  if (Array.isArray(data.achievements)) {
+    const map = new Map();
+    for (const a of data.achievements) if (a && a.id) map.set(String(a.id), a);
+    if (map.size) CONTENT.achievements = map;
+  }
+  if (Array.isArray(data.phases)) {
+    const map = new Map();
+    for (const p of data.phases) if (p && p.id) map.set(String(p.id), p);
+    if (map.size) CONTENT.phases = map;
+  }
+  if (Array.isArray(data.skills)) {
+    const map = new Map();
+    for (const s of data.skills) if (s && s.id) map.set(String(s.id), s);
+    if (map.size) CONTENT.skills = map;
+  }
+  CONTENT.loaded = true;
+  rebuildContentDerived();
+  // 界面按新表刷新（配方格 / 任务名 / 成就名 / 技能名可能已变）
+  craftGridSig = "";
+  craftJobIds = "";
+  if (!craftEl.classList.contains("hidden")) refreshCraftPanel(selfEntity());
+}
+
+// 拉取内容表；失败只记日志（内置静态表兜底，不影响任何功能）
+async function fetchContent() {
+  if (!httpBase) return false;
+  try {
+    const resp = await fetch(`${httpBase}/content`, { cache: "no-cache" });
+    if (!resp.ok) { log(`内容表拉取失败 HTTP ${resp.status}（沿用内置静态表）`); return false; }
+    const data = await resp.json();
+    applyContent(data);
+    log(`内容表已更新（物品 ${CONTENT.items.size} · 配方 ${CONTENT.recipes.length} · 任务 ${CONTENT.quests.size}` +
+      ` · 成就 ${CONTENT.achievements.size} · 相位 ${CONTENT.phases.size} · 技能 ${CONTENT.skills.size}）`);
+    return true;
+  } catch (e) {
+    log(`内容表拉取失败（沿用内置静态表）：${(e && e.message) || e}`);
+    return false;
+  }
+}
+
+/* ============================================================================
  * 地图加载（规格 §P1 + 协议 §5.2）
  * ==========================================================================*/
+// 拉取并校验 /maps/runtime 全图几何快照；成功返回地图数据，失败返回 null（已记日志）
+async function fetchMapSnapshot(mapId) {
+  const resp = await fetch(`${httpBase}/maps/runtime?mapId=${encodeURIComponent(mapId)}`, { cache: "no-cache" });
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    log(`地图拉取失败 HTTP ${resp.status}：${body.slice(0, 120)}（跨域失败见坑 K5：页面需跑在 http://localhost:5173 或配置 CORS_ORIGINS）`);
+    return null;
+  }
+  const data = await resp.json();
+  const ver = data.version || resp.headers.get("x-map-version") || "unknown";
+  // 校验：响应 key 必须等于请求的 mapId，不符告警并拒绝应用（规格 §P1-2）
+  if (data.key !== mapId) {
+    console.warn(`地图 key 不符：请求 ${mapId}，响应 ${data.key}，拒绝应用`);
+    log(`地图 key 不符（请求 ${mapId} / 响应 ${data.key}），已拒绝应用`);
+    return null;
+  }
+  // 校验：walkable 为纯 JSON number[]，行主序，长度必须 = width*height（规格 §P1-3）
+  const { width, height } = data.grid || {};
+  if (!Number.isInteger(width) || !Number.isInteger(height) ||
+      !Array.isArray(data.walkable) || data.walkable.length !== width * height) {
+    console.error(`walkable 长度不符：期望 ${width}*${height}=${width * height}，实际 ${data.walkable && data.walkable.length}`);
+    log("地图数据校验失败（walkable 长度不符），已拒绝应用");
+    return null;
+  }
+  const mapData = {
+    key: data.key, version: ver, grid: data.grid,
+    tiles: data.tiles, walkable: data.walkable,
+    regions: data.regions, regionOfTile: data.regionOfTile,
+    level: Array.isArray(data.level) ? data.level : null,   // 离散层号（积雪雪线用；缺失按平地图处理）
+  };
+  mapCache.set(`${mapId}@${ver}`, mapData);
+  return mapData;
+}
+
 async function ensureMap(mapId) {
   if (!mapId || mapLoading) return;
   if (currentMap && currentMap.key === mapId) return;
@@ -932,34 +1384,8 @@ async function ensureMap(mapId) {
       if (hit) { applyMap(hit, mapId); return; }
     }
     // ③ 拉取全图几何快照
-    const resp = await fetch(`${httpBase}/maps/runtime?mapId=${encodeURIComponent(mapId)}`, { cache: "no-cache" });
-    if (!resp.ok) {
-      const body = await resp.text().catch(() => "");
-      log(`地图拉取失败 HTTP ${resp.status}：${body.slice(0, 120)}（跨域失败见坑 K5：页面需跑在 http://localhost:5173 或配置 CORS_ORIGINS）`);
-      return;
-    }
-    const data = await resp.json();
-    const ver = data.version || resp.headers.get("x-map-version") || "unknown";
-    // ④ 校验：响应 key 必须等于请求的 mapId，不符告警并拒绝应用（规格 §P1-2）
-    if (data.key !== mapId) {
-      console.warn(`地图 key 不符：请求 ${mapId}，响应 ${data.key}，拒绝应用`);
-      log(`地图 key 不符（请求 ${mapId} / 响应 ${data.key}），已拒绝应用`);
-      return;
-    }
-    // ⑤ 校验：walkable 为纯 JSON number[]，行主序，长度必须 = width*height（规格 §P1-3）
-    const { width, height } = data.grid || {};
-    if (!Number.isInteger(width) || !Number.isInteger(height) ||
-        !Array.isArray(data.walkable) || data.walkable.length !== width * height) {
-      console.error(`walkable 长度不符：期望 ${width}*${height}=${width * height}，实际 ${data.walkable && data.walkable.length}`);
-      log("地图数据校验失败（walkable 长度不符），已拒绝应用");
-      return;
-    }
-    const mapData = {
-      key: data.key, version: ver, grid: data.grid,
-      tiles: data.tiles, walkable: data.walkable,
-      regions: data.regions, regionOfTile: data.regionOfTile,
-    };
-    mapCache.set(`${mapId}@${ver}`, mapData);
+    const mapData = await fetchMapSnapshot(mapId);
+    if (!mapData) return;
     applyMap(mapData, mapId);
   } catch (e) {
     // 网络/CORS 异常（坑 K5：页面需跑在 http://localhost:5173 或配置服务端 CORS_ORIGINS）
@@ -969,12 +1395,62 @@ async function ensureMap(mapId) {
   }
 }
 
+/* ---------- 地图自动刷新：version 变化（写回焦土等）则重拉并重绘 ---------- */
+const MAP_REFRESH_INTERVAL_MS = 5000;
+let mapRefreshing = false;   // 刷新通道独立标记（避免与 ensureMap 的加载标记互相覆盖）
+async function refreshMapIfChanged() {
+  if (!room || !currentMap || mapLoading || mapRefreshing) return;
+  const mapId = currentMap.key;
+  mapRefreshing = true;
+  try {
+    const resp = await fetch(`${httpBase}/maps/meta`, { cache: "no-cache" });
+    if (!resp.ok) return;
+    const meta = await resp.json();
+    const info = (meta.maps || []).find((m) => m.id === mapId);
+    if (!info || !info.version || info.version === currentMap.version) return;
+    // version 变了 → 重拉 runtime 并重绘
+    const mapData = await fetchMapSnapshot(mapId);
+    if (mapData) {
+      applyMap(mapData, mapId, true);
+      log(`地图 ${mapId} 已更新（版本 ${mapData.version}）`);
+    }
+  } catch (e) {
+    // 静默失败：下个周期再试（不影响游戏）
+  } finally {
+    mapRefreshing = false;
+  }
+}
+setInterval(() => { void refreshMapIfChanged(); }, MAP_REFRESH_INTERVAL_MS);
+
 // 应用地图：若加载期间玩家又换图则丢弃（防错图）
-function applyMap(mapData, forMapId) {
+function applyMap(mapData, forMapId, isRefresh = false) {
   if (forMapId !== lastMapId) return;
   currentMap = mapData;
+  computeMapLevelRange();
   prerenderMap();
-  log(`地图 ${mapData.key} 已加载（${mapData.grid.width}×${mapData.grid.height} 格，版本 ${mapData.version}）`);
+  if (isRefresh) {
+    log(`地图 ${mapData.key} 已刷新（${mapData.grid.width}×${mapData.grid.height} 格，版本 ${mapData.version}）`);
+  } else {
+    log(`地图 ${mapData.key} 已加载（${mapData.grid.width}×${mapData.grid.height} 格，版本 ${mapData.version}）`);
+  }
+}
+
+// 地图离散层号范围（积雪雪线用；平地图 flat=true → 退化为全图薄霜）
+function computeMapLevelRange() {
+  const m = currentMap;
+  if (!m || !m.grid) return;
+  const total = m.grid.width * m.grid.height;
+  if (!Array.isArray(m.level) || m.level.length !== total) {
+    m.levelRange = { min: 0, max: 0, flat: true };
+    return;
+  }
+  let min = Infinity, max = -Infinity;
+  for (let i = 0; i < total; i++) {
+    const v = m.level[i];
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  m.levelRange = { min, max, flat: max === min };
 }
 
 /* ---------- 地面手绘颗粒：每格确定性 hash → ±6% 明度抖动（不依赖随机数，重渲染一致） ---------- */
@@ -1446,6 +1922,159 @@ function drawClock(hour, day) {
 }
 
 /* ============================================================================
+ * 天气 / 季节表现（纯视觉层；数据源：RoomState.weatherId / phaseId / phaseProgress）
+ * —— 粒子与色调只影响观感，不参与任何玩法判定（服务端权威）。
+ * —— 积雪是**近似表现**：用 /content 的相位天气权重 × phaseProgress 估算雪量，
+ *    再对「高于雪线」的地块铺白色覆盖（雪线 = 地图离散层号阈值；平地图退化为全图薄霜）。
+ *    纯客户端本地计算，服务端不参与渲染判定。
+ * ==========================================================================*/
+// 降水类天气 id（用于估算降雪倾向；通用词表，未知 id 一律不计入）
+const PRECIP_WEATHER = new Set(["rain", "storm", "snow", "blizzard", "sleet", "hail", "thunder"]);
+
+// 天气粒子状态（屏幕空间）
+const weatherFx = { kind: "", drops: [], fogs: [], flash: 0, nextFlashAt: 0, lastT: 0 };
+
+function newDrop() {
+  return {
+    x: Math.random() * (canvas.width || 800),
+    y: Math.random() * (canvas.height || 600),
+    len: 8 + Math.random() * 14,
+    sp: 620 + Math.random() * 520,
+    a: 0.14 + Math.random() * 0.22,
+  };
+}
+function newFog() {
+  return {
+    x: Math.random() * (canvas.width || 800),
+    y: Math.random() * (canvas.height || 600),
+    r: 140 + Math.random() * 180,
+    v: 8 + Math.random() * 18,
+    a: 0.05 + Math.random() * 0.05,
+  };
+}
+// 天气切换时重建粒子池（clear 不建池）
+function syncWeatherFx(kind) {
+  if (weatherFx.kind === kind) return;
+  weatherFx.kind = kind;
+  weatherFx.drops = [];
+  weatherFx.fogs = [];
+  weatherFx.flash = 0;
+  weatherFx.nextFlashAt = 0;
+  const n = kind === "storm" ? 240 : kind === "rain" ? 140 : 0;
+  for (let i = 0; i < n; i++) weatherFx.drops.push(newDrop());
+  if (kind === "fog") for (let i = 0; i < 5; i++) weatherFx.fogs.push(newFog());
+}
+// 粒子推进（dt 秒）
+function updateWeatherFx(dt, kind) {
+  syncWeatherFx(kind);
+  const W = canvas.width, H = canvas.height;
+  for (const d of weatherFx.drops) {
+    d.y += d.sp * dt;
+    d.x -= 140 * dt;                                  // 风：向左斜
+    if (d.y > H + 20) { d.y = -20; d.x = Math.random() * W; }
+    if (d.x < -30) d.x = W + 20;
+  }
+  for (const f of weatherFx.fogs) {
+    f.x += f.v * dt;
+    if (f.x - f.r > W) { f.x = -f.r; f.y = Math.random() * H; }
+  }
+  if (kind === "storm") {
+    if (weatherFx.nextFlashAt === 0) weatherFx.nextFlashAt = 2 + Math.random() * 4;
+    weatherFx.nextFlashAt -= dt;
+    if (weatherFx.nextFlashAt <= 0) {
+      weatherFx.flash = 1;
+      weatherFx.nextFlashAt = 4 + Math.random() * 8;
+    }
+  }
+  weatherFx.flash = Math.max(0, weatherFx.flash - dt * 3.2);
+}
+// 天气绘制（屏幕空间，叠在夜幕之上 → 前景雨感；透明度压低，不糊可读性）
+function drawWeatherFx(kind) {
+  if (!kind || kind === "clear") return;
+  const W = canvas.width, H = canvas.height;
+  const tint = {
+    rain: "rgba(70,92,124,0.10)",
+    fog: "rgba(206,210,214,0.15)",
+    drought: "rgba(206,158,74,0.10)",
+    storm: "rgba(44,54,86,0.18)",
+    snow: "rgba(216,226,240,0.13)",
+    blizzard: "rgba(216,226,240,0.17)",
+  }[kind];
+  if (tint) { ctx.fillStyle = tint; ctx.fillRect(0, 0, W, H); }
+  // 雨线（斜线）
+  if (weatherFx.drops.length) {
+    ctx.lineWidth = 1;
+    for (const d of weatherFx.drops) {
+      ctx.strokeStyle = `rgba(196,214,238,${d.a.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.moveTo(d.x, d.y);
+      ctx.lineTo(d.x - d.len * 0.28, d.y + d.len);
+      ctx.stroke();
+    }
+  }
+  // 雾团：缓慢漂移的柔光（几团叠加）
+  for (const f of weatherFx.fogs) {
+    const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.r);
+    g.addColorStop(0, `rgba(214,218,222,${f.a.toFixed(3)})`);
+    g.addColorStop(1, "rgba(214,218,222,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2); ctx.fill();
+  }
+  // 闪电：短促白闪（风暴）
+  if (weatherFx.flash > 0.01) {
+    ctx.fillStyle = `rgba(226,236,255,${(weatherFx.flash * 0.22).toFixed(3)})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+/* ---------- 积雪（近似表现）：雪量由相位天气权重 × phaseProgress 估算 ---------- */
+function snowCoverage() {
+  const ph = phaseInfo(envState.phaseId);
+  if (!ph || !Array.isArray(ph.weather) || ph.weather.length === 0) return 0;
+  let precip = 0, total = 0;
+  for (const o of ph.weather) {
+    const w = numOr(o?.weight, 0);
+    total += w;
+    if (PRECIP_WEATHER.has(String(o?.id ?? ""))) precip += w;
+  }
+  if (total <= 0 || precip <= 0) return 0;   // 无降水相位 → 视为融雪
+  const tendency = precip / total;
+  const p = Math.max(0, Math.min(1, envState.phaseProgress));
+  return Math.max(0, Math.min(1, tendency * (0.35 + 0.65 * p)));
+}
+// 积雪覆盖绘制（世界坐标）：高于雪线的地块铺白色；平地图 → 全图薄霜
+function drawSnowOverlay() {
+  if (!currentMap || !currentMap.grid) return;
+  const cov = snowCoverage();
+  if (cov <= 0.02) return;
+  const { width, height, tileWidth: tw, tileHeight: th } = currentMap.grid;
+  const range = currentMap.levelRange || { min: 0, max: 0, flat: true };
+  const viewW = canvas.width / ZOOM, viewH = canvas.height / ZOOM;
+  const x0 = Math.max(0, Math.floor(camX / tw)), x1 = Math.min(width - 1, Math.floor((camX + viewW) / tw));
+  const y0 = Math.max(0, Math.floor(camY / th)), y1 = Math.min(height - 1, Math.floor((camY + viewH) / th));
+  if (x1 < x0 || y1 < y0) return;
+  const levels = currentMap.level;
+  // 雪线：覆盖度越高雪线越低（覆盖地块越多）
+  const line = range.flat ? range.min : range.max + 0.5 - cov * (range.max - range.min + 1);
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const i = y * width + x;
+      let a;
+      if (range.flat) {
+        a = cov * 0.42;                                     // 平地图：全图薄霜
+      } else {
+        const d = (levels[i] ?? 0) - line;
+        if (d < 0) continue;
+        a = Math.min(0.8, cov * (0.45 + 0.25 * Math.min(1, d)));
+      }
+      if (a <= 0.02) continue;
+      ctx.fillStyle = `rgba(228,239,249,${a.toFixed(3)})`;
+      ctx.fillRect(x * tw, y * th, tw, th);
+    }
+  }
+}
+
+/* ============================================================================
  * 渲染主循环（坑 K7：服务端权威，不做位移预测/插值，直接读最新状态渲染）
  * ==========================================================================*/
 function frame() {
@@ -1487,6 +2116,7 @@ function frame() {
       ctx.drawImage(mapCanvas, vx0, vy0, vx1 - vx0, vy1 - vy0, vx0, vy0, vx1 - vx0, vy1 - vy0);
     }
   }
+  drawSnowOverlay(); // 积雪覆盖（世界坐标：压在地面之上、实体之下）
   for (const e of drawList) drawEntity(e);
   // 投掷瞄准：自身 → 瞄准点的虚线 + 落点圆环（世界单位，随缩放）
   if (aiming && selfEnt) {
@@ -1542,6 +2172,15 @@ function frame() {
       ctx.fillStyle = gw;
       ctx.beginPath(); ctx.arc(sxp, syp, lr, 0, Math.PI * 2); ctx.fill();
     }
+  }
+
+  // ---- 天气粒子与色调（屏幕空间，叠在夜幕之上 → 前景雨感） ----
+  {
+    const now = performance.now();
+    const dt = weatherFx.lastT ? Math.min(0.1, (now - weatherFx.lastT) / 1000) : 0;
+    weatherFx.lastT = now;
+    updateWeatherFx(dt, envState.weatherId);
+    drawWeatherFx(envState.weatherId);
   }
 }
 requestAnimationFrame(frame);
@@ -1756,7 +2395,7 @@ function renderLootPanel() {
     return;
   }
   lootBodyEl.innerHTML = slots.map((s) => {
-    const max = DURABILITY_MAX[s.kind];
+    const max = durabilityMax(s.kind);
     const dur = (s.durability !== undefined && max)
       ? `<span class="lootDur${s.durability / max < 0.34 ? " low" : ""}" title="耐久 ${Math.round(s.durability)}/${max}">` +
         `<i style="width:${Math.max(0, Math.min(100, Math.round((s.durability / max) * 100)))}%"></i></span>`
@@ -1888,9 +2527,20 @@ function screenToWorld(sx, sy) {
   const py = (sy - rect.top) * (canvas.height / (rect.height || canvas.height));
   return { x: camX + px / ZOOM, y: camY + py / ZOOM };
 }
-// 本地投掷冷却剩余秒数（Cooldown 组件不同步，本地计时只作提示）
+// 本地投掷冷却剩余秒数（Cooldown 组件未同步时的本地计时兜底）
 function throwCooldownLeft() {
   return Math.max(0, (throwReadyAt - Date.now()) / 1000);
+}
+/* ---------- 冷却读秒（Cooldown.remainingMs，服务端权威） ---------- */
+// 服务端下发的剩余冷却毫秒（0 或缺省 = 无冷却）
+function cooldownRemainingMs(selfEnt) {
+  const v = num(selfEnt, "Cooldown.remainingMs");
+  return typeof v === "number" && v > 0 ? v : 0;
+}// 冷却剩余秒数：服务端读数优先；服务端未同步时回退本地计时
+function cooldownLeftSeconds(selfEnt) {
+  const srv = cooldownRemainingMs(selfEnt);
+  if (srv > 0) return srv / 1000;
+  return throwCooldownLeft();
 }
 // 进入瞄准模式：服务端要求「武器槽」装备带 throw 档案的物品，故先确保已装备
 function enterAimMode() {
@@ -1937,7 +2587,7 @@ function exitAimMode() {
 // 瞄准提示条（显示冷却剩余）
 function updateAimBanner() {
   if (!aiming) return;
-  const left = throwCooldownLeft();
+  const left = cooldownLeftSeconds(selfEntity());
   aimBannerEl.textContent = left > 0
     ? `瞄准中 · 冷却 ${left.toFixed(1)} 秒 · 左键投掷 · Esc 取消`
     : "瞄准中 · 移动鼠标选点 · 左键投掷 · Esc 取消";
@@ -1954,7 +2604,7 @@ window.addEventListener("mousemove", (ev) => {
 // 点击画布：发送 throw{x,y}（世界坐标 = 鼠标位置换算）
 canvas.addEventListener("click", (ev) => {
   if (!aiming) return;
-  const left = throwCooldownLeft();
+  const left = cooldownLeftSeconds(selfEntity());
   if (left > 0) { log(`投掷冷却中（还剩 ${left.toFixed(1)} 秒）`); return; }
   const w = screenToWorld(ev.clientX, ev.clientY);
   throwAt(Math.round(w.x), Math.round(w.y));
@@ -1992,6 +2642,7 @@ window.addEventListener("keydown", (ev) => {
     case "r": lootNearestContainer(); break;   // 搜刮最近容器（打开搜刮面板）
     case "y": cancelCurrentCraft(); break;     // 取消进行中的合成
     case "u": refuelNearestStation(); break;   // 给最近站点加燃料
+    case "v": toggleTradePanel(); break;       // 打开/关闭交易面板（P2P 报价）
     case "q":                                // 投掷：持投掷矛 → 瞄准模式，否则朝最近敌怪
       if (aiming) { exitAimMode(); break; }
       if (THROWABLE_KINDS.has(slotKind(selectedSlot))) enterAimMode();
@@ -2060,29 +2711,35 @@ function refreshCraftPanel(selfEnt) {
     b.classList.toggle("active", b.dataset.cat === activeCat && !craftEl.classList.contains("hidden")));
   craftCatsEl.querySelectorAll("button").forEach((b) =>
     b.classList.toggle("active", b.dataset.cat === activeCat));
-  // 配方格阵列（签名 = 分类 + 选中 + 材料总量 + 解锁标记）
-  const list = RECIPES.filter((r) => activeCat === "all" || (RECIPE_CATS[r.id] || "tool") === activeCat);
-  const sig = `${activeCat}|${selectedRecipe}|${JSON.stringify(totals)}|${list.map((r) => (r.unlock ? 1 : 0)).join("")}`;
+  // 配方格阵列（签名 = 分类 + 选中 + 相位 + 材料总量 + 解锁标记）
+  const allRecipes = recipeList();
+  if (selectedRecipe && !allRecipes.some((x) => x.id === selectedRecipe)) {
+    selectedRecipe = allRecipes[0]?.id || "";   // 配方表更新后原选中项可能已消失
+  }
+  const list = allRecipes.filter((r) => activeCat === "all" || recipeCategory(r) === activeCat);
+  const sig = `${activeCat}|${selectedRecipe}|${currentPhaseId()}|${JSON.stringify(totals)}|${list.map((r) => (r.unlock ? 1 : 0)).join("")}`;
   if (sig !== craftGridSig) {
     craftGridSig = sig;
     recipeGridEl.innerHTML = "";
     for (const r of list) {
       const ok = r.in.every(([k, c]) => (totals[k] || 0) >= c);
+      const met = unlockMet(r.unlock);       // inPhase 用真实相位判断；其余 null（服务端裁决）
       const cell = document.createElement("div");
-      // locked = 材料不足（置暗）；unlck = 有解锁条件（虚线框，仍可点击——服务端裁决）
-      cell.className = "recipeCell" + (ok ? "" : " locked") + (r.unlock ? " unlck" : "") +
-        (r.id === selectedRecipe ? " sel" : "");
+      // locked = 材料不足（置暗）；unlck = 解锁条件未满足（虚线框 + 锁，仍可点——服务端裁决）
+      cell.className = "recipeCell" + (ok ? "" : " locked") +
+        (r.unlock && met !== true ? " unlck" : "") + (r.id === selectedRecipe ? " sel" : "");
       cell.textContent = r.out.map(([k, c]) => (c > 1 ? `${itemName(k)}×${c}` : itemName(k))).join(" + ");
-      cell.title = r.unlock ? `${r.id} · ${unlockHint(r.unlock)}` : r.id;
+      cell.title = r.unlock ? `${r.id} · ${unlockStatusText(r.unlock)}` : r.id;
       cell.addEventListener("click", () => { selectedRecipe = r.id; refreshCraftPanel(selfEntity()); });
       recipeGridEl.appendChild(cell);
     }
   }
   // 详情区
-  const r = RECIPES.find((x) => x.id === selectedRecipe) || RECIPES[0];
+  const r = recipeById(selectedRecipe) || recipeList()[0];
+  if (!r) return;
   craftNameEl.textContent = `${r.out.map(([k, c]) => `${itemName(k)}×${c}`).join(" + ")} ［${r.id}］`;
-  craftDescEl.textContent = RECIPE_DESC[r.id] || "——";
-  craftUnlockEl.textContent = r.unlock ? `🔒 ${unlockHint(r.unlock)}（仍可尝试，由服务端裁决）` : "";
+  craftDescEl.textContent = r.desc || "——";
+  craftUnlockEl.textContent = r.unlock ? unlockStatusText(r.unlock) : "";
   craftMatsEl.innerHTML = r.in.map(([k, c]) => {
     const have = totals[k] || 0;
     return `<span class="mat ${have >= c ? "ok" : "lack"}">${itemName(k)} ${have}/${c}</span>`;
@@ -2126,7 +2783,7 @@ function renderCraftJobs(selfEnt) {
     craftJobIds = ids;
     if (!jobs.length) { craftJobsEl.innerHTML = ""; return; }
     craftJobsEl.innerHTML = `<div class="gSecTitle">制 作 中</div>` + jobs.map((j) => {
-      const rec = RECIPES.find((r) => r.id === j.recipeId);
+      const rec = recipeById(j.recipeId);
       const outName = rec ? rec.out.map(([k, c]) => `${itemName(k)}×${c}`).join(" + ") : j.recipeId;
       return `<div class="jobRow">` +
         `<div class="jobName"><span>${outName}</span><span class="jobId">${j.recipeId}</span></div>` +
@@ -2239,12 +2896,16 @@ function buildHotbar(selfEnt) {
     let idx = -1;
     if (selfEnt) { const v = num(selfEnt, `Equipment.${eq.key}`); if (v !== undefined) idx = v; }
     const kind = selfEnt && idx >= 0 ? (str(selfEnt, `Inventory.${idx}.kind`) || "") : "";
+    // 冷却读秒（Cooldown.remainingMs，服务端权威；武器槽显示，本地计时兜底）
+    const cdLeft = eq.key === "weaponSlot" ? cooldownLeftSeconds(selfEnt) : 0;
     const d = document.createElement("div");
-    d.className = "slot eq" + (kind ? "" : " empty");
-    d.title = `${eq.label}${kind ? "：" + itemName(kind) + "（" + kind + "）" : "（空）"}`;
+    d.className = "slot eq" + (kind ? "" : " empty") + (cdLeft > 0 ? " cooling" : "");
+    d.title = `${eq.label}${kind ? "：" + itemName(kind) + "（" + kind + "）" : "（空）"}` +
+      (cdLeft > 0 ? ` · 冷却 ${cdLeft.toFixed(1)} 秒` : "");
     d.innerHTML = `<span class="eqTag">${eq.tag}</span>` +
       (kind ? `<span class="dot" style="background:${itemColor(kind)}"></span>` +
-        `<span class="kind">${itemName(kind)}</span>` : "");
+        `<span class="kind">${itemName(kind)}</span>` : "") +
+      (cdLeft > 0 ? `<span class="cdText">${cdLeft.toFixed(1)}s</span>` : "");
     if (idx >= 0) d.addEventListener("click", () => { selectedSlot = idx; });
     equipBarEl.appendChild(d);
   }
@@ -2259,9 +2920,9 @@ function buildQuests(selfEnt) {
       const st = num(selfEnt, `Quest.${i}.state`);
       const cnt = num(selfEnt, `Quest.${i}.count`);
       if (qid === undefined && st === undefined && cnt === undefined) break;
-      const meta = qid ? QUESTS[qid] : null;
-      const name = meta ? meta.name : (qid ?? "?");
-      items.push(`<div class="qItem" title="${qid ?? ""}"><span class="qName">${name}</span> ` +
+      const name = qid ? questTitle(qid) : "?";
+      const desc = qid ? questDesc(qid) : "";
+      items.push(`<div class="qItem" title="${esc(desc || qid || "")}"><span class="qName">${esc(name)}</span> ` +
         `<span class="qState s${st ?? 0}">[${QUEST_STATE_TEXT[st] ?? st}]</span>` +
         (cnt !== undefined && cnt > 0 ? ` <span class="qCnt">进度 ${cnt}</span>` : "") + `</div>`);
     }
@@ -2296,7 +2957,7 @@ function buildGrowth(selfEnt) {
     skills.set(m[1], cur);
   });
   const skillRows = [...skills.entries()].map(([id, s]) => {
-    const nm = SKILLS[id] || id;
+    const nm = skillLabel(id);
     // 技能经验同样是累计值：本级进度 = 累计 − 达到本级所需累计
     const sNeed = Math.max(1, Math.round(XP_CURVE.baseXp * Math.pow(XP_CURVE.growth, s.level - 1)));
     const sInto = Math.max(0, s.xp - xpAtLevel(s.level));
@@ -2310,7 +2971,7 @@ function buildGrowth(selfEnt) {
   // ③ 已解锁成就（Achievements.<id> = 1）
   const unlocked = unlockedAchievementIds(selfEnt);
   const achRows = unlocked.length
-    ? unlocked.map((id) => `<span class="gTag" title="${ACHIEVEMENTS[id]?.desc ?? id}">${ACHIEVEMENTS[id]?.name ?? id}</span>`).join("")
+    ? unlocked.map((id) => `<span class="gTag" title="${esc(achievementDesc(id))}">${esc(achievementName(id))}</span>`).join("")
     : `<div class="gEmpty">暂无成就</div>`;
   parts.push(`<div class="gSec"><div class="gSecTitle">成就</div>${achRows}</div>`);
 
@@ -2340,24 +3001,36 @@ function detectNewAchievements(selfEnt) {
     if (seenAchievements.has(id)) continue;
     seenAchievements.add(id);
     // 第一轮只记录基线（重连时既有成就不再弹）；之后新出现的才算「新解锁」
-    if (achievementBaselineDone) toast(`成就解锁：${ACHIEVEMENTS[id]?.name ?? id}`);
+    if (achievementBaselineDone) toast(`成就解锁：${achievementName(id)}`);
   }
   achievementBaselineDone = true;
 }
 
-/* ---------- 对话选项（自身实体存在 Dialogue.{i}.option 时渲染竖排按钮，协议 §4.6） ---------- */
-function buildDialogue(selfEnt) {
+/* ---------- 对话面板（Dialogue.text 正文 + Dialogue.option.<i>.text 选项文案） ---------- */
+// 选项文案读取：新键 Dialogue.option.<i>.text 优先，旧键 Dialogue.<i>.option 兜底
+function dialogueOptions(selfEnt) {
   const opts = [];
-  if (selfEnt) {
-    for (let i = 0; i < 16; i++) {
-      const o = str(selfEnt, `Dialogue.${i}.option`);
-      if (o === undefined) break;
-      opts.push(o);
-    }
+  if (!selfEnt) return opts;
+  for (let i = 0; i < 16; i++) {
+    const t = str(selfEnt, `Dialogue.option.${i}.text`);
+    if (t === undefined) break;                 // 索引连续，遇到空即止
+    opts.push(t);
   }
-  if (opts.length) {
+  if (opts.length) return opts;
+  for (let i = 0; i < 16; i++) {                // 兜底：旧协议键
+    const o = str(selfEnt, `Dialogue.${i}.option`);
+    if (o === undefined) break;
+    opts.push(o);
+  }
+  return opts;
+}
+function buildDialogue(selfEnt) {
+  const opts = dialogueOptions(selfEnt);
+  const body = (selfEnt && str(selfEnt, "Dialogue.text")) || "";
+  if (opts.length || body) {
     dlgEl.classList.remove("hidden");
-    dlgTitleEl.textContent = `对话中（节点 ${str(selfEnt, "Dialogue.nodeId") ?? "?"}）`;
+    dlgTitleEl.textContent = `对话中（节点 ${(selfEnt && str(selfEnt, "Dialogue.nodeId")) || "?"}）`;
+    dlgTextEl.textContent = body;
     dlgOptionsEl.innerHTML = "";
     opts.forEach((text, i) => {
       const b = document.createElement("button");
@@ -2367,8 +3040,265 @@ function buildDialogue(selfEnt) {
     });
   } else {
     dlgEl.classList.add("hidden");
+    dlgTextEl.textContent = "";
   }
 }
+
+/* ============================================================================
+ * 交易面板（P2P 报价：协议 §2.2 的 offer / offer-accept / offer-cancel）
+ * —— 附近玩家：RoomState.players 里其他 sessionId 的 entityId 即 networkId；
+ * —— 报价摘要：RoomState.offers（只含相关方）→ {from,to,give:[[kind,count]],take:[[kind,count]]}；
+ * —— 命令形状：offer{offer:[{party:networkId,give:[{kind,count}],take:[{kind,count}]}]}。
+ * ==========================================================================*/
+const tradeState = { target: null, give: [], take: [] };  // target=对方 networkId；give/take=我给出/我索取
+let tradePlayersSig = "";
+let tradeFormSig = "";
+let tradeOffersSig = "";
+
+// HTML 属性转义（offerId 等外部字符串进属性时用）
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+// 数量列表 → 中文摘要
+function fmtAmounts(list) {
+  if (!list || !list.length) return "（无）";
+  return list.map((a) => `${itemName(a.kind)} ×${a.count}`).join("、");
+}
+
+// 附近玩家（其他会话的玩家实体 + 距离；视野外显示「视野外」）
+function nearbyPlayers() {
+  const out = [];
+  if (!room || !room.state || !room.state.players) return out;
+  const selfEnt = selfEntity();
+  const sx = selfEnt ? num(selfEnt, "Transform.x") : undefined;
+  const sy = selfEnt ? num(selfEnt, "Transform.y") : undefined;
+  room.state.players.forEach((ps, sessionId) => {
+    if (!ps || sessionId === room.sessionId) return;
+    const netId = ps.entityId;
+    if (!netId) return;
+    let dist = null;
+    if (sx !== undefined && sy !== undefined) {
+      const ent = collectEntities().find((e) => e.id === netId);
+      if (ent) {
+        const ex = num(ent, "Transform.x"), ey = num(ent, "Transform.y");
+        if (ex !== undefined && ey !== undefined) dist = Math.round(Math.hypot(ex - sx, ey - sy));
+      }
+    }
+    out.push({ sessionId, netId, dist });
+  });
+  out.sort((a, b) => (a.dist ?? 1e9) - (b.dist ?? 1e9));
+  return out;
+}
+
+// 我的背包物品清单（「我给」用）
+function myInventoryItems() {
+  const totals = inventoryTotals(selfEntity());
+  return Object.keys(totals)
+    .filter((k) => totals[k] > 0)
+    .map((k) => ({ kind: k, count: totals[k] }));
+}
+
+// 已知物品目录（「我要」用）：/content 优先，否则用内置静态表
+function knownItemKinds() {
+  const kinds = new Set();
+  if (CONTENT.loaded && CONTENT.items.size) for (const k of CONTENT.items.keys()) kinds.add(k);
+  for (const k of Object.keys(ITEM_TABLE)) kinds.add(k);
+  return [...kinds];
+}
+
+// 报价条目增减
+function tradeAdd(list, kind, max) {
+  const found = list.find((a) => a.kind === kind);
+  if (found) {
+    if (max !== undefined && found.count >= max) return false;
+    found.count += 1;
+    return true;
+  }
+  list.push({ kind, count: 1 });
+  return true;
+}
+function tradeRemove(list, kind) {
+  const i = list.findIndex((a) => a.kind === kind);
+  if (i < 0) return;
+  if (list[i].count > 1) list[i].count -= 1;
+  else list.splice(i, 1);
+}
+
+// 报价摘要解析（RoomState.offers 的值可能是对象，也可能是 JSON 字符串）
+function parseOfferSummary(v) {
+  if (v === undefined || v === null) return null;
+  let o = v;
+  if (typeof o === "string") {
+    try { o = JSON.parse(o); } catch (e) { return null; }
+  }
+  if (!o || typeof o !== "object") return null;
+  const from = Number(o.from), to = Number(o.to);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
+  return { from, to, give: normAmounts(o.give), take: normAmounts(o.take) };
+}
+// 当前收到的报价（只含与自己相关的）
+function readOffers() {
+  const out = [];
+  const st = room && room.state;
+  if (!st || !st.offers || typeof st.offers.forEach !== "function") return out;
+  st.offers.forEach((v, k) => {
+    const sum = parseOfferSummary(v);
+    if (!sum) return;
+    out.push({ id: String(k), from: sum.from, to: sum.to, give: sum.give, take: sum.take });
+  });
+  return out;
+}
+
+// 发送报价：我给出 give / 我索取 take；对方条款互为镜像
+function sendTradeOffer() {
+  if (!room) { log("未连接，无法报价"); return; }
+  const p = me();
+  if (!p) { log("自身实体未同步"); return; }
+  const myNetId = p.entityId;
+  if (!myNetId) { log("自身 networkId 未同步"); return; }
+  if (!tradeState.target) { log("先在附近玩家里选择交易对象"); return; }
+  if (!tradeState.give.length && !tradeState.take.length) { log("先选择要给出或索取的物品"); return; }
+  const totals = inventoryTotals(selfEntity());
+  for (const a of tradeState.give) {
+    if ((totals[a.kind] || 0) < a.count) {
+      log(`${itemName(a.kind)} 数量不足（背包 ${totals[a.kind] || 0}）`);
+      return;
+    }
+  }
+  const give = tradeState.give.map((a) => ({ kind: a.kind, count: a.count }));
+  const take = tradeState.take.map((a) => ({ kind: a.kind, count: a.count }));
+  sendCommand({
+    type: "offer",
+    offer: [
+      { party: myNetId, give, take },
+      { party: tradeState.target, give: take, take: give },
+    ],
+  });
+  log(`已发出报价：给出 ${fmtAmounts(give)} · 索取 ${fmtAmounts(take)}（玩家 ${tradeState.target}）`);
+}
+// 确认报价（全部参与方确认后成交）
+function acceptOffer(offerId) {
+  sendCommand({ type: "offer-accept", offerId: String(offerId) });
+  log(`已确认报价 ${offerId}`);
+}
+// 撤销报价
+function cancelOffer(offerId) {
+  sendCommand({ type: "offer-cancel", offerId: String(offerId) });
+  log(`已撤销报价 ${offerId}`);
+}
+
+// 渲染交易面板（各分区用签名控制重建，避免打断玩家点击）
+function renderTradePanel() {
+  if (tradeEl.classList.contains("hidden")) return;
+  const p = me();
+  const myNetId = p ? p.entityId : 0;
+
+  // ① 附近玩家
+  const players = nearbyPlayers();
+  const psig = players.map((x) => `${x.netId}:${x.dist ?? "?"}`).join("|") + "#" + (tradeState.target ?? "");
+  if (psig !== tradePlayersSig) {
+    tradePlayersSig = psig;
+    tradePlayersEl.innerHTML = players.length
+      ? players.map((x) => `<div class="tradeRow"><span class="tradeName">玩家 ${x.netId}</span>` +
+          `<span class="tradeDist">${x.dist === null ? "视野外" : x.dist + "px"}</span>` +
+          `<button class="btnWood" data-target="${x.netId}">${tradeState.target === x.netId ? "已选" : "交易"}</button></div>`).join("")
+      : `<div class="gEmpty">附近没有其他玩家</div>`;
+    tradePlayersEl.querySelectorAll("button[data-target]").forEach((b) => {
+      b.addEventListener("click", () => {
+        tradeState.target = Number(b.dataset.target);
+        renderTradePanel();
+      });
+    });
+  }
+
+  // ② 报价条款（我给 / 我要）+ 物品选择器
+  const myItems = myInventoryItems();
+  const fsig = `${tradeState.target}|${JSON.stringify(tradeState.give)}|${JSON.stringify(tradeState.take)}|` +
+    myItems.map((i) => `${i.kind}${i.count}`).join(",");
+  if (fsig !== tradeFormSig) {
+    tradeFormSig = fsig;
+    tradeTargetEl.textContent = tradeState.target ? `玩家 ${tradeState.target}` : "未选择";
+    const rowOf = (a, attr) => `<div class="tradeRow"><span class="lootDot" style="background:${itemColor(a.kind)}"></span>` +
+      `<span class="tradeName">${itemName(a.kind)} ×${a.count}</span>` +
+      `<button class="btnWood" ${attr}="${esc(a.kind)}">−</button></div>`;
+    tradeGiveEl.innerHTML = tradeState.give.map((a) => rowOf(a, "data-give")).join("");
+    tradeTakeEl.innerHTML = tradeState.take.map((a) => rowOf(a, "data-take")).join("");
+    tradeMyItemsEl.innerHTML = myItems.length
+      ? myItems.map((i) => `<button class="tradePick${tradeState.give.some((a) => a.kind === i.kind) ? " sel" : ""}"` +
+          ` data-addgive="${esc(i.kind)}">${itemName(i.kind)} ×${i.count}</button>`).join("")
+      : `<div class="gEmpty">背包是空的</div>`;
+    tradeCatalogEl.innerHTML = knownItemKinds()
+      .map((k) => `<button class="tradePick${tradeState.take.some((a) => a.kind === k) ? " sel" : ""}"` +
+        ` data-addtake="${esc(k)}">${itemName(k)}</button>`).join("");
+    tradeGiveEl.querySelectorAll("button[data-give]").forEach((b) => {
+      b.addEventListener("click", () => { tradeRemove(tradeState.give, b.dataset.give); renderTradePanel(); });
+    });
+    tradeTakeEl.querySelectorAll("button[data-take]").forEach((b) => {
+      b.addEventListener("click", () => { tradeRemove(tradeState.take, b.dataset.take); renderTradePanel(); });
+    });
+    tradeMyItemsEl.querySelectorAll("button[data-addgive]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const kind = b.dataset.addgive;
+        const totals = inventoryTotals(selfEntity());
+        if (!tradeAdd(tradeState.give, kind, totals[kind] || 0)) log(`${itemName(kind)} 数量不足`);
+        renderTradePanel();
+      });
+    });
+    tradeCatalogEl.querySelectorAll("button[data-addtake]").forEach((b) => {
+      b.addEventListener("click", () => { tradeAdd(tradeState.take, b.dataset.addtake); renderTradePanel(); });
+    });
+  }
+
+  // ③ 报价收件箱（RoomState.offers：只含相关方）
+  const offers = readOffers();
+  const osig = JSON.stringify(offers);
+  if (osig !== tradeOffersSig) {
+    tradeOffersSig = osig;
+    if (!offers.length) {
+      tradeOffersEl.innerHTML = `<div class="gEmpty">暂无报价</div>`;
+    } else {
+      tradeOffersEl.innerHTML = offers.map((o) => {
+        const mine = myNetId && o.from === myNetId;
+        const btns = [];
+        if (!mine) btns.push(`<button data-accept="${esc(o.id)}">接受</button>`);
+        btns.push(`<button data-cancel="${esc(o.id)}">${mine ? "撤销" : "取消"}</button>`);
+        // 摘要以发起方（from）为基准：give = 发起方给出，take = 发起方收取
+        const giveLine = mine ? `我给出：${fmtAmounts(o.give)}` : `对方给出：${fmtAmounts(o.give)}`;
+        const takeLine = mine ? `我索取：${fmtAmounts(o.take)}` : `对方索取：${fmtAmounts(o.take)}`;
+        return `<div class="offerBox${mine ? " mine" : ""}">` +
+          `<div class="offerTitle">${mine ? "我发出的报价" : "来自玩家 " + o.from}</div>` +
+          `<div class="offerLine">${giveLine}</div>` +
+          `<div class="offerLine">${takeLine}</div>` +
+          `<div class="offerBtns">${btns.join("")}</div></div>`;
+      }).join("");
+      tradeOffersEl.querySelectorAll("button[data-accept]").forEach((b) => {
+        b.addEventListener("click", () => acceptOffer(b.dataset.accept));
+      });
+      tradeOffersEl.querySelectorAll("button[data-cancel]").forEach((b) => {
+        b.addEventListener("click", () => cancelOffer(b.dataset.cancel));
+      });
+    }
+  }
+}
+
+// 开关交易面板
+function toggleTradePanel() {
+  tradeEl.classList.toggle("hidden");
+  if (!tradeEl.classList.contains("hidden")) {
+    tradePlayersSig = ""; tradeFormSig = ""; tradeOffersSig = "";
+    renderTradePanel();
+  }
+}
+document.getElementById("tradeClose").addEventListener("click", () => tradeEl.classList.add("hidden"));
+document.getElementById("tradeSend").addEventListener("click", sendTradeOffer);
+document.getElementById("tradeClear").addEventListener("click", () => {
+  tradeState.give = [];
+  tradeState.take = [];
+  tradeFormSig = "";
+  renderTradePanel();
+  log("已清空报价条款");
+});
 
 function updateHud() {
   const p = me();
@@ -2384,6 +3314,10 @@ function updateHud() {
     growthBodyEl.innerHTML = "";
     closeLootPanel();
     exitAimMode();
+    tradeEl.classList.add("hidden");
+    tradeState.target = null;
+    tradeState.give = [];
+    tradeState.take = [];
     return;
   }
 
@@ -2417,6 +3351,19 @@ function updateHud() {
     levelTextEl.textContent = `层 L${selfLevel()}`;
   }
 
+  // ---- 季节与天气（RoomState.weatherId / phaseId / phaseProgress） ----
+  {
+    envState.weatherId = room.state.weatherId || "";
+    envState.phaseId = room.state.phaseId || "";
+    envState.phaseProgress = numOr(room.state.phaseProgress, 0);
+    const phaseTxt = envState.phaseId ? `${phaseName(envState.phaseId)}季` : "";
+    const weatherTxt = weatherName(envState.weatherId);
+    weatherTextEl.textContent = [phaseTxt, weatherTxt].filter(Boolean).join(" · ") || "—";
+    const pct = Math.max(0, Math.min(1, envState.phaseProgress)) * 100;
+    const fill = phaseBarEl.querySelector("i");
+    if (fill) fill.style.width = `${pct.toFixed(1)}%`;
+  }
+
   // ---- 状态徽章组（HP + Needs 液位徽章） ----
   buildBadges(selfEnt);
 
@@ -2446,10 +3393,23 @@ function updateHud() {
   // ---- 搜刮面板（打开时刷新槽位与距离；内容未变不重建，保住「取回」按钮可点） ----
   if (!lootEl.classList.contains("hidden")) renderLootPanel();
 
+  // ---- 交易面板（打开时刷新附近玩家 / 条款 / 报价收件箱） ----
+  if (!tradeEl.classList.contains("hidden")) renderTradePanel();
+
   // ---- 瞄准提示条（冷却剩余秒数） ----
   updateAimBanner();
 }
 setInterval(updateHud, 150);
+
+/* ============================================================================
+ * 启动：先按地址栏的服务端基址拉一次内容表（连上后会再拉一次，见 connect）。
+ * 拉取失败不阻塞任何功能——内置静态表兜底。
+ * ==========================================================================*/
+{
+  const ep = (endpointInput.value || "ws://localhost:3000").trim();
+  httpBase = ep.replace(/^ws:/, "http:").replace(/^wss:/, "https:");
+  void fetchContent();
+}
 </script>
 </body>
 </html>

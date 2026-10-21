@@ -150,7 +150,20 @@ registerAosSyncAdapter("Portal", (_world, eid, fields) => {
   return out;
 });
 
-/** 内建适配器：Dialogue（玩家对话会话——npcId/树/节点/选项文本）。 */
+/** 内建适配器：Dialogue（玩家对话会话——npcId/树/节点/正文/选项文本）。
+ *
+ * 展平键（服务端权威，客户端只读）：
+ * - `Dialogue.npcId`（数值）、`Dialogue.treeId` / `Dialogue.nodeId`（字符串）；
+ * - `Dialogue.text`（字符串）——当前对话节点的**正文**（对话树节点的 text）；
+ * - `Dialogue.option.{i}.text`（字符串）——第 i 个选项的**文案**；
+ * - `Dialogue.{i}.option`（字符串，历史键）——第 i 个选项文本（旧客户端读取路径，
+ *   与新键同值，保留以兼容既有客户端）。
+ *
+ * 字段白名单（netSync.fields）语义：
+ * - `text` → 节点正文；
+ * - `optionText` → 选项文案（新键 `Dialogue.option.{i}.text`）；
+ * - `options` → 选项文本（旧键 `Dialogue.{i}.option`）。
+ */
 registerAosSyncAdapter("Dialogue", (_world, eid, fields) => {
   const out = empty();
   const state = Dialogue[eid];
@@ -159,7 +172,12 @@ registerAosSyncAdapter("Dialogue", (_world, eid, fields) => {
     if (f === "npcId") out.numbers["Dialogue.npcId"] = state.npcId;
     else if (f === "treeId") out.strings["Dialogue.treeId"] = state.treeId;
     else if (f === "nodeId") out.strings["Dialogue.nodeId"] = state.nodeId;
-    else if (f === "options") {
+    else if (f === "text") out.strings["Dialogue.text"] = state.text ?? "";
+    else if (f === "optionText") {
+      for (let i = 0; i < state.options.length; i++) {
+        out.strings[`Dialogue.option.${i}.text`] = state.options[i];
+      }
+    } else if (f === "options") {
       for (let i = 0; i < state.options.length; i++) {
         out.strings[`Dialogue.${i}.option`] = state.options[i];
       }

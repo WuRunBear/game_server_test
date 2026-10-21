@@ -139,6 +139,7 @@ export function startDialogue(
     npcEid,
     treeId: tree.id,
     nodeId: tree.start,
+    text: node.text,
     options: node.options.map((o) => o.label),
   };
   return true;
@@ -326,6 +327,7 @@ export function advanceDialogue(world: GameWorld, playerEid: EntityId, optionInd
   }
 
   dlg.nodeId = to!;
+  dlg.text = nextNode!.text;
   dlg.options = nextNode!.options.map((o) => o.label);
   return true;
 }

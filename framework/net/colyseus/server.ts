@@ -1,7 +1,7 @@
 /**
  * Colyseus 服务端装配：创建 WebSocket 传输层、注册单房间类型
  * （game）、启动一个常驻房间，并挂载少量调试 HTTP 端点
- * （/health、/maps/runtime、/maps/meta、/debug/colliders）。游戏逻辑全部在
+ * （/health、/content、/maps/runtime、/maps/meta、/debug/colliders）。游戏逻辑全部在
  * 仿真层，本文件只负责把 Colyseus 接到 GameRoom 上。
  */
 import http from "node:http";
@@ -14,9 +14,10 @@ import { loadGameDefinition } from "framework/bootstrap/loadGameDefinition";
 import type { MapConfig } from "framework/config/schema/MapRegistrySchema";
 import { serverConfig } from "config";
 import { buildMapGeometry } from "map/generate/pipeline";
-import { serializeGeometry } from "map/geometry/snapshot";
-import { describeGeometry } from "map/geometry/version";
+import { serializeGeometry, type SerializedMapGeometry } from "map/geometry/snapshot";
+import { describeGeometry, type GeometryMetaInfo } from "map/geometry/version";
 import type { MapGeometry } from "map/geometry/types";
+import { buildContentCatalog } from "framework/content/catalog";
 import { GameRoom } from "network/colyseus/rooms/GameRoom";
 import type { Logger } from "utils/logger";
 
@@ -80,6 +81,61 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
 
   let persistentRoomId: string | undefined;
 
+  /**
+   * 常驻房间就绪信号。
+   *
+   * 地图端点需要区分「房间已就绪 → 读 live 几何」与「无房间 → 按配置重建」，
+   * 故端点先 await 本信号（带超时兜底），避免启动初期读到不一致的视图。
+   */
+  let markRoomReady: () => void = () => {};
+  const roomReady = new Promise<void>((resolve) => {
+    markRoomReady = resolve;
+  });
+
+  /** 等待常驻房间就绪（带超时；超时后按「无房间」处理）。 */
+  const waitForRoom = async (timeoutMs = 5000): Promise<void> => {
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      roomReady,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+  };
+
+  /**
+   * 取常驻房间内某图的**实时几何**快照（房间未就绪/图不存在 → undefined）。
+   *
+   * 实时几何含运行期写回（野火焦土等）的结果，version 指纹随之变化——
+   * 这正是「按配置重建」视图看不到的部分。
+   */
+  const liveGeometryOf = async (mapId: string): Promise<SerializedMapGeometry | undefined> => {
+    if (!persistentRoomId) return undefined;
+    try {
+      const result = await matchMaker.remoteRoomCall<GameRoom>(
+        persistentRoomId,
+        "getLiveMapGeometry",
+        [mapId],
+      );
+      return (result as SerializedMapGeometry | null | undefined) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  /** 取常驻房间内全部地图的实时元信息（房间未就绪 → undefined）。 */
+  const liveMetaOf = async (): Promise<GeometryMetaInfo[] | undefined> => {
+    if (!persistentRoomId) return undefined;
+    try {
+      const result = await matchMaker.remoteRoomCall<GameRoom>(persistentRoomId, "getLiveMapMeta", []);
+      return Array.isArray(result) ? (result as GeometryMetaInfo[]) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
   const gameServer = new Server({
     transport,
     // 停机存档接线（F-08）：Colyseus 的 gracefullyShutdown 钩子默认会监听
@@ -118,7 +174,13 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
         res.status(200).json({ ok: true });
       });
 
-      app.get("/maps/runtime", (req: any, res: any) => {
+      // 内容目录（静态表的服务端单一来源）：客户端一次拉取即拿到当前
+      // game/ 配置的物品/配方/任务/成就/相位/技能清单——不必硬编码。
+      app.get("/content", (_req: any, res: any) => {
+        res.status(200).json(buildContentCatalog(gameDef));
+      });
+
+      app.get("/maps/runtime", async (req: any, res: any) => {
         const rawMapId = req.query?.mapId;
         const mapId = typeof rawMapId === "string" ? rawMapId : undefined;
         // 缺省 mapId → 默认图；显式未知 key（含空串）→ 404，不静默顶替默认图
@@ -131,15 +193,23 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
           return;
         }
 
-        const snapshot = serializeGeometry(geometryOf(config));
+        // 优先读**活动房间的 live 几何**（含运行期写回，如野火焦土）；
+        // 无房间（房间未就绪/创建失败）时回退到按配置重建的视图。
+        await waitForRoom();
+        const live = await liveGeometryOf(config.key);
+        const snapshot = live ?? serializeGeometry(geometryOf(config));
         res.setHeader("x-map-version", snapshot.version);
         res.status(200).json(snapshot);
       });
 
-      app.get("/maps/meta", (_req: any, res: any) => {
-        const maps = gameDef.resolvedMapConfigs.map((config) =>
-          describeGeometry(geometryOf(config), config.pipeline[0].generator),
-        );
+      app.get("/maps/meta", async (_req: any, res: any) => {
+        await waitForRoom();
+        const live = await liveMetaOf();
+        const maps =
+          live ??
+          gameDef.resolvedMapConfigs.map((config) =>
+            describeGeometry(geometryOf(config), config.pipeline[0].generator),
+          );
 
         res.status(200).json({ default: defaultMapId, maps });
       });
@@ -182,14 +252,17 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
         (room) => {
           persistentRoomId = room.roomId;
           options.logger.info("常驻房间已创建", { roomId: room.roomId });
+          markRoomReady();
         },
         (err) => {
           options.logger.error("常驻房间创建失败", { error: String(err) });
+          markRoomReady();
         },
       );
     },
     (err) => {
       options.logger.error("服务器启动失败", { error: String(err) });
+      markRoomReady();
     },
   );
 

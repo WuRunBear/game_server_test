@@ -11,7 +11,7 @@ import { Room, type Client } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
 
 import { createGameSimulation, type SimulationPort } from "simulation";
-import type { PlayerInput, PlayerCommand, TickResult, EntitySnapshot } from "simulation/types";
+import type { PlayerInput, PlayerCommand, TickResult, EntitySnapshot, TickSnapshot, OfferSummary } from "simulation/types";
 import { loadGameDefinition } from "framework/bootstrap/loadGameDefinition";
 import { createFileRepository } from "framework/persistence/fileRepository";
 import type { ServerRule } from "framework/config/schema/RuleSchema";
@@ -28,14 +28,16 @@ import { PlayerState } from "network/colyseus/state/PlayerState";
 const DEBUG_COLLIDERS_PUSH_INTERVAL_MS = 500;
 
 /**
- * 类型守卫：判断收到的消息是否为合法的 PlayerInput 格式。
+ * 输入消息类型守卫：判断收到的消息是否为合法的 PlayerInput 格式。
  *
  * 传输层只做"字段存在 + 类型正确"的结构验证，不做游戏逻辑校验
  * （seq 去重、移动速度限制等由仿真层处理）。数值必须为有限数：
  * NaN/Infinity/非整数 seq 在此即丢弃（仿真层仍有同款权威校验）。
  * moveX/moveY 缺省视为 0（由仿真层归一化）。
+ *
+ * 导出供测试直连（守卫是协议边界的第一道闸：误拒 = 客户端命令整条丢弃）。
  */
-function isPlayerInput(message: unknown): message is PlayerInput {
+export function isPlayerInput(message: unknown): message is PlayerInput {
   if (!message || typeof message !== "object") return false;
   const obj = message as Record<string, unknown>;
   return (
@@ -52,12 +54,19 @@ function isPlayerInput(message: unknown): message is PlayerInput {
   );
 }
 
-/** 交易数量条目浅校验（结构合法性由仿真层最终裁决）。 */
-function isTradeAmountShape(value: unknown): boolean {
+/**
+ * 交易数量条目浅校验（结构合法性由仿真层最终裁决）。
+ *
+ * `container` **可省略**（缺省按背包 inventory 处理，见 economy/offer 的归一）；
+ * `kind` 与 `count` 仍必填（kind 非空字符串、count 正整数）。
+ */
+export function isTradeAmountShape(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const amount = value as Record<string, unknown>;
   return (
-    (amount.container === "inventory" || amount.container === "ledger") &&
+    (amount.container === undefined ||
+      amount.container === "inventory" ||
+      amount.container === "ledger") &&
     typeof amount.kind === "string" &&
     amount.kind.length > 0 &&
     typeof amount.count === "number" &&
@@ -66,8 +75,12 @@ function isTradeAmountShape(value: unknown): boolean {
   );
 }
 
-/** 交易单方条款浅校验（party eid + give/take 条目）。 */
-function isTradePartyShape(value: unknown): boolean {
+/**
+ * 交易单方条款浅校验（party 为**参与方 networkId**（正整数）+ give/take 条目）。
+ *
+ * `party` 是协议层的 networkId（客户端可见的稳定 id），不是服务端内部 eid。
+ */
+export function isTradePartyShape(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const party = value as Record<string, unknown>;
   if (
@@ -92,8 +105,18 @@ function isTradePartyShape(value: unknown): boolean {
   return true;
 }
 
-/** 命令消息类型守卫：只做结构校验，游戏逻辑校验在仿真层。 */
-function isPlayerCommand(message: unknown): message is PlayerCommand {
+/**
+ * 命令消息类型守卫：只做结构校验，游戏逻辑校验在仿真层。
+ *
+ * 协议放宽点（与客户端实现对齐，误拒 = 命令整条丢弃）：
+ * - `offer` 条款元素：`container` **可省略**（缺省 inventory）；`give`/`take`
+ *   元素仍须含 `kind`（非空字符串）与 `count`（正整数）；
+ * - `offerId`：**数字或数字字符串**皆可（RoomState.offers 的键是 offerId
+ *   字符串，客户端按该原值回传）。
+ *
+ * 导出供测试直连（守卫是协议边界的第一道闸）。
+ */
+export function isPlayerCommand(message: unknown): message is PlayerCommand {
   if (!message || typeof message !== "object") return false;
   const obj = message as Record<string, unknown>;
   return (
@@ -124,7 +147,9 @@ function isPlayerCommand(message: unknown): message is PlayerCommand {
     (obj.offer === undefined ||
       (Array.isArray(obj.offer) && obj.offer.every(isTradePartyShape))) &&
     (obj.offerId === undefined ||
-      (typeof obj.offerId === "number" && Number.isInteger(obj.offerId))) &&
+      (typeof obj.offerId === "number" && Number.isInteger(obj.offerId)) ||
+      // 客户端直接回传报价表 map 键的字符串形态 → 允许数字字符串
+      (typeof obj.offerId === "string" && /^\d+$/.test(obj.offerId.trim()))) &&
     (obj.ttlTicks === undefined ||
       (typeof obj.ttlTicks === "number" &&
         Number.isInteger(obj.ttlTicks) &&
@@ -198,6 +223,19 @@ export class GameRoom extends Room<{ state: RoomState }> {
   private debugPushCooldownMs = 0;
 
   /**
+   * 上一 tick 结束（已从共享报价表删除）的报价条目 id。
+   *
+   * 用途：让「曾看到该条目」的客户端仍能收到**删除操作**——报价表的删除
+   * 是在本 tick 的广播里编码的，故其可见性登记需再保留一轮（下一 tick 清理）。
+   */
+  private retiredOfferIds: string[] = [];
+
+  /**
+   * 最近一帧的报价摘要列表（供新连接加入时登记可见性）。
+   */
+  private lastOffers: OfferSummary[] = [];
+
+  /**
    * 房间创建——这是 GameRoom 生命周期的起点。
    *
    * 执行顺序：
@@ -244,7 +282,17 @@ export class GameRoom extends Room<{ state: RoomState }> {
     this.setSimulationInterval((deltaTime) => this.onTick(deltaTime, fixedDtMs), fixedDtMs);
 
     // --- 注册消息处理器 ---
+    this.registerMessageHandlers();
+  }
 
+  /**
+   * 注册消息处理器（input / command / 调试订阅）。
+   *
+   * 独立成方法（而非内联在 onCreate）：消息守卫是协议边界的**第一道闸**——
+   * 守卫误拒 = 客户端命令整条丢弃且无回执（最难排查的一类故障）。独立成
+   * 方法便于测试直连「守卫 → 仿真层」的完整链路。
+   */
+  private registerMessageHandlers(): void {
     // 客户端输入：校验格式后交给仿真层处理
     this.onMessage("input", (client: Client, message: unknown) => {
       if (!isPlayerInput(message)) return;
@@ -315,6 +363,27 @@ export class GameRoom extends Room<{ state: RoomState }> {
     }
     (client.view as unknown as { sessionId?: string }).sessionId = client.sessionId;
     client.view.add(playerState);
+    // 报价摘要表（RoomState.offers）是房间级共享表 + 逐条 per-client 过滤：
+    // 该表必须挂进本连接的 view（否则其过滤字段不进本客户端编码），
+    // 逐条可见性由 OfferSummaries.$filter 按 sessionId 判定。
+    client.view.add(this.state.offers);
+    // 新连接的可见性登记：既有报价条目的 ADD 操作早于其加入（已在其他广播
+    // 中编码过），故须在此立即登记，否则该连接的**初始全量状态**里看不到
+    // 自己参与的报价（后续帧也不会补发——条目内容未变）。
+    this.registerOfferVisibility(client.sessionId, networkId);
+  }
+
+  /**
+   * 登记某连接的报价可见性（按参与方 networkId 匹配）。
+   *
+   * @param sessionId 连接 sessionId
+   * @param networkId 该连接玩家的 networkId
+   */
+  private registerOfferVisibility(sessionId: string, networkId: number): void {
+    for (const offer of this.lastOffers) {
+      if (offer.from !== networkId && offer.to !== networkId) continue;
+      this.state.offers.addVisibleSession(String(offer.offerId), sessionId);
+    }
   }
 
   /**
@@ -366,6 +435,64 @@ export class GameRoom extends Room<{ state: RoomState }> {
   }
 
   /**
+   * 取房间内世界的**实时地图几何**快照（供 HTTP 端点 /maps/runtime 使用）。
+   *
+   * 与「按配置重建几何」不同：这里返回世界当前持有的几何——运行期写回
+   * （如野火焦土）已反映在 tiles/walkable/level 上，version 指纹随之变化。
+   * 该图不在世界中时返回 null（端点回退到配置重建视图）。
+   *
+   * 方法名必须保留不变：server.ts 用 Colyseus 的
+   * `matchMaker.remoteRoomCall<GameRoom>("getLiveMapGeometry")` 按字符串名调用。
+   */
+  getLiveMapGeometry(mapId: string): unknown {
+    return this.sim.getMapGeometry?.(mapId) ?? null;
+  }
+
+  /**
+   * 取房间内全部地图的实时元信息（id/尺寸/version）——供 /maps/meta 使用。
+   *
+   * version 取自**实时几何**（含写回后的内容指纹）；未在世界中构建的图不在
+   * 返回值里（端点回退到配置重建视图）。
+   */
+  getLiveMapMeta(): unknown {
+    const maps: Array<{
+      id: string;
+      name: string;
+      kind: string;
+      width: number;
+      height: number;
+      tileWidth: number;
+      tileHeight: number;
+      version: string;
+    }> = [];
+    for (const config of this.sim.getMapConfigs?.() ?? []) {
+      const geometry = this.sim.getMapGeometry?.(config.key);
+      if (!geometry) continue;
+      maps.push({
+        id: geometry.key,
+        name: geometry.key,
+        kind: config.pipeline[0]?.generator ?? "",
+        width: geometry.grid.width,
+        height: geometry.grid.height,
+        tileWidth: geometry.grid.tileWidth,
+        tileHeight: geometry.grid.tileHeight,
+        version: geometry.version,
+      });
+    }
+    return maps;
+  }
+
+  /**
+   * 调试用：写回某图单格地面语义（验证 /maps 端点读的是 live 几何）。
+   *
+   * 方法名必须保留不变：测试/工具经 Colyseus 的
+   * `matchMaker.remoteRoomCall<GameRoom>("debugWriteGround")` 按字符串名调用。
+   */
+  debugWriteGround(mapId: string, tileIndex: number, semanticId: number): unknown {
+    return this.sim.debugSetGround?.(mapId, tileIndex, semanticId) ?? false;
+  }
+
+  /**
    * 每帧 tick 回调——由 Colyseus setSimulationInterval 触发。
    *
    * 三步：
@@ -399,6 +526,12 @@ export class GameRoom extends Room<{ state: RoomState }> {
       this.state.hour = snapshot.timeOfDay.hour;
       this.state.phase = snapshot.timeOfDay.phase;
     }
+    // 环境派生（相位/天气/进度）：tick 的纯函数，仿真层每帧算出后写入。
+    if (snapshot.environment) {
+      this.state.weatherId = snapshot.environment.weatherId;
+      this.state.phaseId = snapshot.environment.phaseId;
+      this.state.phaseProgress = snapshot.environment.phaseProgress;
+    }
     // per-client 地图状态：每玩家从 snapshot.playerMaps 写入各自 PlayerState
     // （playerMaps 恒存在，todo 10；PlayerState.mapId 为 T12 新增字段）。
     for (const client of this.clients) {
@@ -406,9 +539,71 @@ export class GameRoom extends Room<{ state: RoomState }> {
       if (!playerState) continue;
       playerState.mapId = snapshot.playerMaps.get(client.sessionId) ?? "";
     }
+    // 报价摘要表：逐条按参与方过滤（非相关玩家看不到该条）。
+    this.applyOffers(snapshot);
     // per-client 地图变更检测（调试快照标记重置），随后恒走 per-client 兴趣路径。
     this.onMapChanged();
     this.applyInterest(result);
+  }
+
+  /**
+   * 维护报价摘要表（RoomState.offers）：条目内容 + 逐条可见性。
+   *
+   * 流程（每 tick）：
+   * 1. 清理**上一 tick**退休条目的可见性登记（其删除操作已在上一轮广播编码）；
+   * 2. 按快照算出每个连接的相关报价（自己是发起方或接收方）；
+   * 3. 把快照中已不存在的条目从共享表删除（可见性登记保留到下一轮，
+   *    让「曾看到该条」的客户端收到删除操作）；
+   * 4. 按本轮相关方重写可见性登记。
+   */
+  private applyOffers(snapshot: TickSnapshot): void {
+    const offers = snapshot.offers ?? [];
+    this.lastOffers = offers;
+    const liveIds = new Set(offers.map((offer) => String(offer.offerId)));
+
+    // 1) 退休条目的可见性登记清理（删除操作已编码完毕）
+    for (const offerId of this.retiredOfferIds) {
+      this.state.offers.clearVisibleSessions(offerId);
+    }
+    this.retiredOfferIds = [];
+
+    // 2) 每连接的相关报价集合（发起方/接收方）
+    const relevantBySession = new Map<string, Set<string>>();
+    for (const client of this.clients) {
+      const playerState = this.state.players.get(client.sessionId);
+      if (!playerState) continue;
+      const myNetworkId = playerState.entityId;
+      const relevant = new Set<string>();
+      for (const offer of offers) {
+        if (offer.from === myNetworkId || offer.to === myNetworkId) {
+          relevant.add(String(offer.offerId));
+        }
+      }
+      relevantBySession.set(client.sessionId, relevant);
+    }
+
+    // 3) 删除已结束的条目（可见性登记保留一轮，供删除操作编码）
+    for (const key of [...this.state.offers.keys()]) {
+      if (liveIds.has(key)) continue;
+      this.state.offers.delete(key);
+      this.retiredOfferIds.push(key);
+    }
+
+    // 4) 写条目内容 + 本轮可见性登记
+    for (const offer of offers) {
+      const offerId = String(offer.offerId);
+      this.state.offers.set(offerId, JSON.stringify({
+        from: offer.from,
+        to: offer.to,
+        give: offer.give,
+        take: offer.take,
+      }));
+      const sessions = new Set<string>();
+      for (const [sessionId, relevant] of relevantBySession) {
+        if (relevant.has(offerId)) sessions.add(sessionId);
+      }
+      this.state.offers.setVisibleSessions(offerId, sessions);
+    }
   }
 
   /**

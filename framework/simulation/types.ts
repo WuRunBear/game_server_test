@@ -44,11 +44,12 @@ export interface PlayerInput {
 
 /**
  * 交易数量条目（offer 命令条款内）。
- * container 保持框架通用机制词（inventory 槽位背包 / ledger 计数账本）。
+ * container 保持框架通用机制词（inventory 槽位背包 / ledger 计数账本）；
+ * 协议层**可省略** container（缺省按 inventory 处理）。
  */
 export interface TradeAmount {
-  /** 容器种类。 */
-  container: "inventory" | "ledger";
+  /** 容器种类（缺省 = inventory）。 */
+  container?: "inventory" | "ledger";
   /** 物品种类字符串（game/items 配置的 kind）。 */
   kind: string;
   /** 数量（> 0）。 */
@@ -57,7 +58,13 @@ export interface TradeAmount {
 
 /** 交易单方条款（offer 命令条款内）。 */
 export interface TradeParty {
-  /** 参与方实体 eid。 */
+  /**
+   * 参与方的**网络标识**（NetworkId，客户端可见的稳定 id）。
+   *
+   * 客户端拿不到服务端内部 eid（eid 由 ECS 分配、销毁后可能复用），因此
+   * 协议层一律用 networkId 表达参与方；服务端在命令入口把 networkId 反查为
+   * eid 后再进入结算流程（解析失败即拒绝该命令）。
+   */
   party: number;
   /** 该方给出的数量列表（从其容器扣减）。 */
   give?: TradeAmount[];
@@ -88,10 +95,10 @@ export interface PlayerCommand {
   target?: number;
   /** 对话选项索引（dialogue 用，推进当前对话节点）。 */
   option?: number;
-  /** 交易条款（offer 用，恰好两方；发送方本人视为已确认，另一方必须是在线玩家并经 offer-accept 显式确认）。 */
+  /** 交易条款（offer 用，恰好两方；`party` 为**参与方 networkId**（客户端可见 id），发送方本人视为已确认，另一方必须是在线玩家并经 offer-accept 显式确认）。 */
   offer?: TradeParty[];
-  /** 报价会话 id（offer-accept / offer-cancel 用）。 */
-  offerId?: number;
+  /** 报价会话 id（offer-accept / offer-cancel 用；数字或数字字符串皆可——客户端可直接回传报价表 map 键的字符串形态）。 */
+  offerId?: number | string;
   /** 报价有效期（offer 用，tick 数；缺省不过期）。 */
   ttlTicks?: number;
 }
@@ -177,11 +184,44 @@ export interface TickSnapshot {
    */
   timeOfDay?: { hour: number; phase: number };
   /**
+   * world 级环境状态（相位/天气：同样是 tick 的纯函数派生）。
+   *
+   * 传输层写入 RoomState 的 weatherId/phaseId/phaseProgress 三个字段；
+   * 无 environment 规则时为 undefined（传输层按空串/0 兜底）。
+   */
+  environment?: { weatherId: string; phaseId: string; phaseProgress: number };
+  /**
+   * 进行中的报价会话摘要（offerId → 条款摘要）。
+   *
+   * 传输层据此维护 RoomState.offers（offerId → JSON 摘要字符串），并按
+   * 「参与方是否含该玩家」做 per-client 可见性裁剪（非参与玩家看不到该条）。
+   */
+  offers?: OfferSummary[];
+  /**
    * 每玩家地图状态：sessionId → 该玩家当前所属地图 id。
    * 房间级 mapId 已随 tick 快照移除——地图语义按玩家拆分（per-player maps）；
    * 传输层据此同步各玩家协议并处理 per-client 缓存失效（todo 13）。
    */
   playerMaps: Map<string, string>;
+}
+
+/**
+ * 报价会话摘要（传输层/客户端可见形态）。
+ *
+ * 视角约定：**以发起方（from）为基准**——`give` 是发起方给出的物品，
+ * `take` 是发起方收取的物品；接收方视角相反。
+ */
+export interface OfferSummary {
+  /** 报价会话 id（world 分配的自增号，客户端用于 offer-accept / offer-cancel）。 */
+  offerId: number;
+  /** 发起方的 networkId。 */
+  from: number;
+  /** 接收方的 networkId。 */
+  to: number;
+  /** 发起方给出的物品（kind → 数量，按条款顺序）。 */
+  give: Array<[string, number]>;
+  /** 发起方收取的物品（kind → 数量，按条款顺序）。 */
+  take: Array<[string, number]>;
 }
 
 /**

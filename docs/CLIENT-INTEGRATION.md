@@ -101,8 +101,8 @@ const room = await client.joinOrCreate<RoomState>("game");
 | `throw` | `x?: number`, `y?: number`（世界坐标） | 投掷**武器槽**中声明了投掷档案的物品；瞄准点优先，缺省按最近敌人/移动朝向回退 |
 | `dialogue` | `option: number` | 推进当前对话（选项索引，见 §4.6） |
 | `offer` | `offer: TradeParty[]`, `ttlTicks?: number` | 发起交易：提交各方条款，发起方本人视为已确认 |
-| `offer-accept` | `offerId: number` | 确认目标报价（全部参与方确认后成交） |
-| `offer-cancel` | `offerId: number` | 取消目标报价 |
+| `offer-accept` | `offerId: number \| string` | 确认目标报价（全部参与方确认后成交） |
+| `offer-cancel` | `offerId: number \| string` | 取消目标报价 |
 
 命令补充说明：
 
@@ -114,12 +114,15 @@ const room = await client.joinOrCreate<RoomState>("game");
 `offer` 的 `offer` 参数是交易条款数组（`TradeParty[]`），每项形如：
 
 ```jsonc
-{ "party": 3, "give": [{ "container": "inventory", "kind": "<itemKind>", "count": 5 }], "take": [{ "container": "inventory", "kind": "<itemKind>", "count": 2 }] }
+{ "party": 123, "give": [{ "container": "inventory", "kind": "<itemKind>", "count": 5 }], "take": [{ "container": "inventory", "kind": "<itemKind>", "count": 2 }] }
 ```
 
-- `party` = 参与方实体 eid；`give` = 该方给出的数量列表（成交时从其容器扣减），`take` = 该方收取的数量列表（成交时插入其容器）；`container` ∈ `inventory` | `ledger`。
+- `party` = 参与方的 **networkId**（客户端可见的稳定 id，如自己 `PlayerState.entityId`、对方实体 `EntityState.id`）；**不是**服务端内部 eid（客户端拿不到）。服务端在命令入口把 networkId 反查为内部实体，**解析失败即整条拒绝**。
+- `give` = 该方给出的数量列表（成交时从其容器扣减），`take` = 该方收取的数量列表（成交时插入其容器）；`container` ∈ `inventory` | `ledger`，**可省略**（缺省按 `inventory` 背包处理，客户端只需给 `{kind, count}`）。
 - 可选 `ttlTicks` 为报价有效期（tick 数，缺省不过期）；发起方本人视为已确认，`offer-accept` 由对方确认，全部参与方确认后成交。
+- `offer-accept` / `offer-cancel` 的 `offerId`：**数字或数字字符串皆可**（客户端可直接回传 `RoomState.offers` 的 map 键原值——那是字符串形态）。
 - 交易账本（ledger）状态**不进入状态同步**（§3.5 无对应 key）——交易由服务端权威推进，客户端以 `Inventory` 变化确认成交结果。
+- **进行中的报价**经 `RoomState.offers` 同步（§3.1「报价摘要」）：发起方与接收方各自能看到该条，其他玩家看不到；成交/取消后条目消失。
 
 约束：
 
@@ -143,10 +146,41 @@ Colyseus Schema 增量同步（补丁 + 全量握手）。**客户端必须声�
 | `hour` | float64 | 世界小时 0–24（推进速率见下「昼夜语义」） |
 | `phase` | uint8 | 0=白天，1=夜晚 |
 | `players` | map\<string, PlayerState\> | key = sessionId |
+| `weatherId` | string | 当前**天气 id**（配置字符串，如 `clear`/`rain`/`fog`/`drought`/`storm`；无环境规则时为空串） |
+| `phaseId` | string | 当前**相位 id**（配置字符串，如 `mild`/`dry`/`wet`/`storm`；无环境规则时为空串） |
+| `phaseProgress` | number | 当前相位内进度 **0..1**（float64；无环境规则时为 0） |
+| `offers` | map\<string, string\> | 进行中的**报价摘要表**：key = 报价会话 id（字符串），value = 摘要 JSON 字符串（见下「报价摘要」） |
+
+> **字段顺序即线协议**：上表顺序 = 服务端 Schema 声明顺序 = 客户端必须声明的顺序。新增字段一律**追加在末尾**（`players` 之后依次是 `weatherId`/`phaseId`/`phaseProgress`/`offers`），既有四项（`tick`/`hour`/`phase`/`players`）的字段索引不变。
 
 > **昼夜语义**：`hour` 按 daynight 规则（`game/rules/daynight.json`）推进——每 `cycleLengthSec` 真实秒走完 24 世界小时（当前配置 600s ⇒ 1 世界小时 = 25 真实秒 ≈ 500 tick@20tps）；`phase` 在 `nightStartHour`/`nightEndHour` 边界切换（当前 19/5，支持跨午夜）。**天数不在协议中**：客户端如需显示「第 X 天」，自行累计 `hour` 回绕（23.x→0.x）次数，属本地近似。
 
-> **房间级状态只有上面四个字段**（协议破坏性变更）：`RoomState` 不再携带 `mapId` / `entities`。玩家的当前地图是 **per-player** 的，经 `PlayerState.mapId` 同步（见 §3.2），**不是**房间级字段；实体同步恒走 per-client 的 `PlayerState.visibleEntities`（见 §3.2），`RoomState` 内没有实体表。
+> **环境（相位/天气）语义**：`phaseId`/`weatherId`/`phaseProgress` 三者同源于**当前 tick 的纯函数派生**（相位程序按绝对槽对齐；天气按「本槽所属相位」的候选+权重确定性抽样），配置源是 `game/rules/environment.json`。id 是**配置字符串**，服务端只透传、不解释其含义（含义随配置漂移，客户端不要硬编码具体取值集）。三者每帧随快照刷新。
+
+> **房间级状态**：`RoomState` 不再携带 `mapId` / `entities`。玩家的当前地图是 **per-player** 的，经 `PlayerState.mapId` 同步（见 §3.2），**不是**房间级字段；实体同步恒走 per-client 的 `PlayerState.visibleEntities`（见 §3.2），`RoomState` 内没有实体表。
+
+#### 报价摘要（`RoomState.offers`）
+
+- **key**：报价会话 id（字符串形式的十进制数字，服务端自增；用于 `offer-accept` / `offer-cancel` 命令的 `offerId`）。
+- **value**：一段 JSON 字符串（**不是**嵌套对象，客户端需 `JSON.parse`）：
+
+  ```jsonc
+  { "from": 123, "to": 456, "give": [["wood", 2]], "take": [["shell", 5]] }
+  ```
+
+  | 字段 | 含义 |
+  |------|------|
+  | `from` | **发起方**的 networkId（即 `PlayerState.entityId` 语义的稳定 id） |
+  | `to` | **接收方**的 networkId |
+  | `give` | 发起方**给出**的物品：`[[kind, 数量], …]`（`kind` 为物品 kind 字符串） |
+  | `take` | 发起方**收取**的物品：`[[kind, 数量], …]` |
+
+  视角约定：**以发起方（`from`）为基准**——接收方视角相反（`give`↔`take` 互换）。
+
+- **可见性（重要）**：服务端按参与方裁剪——**只有该报价的发起方/接收方能在自己的 `offers` 表里看到这条**，其他玩家的表中没有该条目。客户端读到的每一条都与自己相关，可直接渲染为「待处理报价」列表。
+- **生命周期**：报价被**接受（成交）/取消/过期**后，该条目从表中移除（key 消失）。
+- 交易账本（ledger）状态仍**不进入状态同步**（§3.5 无对应 key）——成交结果以 `Inventory` 变化为准。
+
 
 ### 3.2 PlayerState（每玩家）
 
@@ -207,12 +241,20 @@ export class RoomState extends Schema {
   @type("float64") hour: number = 8;
   @type("uint8") phase: number = 0;
   @type({ map: PlayerState }) players = new MapSchema<PlayerState>();
+  // —— 以下四个字段追加在末尾（顺序即线协议）——
+  @type("string") weatherId: string = "";        // 当前天气 id（配置字符串）
+  @type("string") phaseId: string = "";          // 当前相位 id（配置字符串）
+  @type("number") phaseProgress: number = 0;     // 当前相位进度 0..1
+  @type({ map: "string" }) offers = new MapSchema<string>(); // 报价摘要：offerId → JSON 字符串
 }
 ```
 
 > 协议破坏性变更：`RoomState` 已移除 `mapId` 与 `entities`（旧字段顺序对齐的客户端会错位解码）；`PlayerState` 新增 `mapId`。字段**顺序**是线协议的一部分——客户端声明必须与服务端一致（见 §3.4 顶部提示），旧客户端解码新流会错位、需升级。
 >
 > **兼容性说明（`EntityState.level`）**：`level` 是**末尾追加**字段，既有 `id` / `values` / `stringValues` 三项的**字段索引不变**——旧客户端在结构上仍能解码新流（只是读不到层号）；新客户端连旧服务端则缺 `level`（按 0 处理即可）。
+>
+> **兼容性说明（`RoomState` 末尾四字段）**：`weatherId`/`phaseId`/`phaseProgress`/`offers` 均为**末尾追加**，既有四项（`tick`/`hour`/`phase`/`players`）索引不变；旧客户端在结构上仍能解码新流（只是读不到这四项）。
+
 
 （非 TS/JS 客户端：以本表字段名/类型/顺序为准，用各自语言的 @colyseus/schema 绑定声明。）
 
@@ -241,7 +283,7 @@ export class RoomState extends Schema {
 | Passage | `Passage.open` | 可开合屏障（门）状态：1=放行 / 0=阻挡 |
 | GridOccupancy | `GridOccupancy.cellX/cellY/cellW/cellH` | 建筑占用的网格 |
 | Portal | `Portal.targetMap/x/y` | 传送门：目标地图与落点 |
-| Dialogue | `Dialogue.npcId/treeId/nodeId/{i}.option` | 玩家对话会话（仅对话中出现的 key，见 §4.6） |
+| Dialogue | `Dialogue.npcId/treeId/nodeId/text`、`Dialogue.option.{i}.text`、`Dialogue.{i}.option` | 玩家对话会话（仅对话中出现的 key，见 §4.6） |
 | DialogueSource | `DialogueSource.treeId` | NPC 挂载的对话树 id |
 | Quest | `Quest.{i}.questId/state/count` | 玩家任务（state：0未接/1进行/2可交/3完成） |
 | Relation | `Relation.{i}.npcKind/value` | 与 NPC 的好感值 |
@@ -249,6 +291,7 @@ export class RoomState extends Schema {
 | Progression | `Progression.skill.{skillId}.xp/level` | 按技能 id 展开的技能经验/等级（skillId 由 progression 规则配置约定） |
 | Achievements | `Achievements.{achievementId}` | 已解锁成就（数值 **1 = 已解锁**；id 由 achievements 规则配置约定） |
 | Crafting | `Crafting.{i}.recipeId`（stringValues）、`Crafting.{i}.remainingTicks/progress/suspended`（values） | **进行中的制作**：`recipeId`=配方 id、`remainingTicks`=距完成剩余 tick（0=到点）、`progress`=时间进度 0–1（挂起时恒 1）、`suspended`=1 表示到点但产出条件未满足（背包满/站点失效）；任务完成/取消后整条消失 |
+| Cooldown | `Cooldown.remainingMs` | **玩家**装备/攻击冷却剩余毫秒（仅带 `Player` 标签的实体同步；服务端权威、每帧递减）。供客户端显示冷却提示——但**冷却是否结束仍以服务端裁决为准**（命令失败无回执） |
 
 ### 3.6 实体辨识（客户端如何知道"这是什么"）
 
@@ -286,7 +329,7 @@ export class RoomState extends Schema {
 | 取消制作 | `command craft-cancel` | 取消进行中的制作并退料（退料放不下则整条拒绝） | 制作时长/条件同 crafting 配置 |
 | 容器取回 | `command transfer{target,slot}` | 容器槽物品 → 本人背包 | 取回距离 = place 规则 `containerRange`（缺省 64px）；同图/同层校验 |
 | 加燃料 | `command refuel` | 消耗背包燃料物品 → 站点 `LightSource.fuelRemainingMs` 增长 | 射程 = crafting 规则 `stationRange`；燃料物品表 = crafting 规则 `fuel.items` |
-| 投掷 | `command throw{x,y}` | 武器槽投掷档案物品 → 投射物实体（直线飞行、命中/寿命结束销毁） | 投掷参数（速度/寿命/半径/伤害/冷却）由物品配置 `throw` 段定义；冷却由服务端裁决（Cooldown 组件**不同步**） |
+| 投掷 | `command throw{x,y}` | 武器槽投掷档案物品 → 投射物实体（直线飞行、命中/寿命结束销毁） | 投掷参数（速度/寿命/半径/伤害/冷却）由物品配置 `throw` 段定义；冷却剩余毫秒经 `Cooldown.remainingMs` 同步（玩家实体），**是否放行仍由服务端裁决** |
 | 装备 | `command equip` | `Equipment` 三槽更新，攻击/采集加成即时生效 | 槽位 weapon/tool/armor 是协议形状；加成数值由物品配置（`game/items/`）定义 |
 | 食用/丢弃 | `command consume/drop` | 需求恢复 / 地面掉物 | 食用恢复量由物品配置（`game/items/`）定义 |
 | 放置 | `command place` | 校验后消耗 1 个 kit → 生成建筑实体 | 放置距离/网格吸附由 place 规则（`game/rules/place.json`）配置 |
@@ -332,8 +375,18 @@ export class RoomState extends Schema {
 ### 4.6 对话
 
 1. `input { talk: true }` → 半径内最近 NPC 开始对话。
-2. 服务端同步 `Dialogue.*` key（`nodeId` + `{i}.option` 选项文本数组）。
-3. 客户端渲染选项，选第 i 项 → `command { type: "dialogue", option: i }`。
+2. 服务端同步 `Dialogue.*` key：
+
+   | key | 位置 | 含义 |
+   |------|------|------|
+   | `Dialogue.treeId` | stringValues | 对话树 id |
+   | `Dialogue.nodeId` | stringValues | 当前节点 id |
+   | `Dialogue.text` | stringValues | **当前节点的正文**（对话气泡内容） |
+   | `Dialogue.option.{i}.text` | stringValues | **第 i 个选项的文案**（按钮文本） |
+   | `Dialogue.{i}.option` | stringValues | 第 i 个选项文本（历史键，与 `option.{i}.text` 同值，保留兼容） |
+   | `Dialogue.npcId` | values | 对话对象的 networkId |
+
+3. 客户端渲染正文（`Dialogue.text`）与选项按钮（`Dialogue.option.0.text`、`Dialogue.option.1.text`…），选第 i 项 → `command { type: "dialogue", option: i }`。
 4. 服务端执行选项效果（接/交任务、好感）；**效果失败停留在当前节点**（可重试）；`__end__` 选项结束对话（`Dialogue.*` key 消失）。
 5. NPC 实体带 `DialogueSource.treeId`（树 id），用于区分不同 NPC 的对话。
 
@@ -346,16 +399,20 @@ export class RoomState extends Schema {
 
 ### 4.8 成长、成就与容器（静态表 vs 协议）
 
-**协议只同步「数值与 id」，不枚举内容**——客户端要显示中文名/图标/描述时，需自备静态表（来自 `game/` 配置，随配置漂移）：
+**协议只同步「数值与 id」，不枚举内容**——中文名/描述统一从 **`GET /content`**（§5.2.1）拉取，不必再自备静态表（该端点是当前 `game/` 配置的服务端单一来源，内容随配置漂移）：
 
-| 展示内容 | 协议来源（id / 数值） | 静态表来源（名称/描述） |
+| 展示内容 | 协议来源（id / 数值） | 名称/描述来源（`/content`） |
 |----------|----------------------|------------------------|
 | 角色等级与经验 | `Progression.totalXp` / `Progression.level` | 等级曲线 `game/rules/progression.json`（`curve`：baseXp / growth / maxLevel） |
-| 技能等级与经验 | `Progression.skill.{skillId}.xp` / `.level` | 技能 id 与中文名 `game/rules/progression.json`（`skills`） |
-| 已解锁成就 | `Achievements.{achievementId}` = 1 | 成就 id/名称/描述 `game/rules/achievements.json` |
-| 任务名称与目标 | `Quest.{i}.questId` / `.state` / `.count` | 任务 id/名称/目标 `game/quests/quests.json` |
-| 容器物品清单 | `Inventory.{i}.kind/count/durability` | 物品名/色标/耐久上限 `game/items/*.json`（**耐久上限不在协议内**，只同步当前值） |
-| 配方名称与解锁条件 | `Crafting.{i}.recipeId` | 配方表与 `unlock.condition` `game/rules/crafting.json` |
+| 技能等级与经验 | `Progression.skill.{skillId}.xp` / `.level` | `skills[].id/label`（`/content` 的 `skills` 段） |
+| 已解锁成就 | `Achievements.{achievementId}` = 1 | `achievements[].id/title/desc`（`/content` 的 `achievements` 段） |
+| 任务名称与目标 | `Quest.{i}.questId` / `.state` / `.count` | `quests[].id/title/desc`（`/content` 的 `quests` 段） |
+| 容器物品清单 | `Inventory.{i}.kind/count/durability` | `items[].kind` + 物品定义字段（`/content` 的 `items` 段；**耐久上限**也在其中） |
+| 配方名称与解锁条件 | `Crafting.{i}.recipeId` | `recipes[].id/desc/unlock`（`/content` 的 `recipes` 段） |
+| 物品名称 | `Inventory.{i}.kind` / `ItemMeta.kind` | `items[]`（`/content` 的 `items` 段；含堆叠上限/耐久/食用/穿戴/放置/投掷档案） |
+| 环境相位与天气 | `RoomState.phaseId/phaseProgress/weatherId` | `phases[].id/durationTicks/weather/modifiers`（`/content` 的 `phases` 段） |
+
+> 兼容说明：`/content` 不可用时（旧服务端）客户端仍可退回到自备静态表的旧做法——协议本身不依赖该端点。
 
 - 等级曲线语义：等级 L（1 起）升到 L+1 所需经验 = `round(baseXp × growth^(L-1))`；**累计**经验跨级累加，服务端按此派生 `level`。客户端若要画经验条，须用同一公式换算「本级进度」。
 - 成就解锁是**世界级事实**（随存档恢复），按实体投影到玩家实体（`Achievements.<id>` = 1）；客户端可用「key 由无到有」判定**新解锁**并提示（重连时既有成就不应重复提示）。
@@ -399,9 +456,13 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 | 端点 | 说明 |
 |------|------|
 | `GET /health` | 健康检查，`{"ok":true}` |
+| `GET /content` | **内容目录**（静态表的单一来源，见 §5.2.1） |
 | `GET /maps/runtime?mapId=<key>` | 地图几何全图快照：网格尺寸、地面语义 `tiles`、通行位图 `walkable`、区域 `regions`/`regionOfTile`、内容版本。用于客户端加载地图/碰撞。`mapId` 可选：省略时返回默认地图（game.json `map.default`，即 `/maps/meta` 的 `default` 字段）；未知 key（含空串）返回 404，错误体附可用图列表 |
 | `GET /maps/meta` | 地图清单：默认图 key 与全部地图的元信息（含 version）。客户端可先拉取清单列出地图、预检版本，再按需拉取 runtime |
 | `GET /debug/colliders` | 房间碰撞体调试快照（房间未就绪时 404） |
+
+> **地图几何来源（live 优先）**：`/maps/runtime` 与 `/maps/meta` 优先返回**活动房间的实时几何**（含运行期写回的结果，如野火焦土——`tiles`/`walkable`/`level` 已变，`version` 指纹随之变化）；房间未就绪（服务刚启动、或房间创建失败）时回退为「按配置重建」的视图。两种视图在**没有任何写回**时内容一致，因此客户端按 `{key, version}` 缓存仍然安全；若运行期发生地形改写，`version` 会变，客户端据此重新拉取。
+
 
 `/maps/runtime` 返回示例（**以当前 game/ 配置「荒岛求生」为例**——地图清单/尺寸/区域名均为配置产物，随配置漂移）：
 
@@ -466,6 +527,74 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 > 字段说明：`id`/`name` = 地图 registry key（当前两者同值）；`kind` = 生成管道首积木注册名（如 `noise-terrain`/`tiled-source`）；`version` 与 `/maps/runtime` 响应体及 `x-map-version` 响应头同值。旧版的 `generatorId`/`seed` 字段已移除。
 
 > 用法：客户端可先请求 `/maps/meta` 列出可用地图与各自 `version`（预检版本、渲染地图选择 UI），再按需请求 `/maps/runtime?mapId=<key>` 拉取具体地图数据。
+
+#### 5.2.1 内容目录（`GET /content`）
+
+**目的**：消灭客户端的硬编码静态表——物品/配方/任务/成就/相位/技能的中文名与描述，全部由服务端从**当前 game/ 配置**导出，客户端一次拉取即用。
+
+请求：`GET /content`（无参数、无查询串）。
+
+响应体（JSON）：
+
+```jsonc
+{
+  "items": [
+    {
+      "kind": "axe",            // 物品 kind（全局唯一标识）
+      "maxStack": 1,            // 单槽最大堆叠数
+      "maxDurability": 60,      // 最大耐久
+      "toolType": "axe",        // 工具分类
+      "consume": [{ "need": "hunger", "amount": 20 }],  // 食用效果
+      "equip": { "slot": "tool" },                      // 穿戴效果
+      "place": { "archetype": "campfire" },              // 放置效果
+      "spoilTicks": 3600,       // 腐烂时长（tick）
+      "value": 5,               // 基准价值
+      "throw": { "speed": 320, "lifeMs": 1000, … }       // 投掷档案
+    }
+  ],
+  "recipes": [
+    {
+      "id": "wood_axe",
+      "inputs": [["wood", 2]],          // [kind, 数量]
+      "outputs": [["axe", 1]],
+      "stationType": 0,                 // 站点类型要求（缺省 = 无要求）
+      "durationTicks": 0,               // 延时制作时长（缺省 = 瞬时）
+      "unlock": { "condition": "inPhase:storm" },  // 解锁条件（可选）
+      "desc": "木斧"                    // 描述（配置无描述时用展示名兜底）
+    }
+  ],
+  "quests": [
+    { "id": "collect_axe", "state": 0, "count": 0, "title": "带来一把斧头", "desc": "收集 1 个斧头" }
+  ],
+  "achievements": [
+    { "id": "village_friend", "title": "渔村的熟人", "desc": "与渔村势力声望达到 10。", "condition": "factionRepAtLeast:village:10", "reward": { … } }
+  ],
+  "phases": [
+    { "id": "mild", "durationTicks": 24000, "weather": [{ "id": "clear", "weight": 5 }], "modifiers": { "temperatureOffset": 0 } }
+  ],
+  "skills": [{ "id": "combat", "label": "战斗" }]
+}
+```
+
+字段说明：
+
+| 段 | 字段 | 说明 |
+|----|------|------|
+| `items` | `kind` | 物品 kind（与 `Inventory.{i}.kind` / `ItemMeta.kind` 同一命名空间） |
+| | 其余字段 | 与物品配置同名同义；**配置未声明的字段直接省略**（不会出现 `null`/空串占位） |
+| `recipes` | `inputs`/`outputs` | 归一为 `[kind, 数量]` 数组（二元组） |
+| | `unlock` | 解锁条件声明（与服务端裁决同源；客户端可显示提示但**不要**据此禁发命令） |
+| `quests` | `state`/`count` | **中性缺省**（0 = 未接 / 进度 0）——内容目录与具体玩家无关；**单个玩家的任务状态以 `Quest.{i}.state/count` 同步为准**（§3.5） |
+| | `title`/`desc` | 任务标题/描述（配置无该字段时按展示名/目标形态生成可读兜底文案） |
+| `achievements` | `title`/`desc` | 取配置的名称/描述字段（缺省时用展示名/条件兜底） |
+| | `condition` | 解锁条件（服务端裁决） |
+| `phases` | `id`/`durationTicks`/`weather`/`modifiers` | 环境相位定义（与 `RoomState.phaseId` 同源命名空间） |
+| `skills` | `id`/`label` | 技能 id 与展示名（`Progression.skill.{id}` 同源） |
+
+> **展示名兜底链**：配置自带字段（成就的 name/description）→ 服务端登记的展示名（游戏层注册的中文名）→ **配置 id/kind 原文**（如 `wood`、`collect_axe`）。客户端应把 `title`/`label`/`desc` 当作**可直接显示的文本**处理，不要假定其一定是中文或一定是 id。
+
+> **内容随配置漂移**：`/content` 每次请求都按当前 `game/` 配置现算，配置改了即变；客户端**不应缓存到过期**（可按响应体整体缓存，重连时刷新）。
+
 
 ### 5.3 地图内容：生成管道 / 校验 / Tiled 制作
 
@@ -566,14 +695,16 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 
 ## 6. 对接清单（Checklist）
 
-1. 声明 §3.4 的 Schema（字段名/类型/顺序严格一致；`EntityState.level` 在末尾）。
+1. 声明 §3.4 的 Schema（字段名/类型/顺序严格一致；`EntityState.level` 与 `RoomState` 的四个新字段都在**末尾**）。
 2. `joinOrCreate("game")`，记 `room.sessionId`；如需断线复用角色，把自己的 networkId 存本地并在 join 参数回传（§1.3）。
 3. 每帧发 `input`（seq 递增，速度不超过 server 规则上限）；按键边沿发 interact/attack/talk。
 4. 渲染：遍历自己的 `players.get(room.sessionId).visibleEntities`（唯一实体来源）；按 `EntityState.level` 过滤异层实体。
 5. 按 §3.6 辨识实体种类（优先 `Kind.value`），按 §3.5 读字段。
 6. UI 操作 → `command`（§2.2），失败以状态回退为准。
 7. 用 `/maps/runtime` 拉取地图几何快照，初始化地图渲染与碰撞（出生点不在几何模型，不从地图数据取）。
-8. 需要展示中文名/进度条时，按 §4.8 备静态表（成就/任务/技能/物品/配方），并随 `game/` 配置漂移手动同步。
+8. 用 `GET /content` 拉一次内容目录，拿到物品/配方/任务/成就/相位/技能的名称与描述（§5.2.1）——**不要硬编码静态表**。
+9. 读 `RoomState.phaseId/phaseProgress/weatherId` 渲染环境 HUD（§3.1）；读 `RoomState.offers` 渲染待处理报价（§3.1「报价摘要」，只有与自己相关的条目）。
+10. 对话 UI 读 `Dialogue.text`（正文）与 `Dialogue.option.{i}.text`（选项文案，§4.6）。
 
 ---
 
@@ -586,7 +717,9 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 | 实体表为空 | 实体恒在自己 `visibleEntities`（首帧后才开始填充）；若持续为空，检查是否同一地图/半径内无实体、或 Schema 声明顺序与服务端不一致 |
 | 控制台报 `"refId not found"`、实体字段偶发消失 | 上游解码 bug（core 0.17.43）：`visibleEntities` 混入空壳实体，按 §3.2 末尾的兜底规则逐实体过滤即可容忍；服务端升级 colyseus 后消除 |
 | 命令"没反应" | 命令失败无回执：缺料/满包/频率超限/距离不够，观察状态确认 |
-| 投掷"没反应" | 武器槽装备的物品没有投掷档案（服务端要求 `throw` 段）；或服务端冷却未结束（Cooldown 不同步，客户端只能用本地计时提示） |
+| 投掷"没反应" | 武器槽装备的物品没有投掷档案（服务端要求 `throw` 段）；或服务端冷却未结束（`Cooldown.remainingMs` 已同步但仍以服务端裁决为准，冷却结束前命令会被静默拒收） |
+| 报价列表为空 | `RoomState.offers` 只含**与自己相关**的条目（发起方/接收方可见）；或报价已成交/取消（条目移除）。参与方 id 用 **networkId**（自己 `PlayerState.entityId`、对方 `EntityState.id`），不是服务端 eid |
+| 中文名显示为英文/原文 | 该条目在配置里没有名称字段且服务端未登记展示名——`/content` 的兜底链末端即 id/kind 原文（§5.2.1） |
 | 断线重进后角色变了 | 正常：未命中保留实体（未回传 networkId / 已超保留期）→ 新建角色；命中则复用原角色（§1.3）。服务端重启恢复存档时，未到存档周期的最后变更仍会丢（周期由 server 规则 `saveIntervalMs` 配置） |
 | 换图后实体全变 | 正常：该玩家 `PlayerState.mapId` 变化 = 该玩家场景切换，实体集随图切换（玩家自身保留）；其他玩家不受影响 |
 | 看不到别的玩家/自己的旧角色 | 处于**断线保留期**的实体不进任何快照（对所有客户端不可见），保留期约 5 分钟后才被清扫 |

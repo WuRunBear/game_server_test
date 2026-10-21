@@ -81,13 +81,14 @@
       { "component": "Passage", "fields": ["open"] },
       { "component": "GridOccupancy", "fields": ["cellX", "cellY", "cellW", "cellH"] },
       { "component": "Portal", "fields": ["targetMap", "x", "y"] },
-      { "component": "Dialogue", "tags": ["Player"], "fields": ["npcId", "treeId", "nodeId", "options"] },
+      { "component": "Dialogue", "tags": ["Player"], "fields": ["npcId", "treeId", "nodeId", "text", "optionText", "options"] },
       { "component": "DialogueSource", "tags": ["NPC"], "fields": ["treeId"] },
       { "component": "Quest", "tags": ["Player"], "fields": ["questId", "state", "count"] },
       { "component": "Relation", "tags": ["Player"], "fields": ["npcKind", "value"] },
       { "component": "Progression", "tags": ["Player"], "fields": ["totalXp", "level", "skills"] },
       { "component": "Achievements", "tags": ["Player"], "fields": ["unlocked"] },
-      { "component": "Crafting", "tags": ["Player"], "fields": ["jobs"] }
+      { "component": "Crafting", "tags": ["Player"], "fields": ["jobs"] },
+      { "component": "Cooldown", "tags": ["Player"], "fields": ["remainingMs"] }
     ]
   }
 }

@@ -20,6 +20,13 @@ export interface DialogueState {
   treeId: string;
   /** 当前对话节点 id（引用该树的 nodes 表）。 */
   nodeId: string;
+  /**
+   * 当前节点正文（对话树节点的 text 字段；客户端据此渲染对话内容）。
+   *
+   * 由 dialogueSystem 在打开/推进对话时从对话树解析写入；可选以兼容手工
+   * 构造的会话（缺省时同步层按空串处理）。
+   */
+  text?: string;
   /** 当前节点选项文本（客户端渲染选项按钮用；索引即选项序号）。 */
   options: string[];
 }

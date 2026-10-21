@@ -60,10 +60,14 @@
 
   class RoomState extends Schema {}
   defineTypes(RoomState, {
-    tick:     "uint32",                  // 逻辑帧号
-    hour:     "float64",                 // 世界小时 0-24
-    phase:    "uint8",                   // 0=白天 1=夜晚
-    players:  { map: PlayerState },      // key=sessionId
+    tick:          "uint32",                  // 逻辑帧号
+    hour:          "float64",                 // 世界小时 0-24
+    phase:         "uint8",                   // 0=白天 1=夜晚
+    players:       { map: PlayerState },      // key=sessionId
+    weatherId:     "string",                  // 当前天气 id（配置字符串）
+    phaseId:       "string",                  // 当前相位 id（配置字符串）
+    phaseProgress: "number",                  // 当前相位进度 0..1
+    offers:        { map: "string" },         // 报价摘要：offerId → JSON 字符串
   });
 
   // 连接：⚠️ 不要传自定义 Schema 类作第 3 参（见坑 K8），否则状态解码为空
@@ -112,10 +116,14 @@
 
   class RoomState extends Schema {}
   defineTypes(RoomState, {
-    tick:     "uint32",                  // 逻辑帧号
-    hour:     "float64",                 // 世界小时 0-24
-    phase:    "uint8",                   // 0=白天 1=夜晚
-    players:  { map: PlayerState },      // key=sessionId
+    tick:          "uint32",                  // 逻辑帧号
+    hour:          "float64",                 // 世界小时 0-24
+    phase:         "uint8",                   // 0=白天 1=夜晚
+    players:       { map: PlayerState },      // key=sessionId
+    weatherId:     "string",                  // 当前天气 id（配置字符串）
+    phaseId:       "string",                  // 当前相位 id（配置字符串）
+    phaseProgress: "number",                  // 当前相位进度 0..1
+    offers:        { map: "string" },         // 报价摘要：offerId → JSON 字符串
   });
 
   // 连接：⚠️ 不要传自定义 Schema 类作第 3 参（见坑 K8），否则状态解码为空
@@ -166,6 +174,15 @@
 6. 监听 `state.players.get(room.sessionId).mapId` 变化 → 变化时重新执行 1-4（该玩家换图）。
 7. 相机：平移画布使自身实体居中（不做边界钳制也可）。可加固定渲染缩放（如 3x：16px 瓦片上屏 48px、横向可见约 30 格）改善观感——1:1 像素渲染视野过大、地图显小；缩放只影响渲染，不涉及协议。
 
+> **live 几何**：服务端优先返回**活动房间的实时几何**（含运行期地形改写，如野火焦土）；无房间时回退为按配置重建的视图。两者在无改写时一致——客户端仍按 `{key, version}` 缓存即可（改写后 `version` 变化 → 重新拉取）。
+
+### P1.5 内容目录（消灭硬编码静态表）
+
+1. join 成功后拉一次：`GET {httpBase}/content`。
+2. 响应含六段：`items` / `recipes` / `quests` / `achievements` / `phases` / `skills`——物品名、配方名、任务标题、成就描述等**全部由服务端从当前配置导出**。
+3. 客户端用 `kind`/`id` 把同步数据（`Inventory.{i}.kind`、`Quest.{i}.questId`、`Achievements.{id}`、`Crafting.{i}.recipeId`）与内容目录 join 起来显示——**不要在客户端硬编码物品/任务/成就清单**。
+4. 名称/描述字段（`title`/`desc`/`label`）是**可直接显示的文本**：配置无名称字段时服务端回退为 id/kind 原文（如 `wood`），不保证一定是中文。
+
 ### P2 输入
 
 1. WASD → `moveX/moveY`（像素/秒，幅度 ≤ 当前 server 规则速度上限，斜向归一化到同一上限；上限随 `game/rules/server.json` 漂移——当前为 `maxMoveSpeedTiles: 2` 格/秒 × 16px/格 = **32 像素/秒**，超限整条输入被静默拒收、角色不动）。
@@ -186,15 +203,17 @@
 | `Y` | 取消进行中的延时制作（读 `Crafting.0.recipeId` → `{type:"craft-cancel",recipe}`） |
 | `U` | 给最近的燃料型站点加燃料（`{type:"refuel",target}`；射程 = crafting 规则 `stationRange`） |
 | `Q` | 投掷：选中**投掷矛**时进入**瞄准模式**（鼠标跟随准星，左键把屏幕坐标换算成世界坐标发 `{type:"throw",x,y}`，`Esc` 取消，本地冷却提示）；未持投掷矛时按最近敌怪投掷 |
-| 对话选项 | 自身实体存在 `Dialogue.{i}.option` 时渲染按钮列表，点击发 `{type:"dialogue",option:i}` |
+| 对话选项 | 自身实体存在 `Dialogue.option.{i}.text` 时渲染按钮列表（正文读 `Dialogue.text`），点击发 `{type:"dialogue",option:i}` |
+| 交易报价 | 读 `state.offers`（map：offerId → JSON 字符串）渲染待处理报价；确认发 `{type:"offer-accept",offerId}`、撤销发 `{type:"offer-cancel",offerId}`；发起报价时条款的 `party` 用 **networkId**（自己 `players.get(sessionId).entityId`、对方可见实体的 `id`） |
 
 > 面板类 UI 的通用约定：**命令失败无回执**（坑 K4），所以面板只做「提示 + 乐观展示」，不等待响应；列表类 DOM 若需定时刷新，**按内容签名重建**，避免整表重绘打断玩家点击。
 
 ### P4 状态 HUD
 
-左/右上角常驻：HP（Health.current）、需求条（`Needs.{i}`，按 `name` 渲染）、时钟（hour + phase 昼/夜）、mapId（该玩家当前地图）、**层号**（`EntityState.level`）；
+左/右上角常驻：HP（Health.current）、需求条（`Needs.{i}`，按 `name` 渲染）、时钟（hour + phase 昼/夜）、**环境**（`RoomState.phaseId` + `phaseProgress` + `weatherId`，id 是配置字符串、原样显示即可）、mapId（该玩家当前地图）、**层号**（`EntityState.level`）；
 底部背包条（`Inventory.{i}.kind/count`，槽位数按原型配置渲染、空槽灰显）；右上角任务列表（`Quest.*`，state 含义见协议 §4.7）；
-成长面板（`Progression.totalXp/level` + `Progression.skill.{id}.xp/level` 技能等级）与成就列表（`Achievements.{id}` = 1）——**中文名需自备静态表**（来自 `game/rules/progression.json`、`game/rules/achievements.json`、`game/quests/quests.json`，见协议 §4.8）；成就**新解锁**（key 由无到有）时弹一次提示。
+成长面板（`Progression.totalXp/level` + `Progression.skill.{id}.xp/level` 技能等级）与成就列表（`Achievements.{id}` = 1）——**中文名来自 `GET /content`**（见 P1.5，勿自备静态表）；成就**新解锁**（key 由无到有）时弹一次提示；
+交易面板（`RoomState.offers`：只有与自己相关的条目；value 是 JSON 字符串，需 `JSON.parse`）。
 
 ---
 
@@ -218,7 +237,10 @@
 - **K10（方式 B）页面实际加载两份 schema**：importmap 钉的是 4.0.25，但 SDK 的 `+esm` 内部对 schema 的传递依赖由 CDN 解析为其范围内最新版（实测 4.0.26）——**解码路径用的是 SDK 内部那份**（控制台报错来源会显示 4.0.26）。如需绝对钉版，在 importmap 里把该传递依赖也显式映射。
 - **K11 `EntityState.level`（int8，末尾追加）**：实体带离散层号（缺省 0）。该字段**追加在 `id`/`values`/`stringValues` 之后**——既有三项的**字段索引不变**，旧客户端结构上仍能解码新流（只是读不到层号）；新客户端连旧服务端则缺该字段，按 0 处理即可。客户端声明 schema 时**必须把 `level` 放在最后**（字段顺序即线协议）。渲染时按自身层号过滤异层实体。
 - **K12 重连语义（断线保留）**：服务端**不是**「断线即销毁」——会话断开后玩家实体保留**约 5 分钟**（server 规则 `offlineRetentionTicks`，缺省 tickRate×300s；配 0 才关闭），期间**对所有客户端不可见**（不进快照）。客户端可把自己断线前的 networkId 存本地（localStorage），join 时作为**可选参数**回传：`joinOrCreate("game", { networkId: saved })`——服务端**严格按该 id 匹配**未到期的保留实体：命中则复用同一角色（背包/进度不丢），未命中则新建。**不要**假设「重连一定是新角色」，也不要假设「重连一定恢复原角色」。
-- **K13 冷却/瞬态不同步**：`Cooldown`（投掷/攻击冷却）等瞬态组件**不进状态同步**（存档也跳过）。客户端若要提示冷却，只能本地计时（按物品/规则配置的冷却值），且**不能**把它当作服务端裁决——真正的冷却由服务端判定，命令失败无回执。
+- **K13 冷却/瞬态不同步**：攻击/投掷冷却以 `Cooldown.remainingMs`（**仅玩家实体**）同步——客户端可据此显示冷却条，但**不能**把它当作服务端裁决：真正的冷却由服务端判定，命令失败无回执。其余瞬态组件（如 `Velocity`/`Intent`/`Kind`）仍不同步。
+- **K14 `RoomState` 末尾四字段（顺序即线协议）**：`weatherId`(string) / `phaseId`(string) / `phaseProgress`(number) / `offers`({map:"string"}) **追加在 `players` 之后**——客户端声明 schema 时必须按此顺序（漏声明会与新服务端错位解码）。旧客户端只声明前四项在结构上仍可解码（读不到这四项）。`phaseId`/`weatherId` 是**配置字符串**（`mild`/`dry`/`wet`/`storm`、`clear`/`rain`/…），语义随配置漂移，**原样显示、不要硬编码取值集**。
+- **K15 `offers` 的可见性与格式**：`state.offers` 的 key 是报价会话 id（字符串），value 是 **JSON 字符串**（需 `JSON.parse`，形如 `{"from":123,"to":456,"give":[["wood",2]],"take":[["shell",5]]}`，`from`/`to` 为 networkId，视角以发起方为基准）。服务端**只把与自己相关的条目**放进你的表里（发起方/接收方可见，他人不可见）——所以读到的每条都与自己相关，可直接渲染。成交/取消后条目消失。发起报价时条款的 `party` 也用 **networkId**（不是服务端 eid），用错会被整条拒绝；条款数量写 `{kind, count}` 即可（`container` 可省略，缺省按背包 inventory 处理）；`offer-accept`/`offer-cancel` 的 `offerId` 直接回传 map 键原值（字符串）即可（数字亦可）。
+- **K16 内容目录（`GET /content`）**：物品/配方/任务/成就/相位/技能的名称与描述由服务端从当前配置导出（`items`/`recipes`/`quests`/`achievements`/`phases`/`skills` 六段）。客户端**不应硬编码静态表**；名称字段是「可直接显示的文本」，配置缺名称时服务端回退为 id/kind 原文（如 `wood`）——不保证是中文。端点不可用（旧服务端）时才退回自备静态表。
 
 ---
 
@@ -246,7 +268,10 @@
 11. 走近任一容器实体（尸体等，带 `Inventory.0.kind`）按 `R` → 搜刮面板列出该容器的槽位（名称/数量/耐久）→ 点「取回」→ 物品进入本人背包（`transfer{target,slot}`）；空容器只给提示、不弹空面板。
 12. 合成延时配方 → 面板出现「制作中」进度条（`Crafting.*`）→ `Y` 或面板「取消」可取消（`craft-cancel`）；`suspended=1` 时显示「等待产出」。
 13. 选中投掷矛按 `Q` → 进入瞄准模式（准星跟随鼠标）→ 左键发出 `throw{x,y}`（屏幕坐标换算为世界坐标）；`Esc` 取消。
-14. HUD 出现等级/经验与技能（`Progression.*`）、成就（`Achievements.*`）与任务（`Quest.*`）条目，且中文名来自静态表。
+14. HUD 出现等级/经验与技能（`Progression.*`）、成就（`Achievements.*`）与任务（`Quest.*`）条目，且中文名来自 `GET /content`（不来自客户端硬编码表）。
+15. `GET /content` 返回六段内容；背包/任务/成就/配方条目的名称取自该响应（与配置一致），未在配置声明名称的条目显示为 id/kind 原文（不崩溃、不显示 undefined）。
+16. 对话框显示**正文**（`Dialogue.text`）与选项文案（`Dialogue.option.{i}.text`），点击选项正常推进。
+17. HUD 显示环境信息（`phaseId`/`phaseProgress`/`weatherId`，原样显示配置字符串）；交易面板可展示 `state.offers` 中的待处理报价条目（解析 JSON 字符串）。
 
 ---
 
@@ -263,3 +288,4 @@
 | v2.1 | 2026-09-22 | tile-units 机制落地后输入约束复核：§P2 移动幅度从硬编码 ≤200 改为指向 server 规则速度上限并标注当前值 32px/s（`maxMoveSpeedTiles: 2` 格/s × 16px/格）——旧值会使生成的客户端全部输入被静默拒收（角色不动）。协议契约（三层 Schema/端点/CORS/K1-K8）无任何变化 |
 | v2.2 | 2026-09-23 | 按生成客户端实测反馈修订：K1 改写为**逐实体过滤**（实测空壳与正常实体同表混入、`values`/`stringValues` 整个缺失，旧的整表校验写法会每帧崩；空壳伴随 `"refId not found"` 预期噪音）；新增 K9（join 后首帧 `players` 可能为 `undefined`，读取需判空）；新增 K10（方式 B 下 SDK 传递依赖漂移，页面实际加载 4.0.25/4.0.26 两份 schema）；K5 补 https/wss 部署白名单说明；§P1 相机补渲染缩放建议；昼夜 `hour` 换算语义补至协议文档 §3.1 |
 | v2.3 | 2026-10-21 | 协议扩容同步（协议细节仍以 `CLIENT-INTEGRATION.md` 为唯一权威）：① **§1 约束 3 的两段 Schema 示例补 `EntityState.level`（int8，末尾追加）**——字段顺序即线协议，漏声明会与新服务端错位解码（新增 K11：末尾追加 ⇒ 旧客户端前三项索引不变）；② §P0 补层号过滤与 `Kind.value` 优先辨识；③ §P3 补新命令键位（`R` 搜刮容器面板 / `Y` 取消制作 / `U` 加燃料 / `Q` 投掷瞄准 + `Esc` 取消）；④ §P4 补成长面板（`Progression.*`）、成就（`Achievements.*`）与新解锁提示；⑤ 新增 K12（**重连语义改正**：断线保留约 5 分钟，凭 networkId 复用，旧文档「断线即销毁」已过时）与 K13（冷却等瞬态组件不同步，客户端只能用本地计时提示）；⑥ 验收清单补第 10-14 条（重连复用 / 搜刮面板 / 制作进度与取消 / 投掷瞄准 / 成长成就 HUD） |
+| v2.4 | 2026-10-21 | 协议面补齐（服务端侧）：① **§1 约束 3 的两段 Schema 示例补 `RoomState` 末尾四字段**——`weatherId`(string)/`phaseId`(string)/`phaseProgress`(number)/`offers`({map:"string"})，顺序即线协议（新增 K14）；② 新增 §P1.5 内容目录（`GET /content`：items/recipes/quests/achievements/phases/skills 六段，中文名由服务端从配置导出，客户端不再硬编码静态表）与 K16；③ §P3 对话选项改读 `Dialogue.option.{i}.text`（正文读 `Dialogue.text`），新增交易报价行（条款 `party` 用 networkId）；④ §P4 HUD 补环境三字段与交易面板；⑤ 新增 K15（`offers` 的可见性/JSON 字符串格式/networkId 语义）；⑥ §P1 补「live 几何」说明（写回后 version 变化 → 重新拉取）；⑦ K13 改写：冷却经 `Cooldown.remainingMs`（仅玩家）同步，仍以服务端裁决为准；⑧ 验收清单补第 15-17 条 |

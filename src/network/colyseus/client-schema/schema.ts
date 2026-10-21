@@ -15,15 +15,22 @@
 //   解码新流会错位）：
 // - EntityState.level（int8，字段末尾新增）：实体离散层号（EntityLevel，
 //   缺省 0）；既有 id/values/stringValues 字段索引不变。
+// - RoomState 末尾新增四字段（既有 tick/hour/phase/players 索引不变）：
+//   weatherId（string，当前天气 id）、phaseId（string，当前相位 id）、
+//   phaseProgress（number，当前相位进度 0..1）、offers（{map:"string"}，
+//   报价摘要：offerId → JSON 字符串 `{"from","to","give","take"}`；
+//   from/to 为 networkId，视角以发起方为基准；只有参与方可见该条目）。
 // - 动态 key 空间扩展（不改变 schema 字段索引，旧客户端结构上可解码，
 //   但需补渲染才可见）：
 //   EntityState.values：`Structure.role|connectLow|connectHigh|connectDir`
 //     （建造角色/连接器，整数）、`Passage.open`（可开合屏障状态，0/1）、
 //     `Inventory.<i>.durability`（仅带耐久的
 //     槽位写键）、`ItemMeta.durability`、`Crafting.<i>.remainingTicks` /
-//     `.progress` / `.suspended`（进行中制作）、`Progression.*`、`Achievements.*`；
+//     `.progress` / `.suspended`（进行中制作）、`Progression.*`、`Achievements.*`、
+//     `Cooldown.remainingMs`（玩家冷却剩余毫秒）；
 //   EntityState.stringValues：`Inventory.<i>.kind`、`ItemMeta.kind`、
-//     `Crafting.<i>.recipeId` 等既有/新增字符串 key。
+//     `Crafting.<i>.recipeId`、`Dialogue.text`（对话正文）、
+//     `Dialogue.option.<i>.text`（选项文案）等既有/新增字符串 key。
 //
 // GENERATED USING @colyseus/schema 4.0.25
 //
@@ -49,4 +56,8 @@ export class RoomState extends Schema {
     @type("float64") public hour!: number;
     @type("uint8") public phase!: number;
     @type({ map: PlayerState }) public players: MapSchema<PlayerState> = new MapSchema<PlayerState>();
+    @type("string") public weatherId!: string;
+    @type("string") public phaseId!: string;
+    @type("number") public phaseProgress!: number;
+    @type({ map: "string" }) public offers: MapSchema<string> = new MapSchema<string>();
 }

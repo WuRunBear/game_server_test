@@ -1,4 +1,17 @@
 /**
+ * 报价会话 id 归一：接受数字或**数字字符串**。
+ *
+ * 客户端从 `RoomState.offers` 的 map 键取 offerId（键是字符串形态）并原样
+ * 回传（offer-accept / offer-cancel）——协议层两种形态都合法。非法值返回
+ * -1（会话不存在 → 命令被拒）。
+ */
+function offerIdOf(value: unknown): number {
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
+  return -1;
+}
+
+/**
  * 仿真层实现——SimulationPort 接口的具体实现（类级 JSDoc 见下方 GameSimulation，
  * 完整说明架构位置、玩家管理/输入处理/快照构建/持久化等职责，此处不重复）。
  */
@@ -28,10 +41,13 @@ import { advanceDialogue } from "framework/systems/gameplay/dialogueSystem";
 import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
 import { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
 import { timeOfDayOf } from "framework/simulation/worldClock/dayNight";
+import { environmentAt } from "framework/simulation/worldClock";
 import { evolve } from "map/evolution/engine";
 import { createMapEvolveDeps } from "map/runtime/evolveDeps";
 import { mapSeedOf } from "map/runtime/mapSeeds";
+import { serializeGeometry, type SerializedMapGeometry } from "map/geometry/snapshot";
 import { advanceTickTo, computeOfflineTicks } from "map/runtime/clock";
+import { setGround } from "map/runtime/terrainWriteback";
 import { noopBootDeps, type BootDeps } from "map/runtime/boot";
 import { fastForwardStateMachines } from "framework/simulation/stateMachine/stateMachineSystem";
 import { fastForwardPopulations } from "framework/simulation/population/populationSystem";
@@ -82,7 +98,7 @@ function normalizeMoveAxis(value: unknown): number | undefined {
 import type { SimulationPort } from "./SimulationPort";
 import type {
   PlayerInput, PlayerJoinResult, PlayerJoinOptions, TickSnapshot, TickResult, DebugSnapshotOptions, PlayerCommand, EntitySnapshot,
-  SimulationOptions,
+  SimulationOptions, OfferSummary,
 } from "./types";
 
 /**
@@ -725,11 +741,21 @@ export class GameSimulation implements SimulationPort {
         // 另一方必须是**当前在线的 Player 实体**（有会话绑定且非断线保留）。
         // 非 Player/离线/不存在/重复 party 一律拒绝——杜绝"非玩家方自动确认"
         // 把尸体/箱子当交易对手搬空。
+        //
+        // 协议层 party 为**参与方 networkId**（客户端可见的稳定 id；服务端
+        // 内部 eid 客户端不可见）→ 此处反查为 eid，解析失败即拒绝整条命令
+        // （伪造/过期的 networkId 不会命中任何实体）。
         const terms = command.offer;
         if (!isValidSettleTerms(terms)) return false;
         if (terms.length !== 2) return false;
-        const partyEids = terms.map((party) => party.party);
-        if (new Set(partyEids).size !== 2) return false;
+        const partyNetworkIds = terms.map((party) => party.party);
+        if (new Set(partyNetworkIds).size !== 2) return false;
+        const partyEids: number[] = [];
+        for (const networkId of partyNetworkIds) {
+          const partyEid = this.eidByNetworkId(networkId);
+          if (partyEid === undefined) return false;
+          partyEids.push(partyEid);
+        }
         if (!partyEids.includes(eid)) return false;
         const counterparty = partyEids.find((partyEid) => partyEid !== eid)!;
         if (!this.isOnlinePlayerEid(counterparty)) return false;
@@ -741,16 +767,24 @@ export class GameSimulation implements SimulationPort {
             : undefined;
         // 发起方本人视为已确认；另一方必须 offer-accept 显式确认（双方均为
         // 在线 Player，openOffer 不会把任何一方当作自动确认方）。
-        const offerId = openOffer(this.world, terms, {
-          confirmedParties: [eid],
-          expiresTick,
-        });
+        const offerId = openOffer(
+          this.world,
+          terms.map((party, index) => ({
+            ...party,
+            party: partyEids[index]!,
+          })),
+          {
+            confirmedParties: [eid],
+            expiresTick,
+            initiator: eid,
+          },
+        );
         return this.finishCommand(eid, command.type, offerId !== null);
       }
       case "offer-accept":
-        return this.finishCommand(eid, command.type, acceptOffer(this.world, eid, command.offerId ?? -1));
+        return this.finishCommand(eid, command.type, acceptOffer(this.world, eid, offerIdOf(command.offerId)));
       case "offer-cancel":
-        return this.finishCommand(eid, command.type, cancelOffer(this.world, eid, command.offerId ?? -1));
+        return this.finishCommand(eid, command.type, cancelOffer(this.world, eid, offerIdOf(command.offerId)));
       default:
         return false;
     }
@@ -767,6 +801,46 @@ export class GameSimulation implements SimulationPort {
       if (onlineEid === eid) return true;
     }
     return false;
+  }
+
+  /**
+   * networkId → eid 反查（协议层只见 networkId，服务端内部只见 eid）。
+   *
+   * 只认**当前存在**的实体（NetworkId 组件在身）；断线保留实体的 networkId
+   * 仍可解析（保留期内实体仍在世界里），但后续的在线校验会拒绝它。
+   * 解析不到（伪造/从未存在/已销毁）返回 undefined → 命令被拒。
+   */
+  private eidByNetworkId(networkId: number): number | undefined {
+    if (!Number.isInteger(networkId) || networkId <= 0) return undefined;
+    for (const eid of query(this.world, [NetworkId])) {
+      if (NetworkId.value[eid] === networkId) return eid;
+    }
+    return undefined;
+  }
+
+  /**
+   * 构建进行中报价会话的摘要列表（协议层可见形态）。
+   *
+   * 只取 pending 会话（已结算/已作废/已过期的会话不再出现在摘要里）。
+   * 视角以**发起方**为基准：give = 发起方给出的物品、take = 发起方收取的物品。
+   * 参与方一律以 networkId 表达（客户端可见的稳定标识）。
+   */
+  private buildOfferSummaries(): OfferSummary[] {
+    const summaries: OfferSummary[] = [];
+    for (const session of this.world.offerSessions.values()) {
+      if (session.status !== "pending") continue;
+      const initiatorTerms = session.terms.find((party) => party.party === session.initiator);
+      const counterpartyTerms = session.terms.find((party) => party.party !== session.initiator);
+      if (!initiatorTerms || !counterpartyTerms) continue;
+      summaries.push({
+        offerId: session.id,
+        from: NetworkId.value[session.initiator] ?? 0,
+        to: NetworkId.value[counterpartyTerms.party] ?? 0,
+        give: (initiatorTerms.give ?? []).map((amount) => [amount.kind, amount.count]),
+        take: (initiatorTerms.take ?? []).map((amount) => [amount.kind, amount.count]),
+      });
+    }
+    return summaries;
   }
 
   /**
@@ -792,6 +866,33 @@ export class GameSimulation implements SimulationPort {
    */
   getDebugSnapshot(options?: DebugSnapshotOptions): unknown {
     return getCollisionDebugSnapshot(this.world, options);
+  }
+
+  /**
+   * 取某张图的实时几何快照（世界当前持有的几何，含运行期写回）。
+   *
+   * 图不在 world.maps 中（未构建/未知 key）时返回 undefined——调用方据此
+   * 回退到「按配置重建」的视图。
+   */
+  getMapGeometry(mapId: string): SerializedMapGeometry | undefined {
+    const geometry = this.world.maps[mapId];
+    if (!geometry) return undefined;
+    return serializeGeometry(geometry);
+  }
+
+  /** 地图生成配置清单（配置声明序）——传输层据此描述地图元信息。 */
+  getMapConfigs(): MapConfig[] {
+    return [...this.mapConfigsByKey.values()];
+  }
+
+  /**
+   * 调试用：写回单格地面语义（terrainWriteback 唯一合法入口）。
+   *
+   * 供「/maps 端点读 live 几何」的验证：写回后 tiles 与 version 指纹变化，
+   * live 视图与「按配置重建」视图随即分叉。
+   */
+  debugSetGround(mapId: string, tileIndex: number, semanticId: number): boolean {
+    return setGround(this.world, mapId, tileIndex, semanticId);
   }
 
   /**
@@ -947,10 +1048,25 @@ export class GameSimulation implements SimulationPort {
     for (const [sessionId, eid] of this.playerEidBySessionId) {
       playerMaps.set(sessionId, entityMapOf(this.world, eid));
     }
+    // 环境派生（相位/天气/进度）：tick 的纯函数（environmentAt），与
+    // environmentSystem 的缓存同源——离线补差后同样正确。
+    const environment = environmentAt(this.world);
+    const snapshotShell = {
+      tick,
+      entities,
+      timeOfDay: { ...timeOfDayOf(this.world) },
+      environment: {
+        weatherId: environment.weatherId,
+        phaseId: environment.phaseId,
+        phaseProgress: environment.progress,
+      },
+      offers: this.buildOfferSummaries(),
+      playerMaps,
+    };
 
     // 无同步配置 → 空快照（客户端看不到实体）
     if (this.netSyncFields.length === 0) {
-      return { tick, entities, timeOfDay: { ...timeOfDayOf(this.world) }, playerMaps };
+      return snapshotShell;
     }
     for (const field of this.netSyncFields) {
       const ensure = (id: number, eid: number): EntitySnapshot => {
@@ -997,7 +1113,14 @@ export class GameSimulation implements SimulationPort {
       }
 
       // SoA 组件：按该组件查询实体（含 NetworkId），读标量数值
-      for (const eid of query(this.world, [NetworkId, comp as object])) {
+      // tags 语义：条目声明 tags 时**只同步带该标签的实体**（如 Cooldown 只给
+      // Player 标签实体），未声明 tags 时按组件全量同步（历史行为）。
+      const soaEntities = field.tags
+        ? [...this.queryByTags(field.tags)].filter((eid) =>
+            hasComponent(this.world, eid, comp as object),
+          )
+        : query(this.world, [NetworkId, comp as object]);
+      for (const eid of soaEntities) {
         // 断线保留期实体不进快照（同上：对一切客户端不可见的唯一门控）
         if (isOfflineRetained(this.world, eid)) continue;
         const id = NetworkId.value[eid];
@@ -1011,12 +1134,7 @@ export class GameSimulation implements SimulationPort {
       }
     }
 
-    return {
-      tick,
-      entities,
-      timeOfDay: { ...timeOfDayOf(this.world) },
-      playerMaps,
-    };
+    return snapshotShell;
   }
 
   /**

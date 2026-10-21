@@ -5,6 +5,8 @@
 import type {
   PlayerInput, PlayerJoinResult, PlayerJoinOptions, TickResult, DebugSnapshotOptions, PlayerCommand,
 } from "./types";
+import type { SerializedMapGeometry } from "map/geometry/snapshot";
+import type { MapConfig } from "framework/config/schema/MapRegistrySchema";
 
 /**
  * 仿真端口——传输层与仿真层之间的双向协议（接口）。
@@ -110,4 +112,35 @@ export interface SimulationPort {
    * @returns 可序列化的调试数据
    */
   getDebugSnapshot(options?: DebugSnapshotOptions): unknown;
+
+  /**
+   * 取某张图的**实时几何快照**（含运行期写回后的内容）。
+   *
+   * 与「按配置重建几何」不同：这里返回的是世界当前持有的几何——野火焦土等
+   * 运行期写回已反映在 tiles/walkable/level 上，version 指纹随之变化。
+   * 图不存在（未构建）时返回 undefined（调用方回退到配置重建视图）。
+   *
+   * @param mapId 地图 registry key
+   * @returns 几何快照；该图不在世界中时为 undefined
+   */
+  getMapGeometry?(mapId: string): SerializedMapGeometry | undefined;
+
+  /**
+   * 地图生成配置清单（key + 生成管道）——供传输层描述地图元信息（如来源标识）。
+   *
+   * @returns 全部配置图（顺序 = 配置声明序）
+   */
+  getMapConfigs?(): MapConfig[];
+
+  /**
+   * 调试用：写回某图单格地面语义（terrainWriteback 的唯一合法入口）。
+   *
+   * 供「/maps 端点读 live 几何」的验证场景使用（写回后 version/tiles 变化）。
+   *
+   * @param mapId 地图 registry key
+   * @param tileIndex tile 线性索引（行主序）
+   * @param semanticId 地面语义 id（0-255）
+   * @returns 是否真的改动了内容（同值写回为 false）
+   */
+  debugSetGround?(mapId: string, tileIndex: number, semanticId: number): boolean;
 }
