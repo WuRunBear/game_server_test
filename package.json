@@ -25,9 +25,9 @@
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@colyseus/core": "^0.17.43",
-    "@colyseus/schema": "^4.0.25",
-    "@colyseus/ws-transport": "^0.17.13",
+    "@colyseus/core": "^0.18.23",
+    "@colyseus/schema": "^5.0.8",
+    "@colyseus/ws-transport": "^0.18.0",
     "bitecs": "^0.4.0",
     "check2d": "^9.36.4",
     "dotenv": "^17.4.2",

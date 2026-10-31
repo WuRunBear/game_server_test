@@ -586,7 +586,7 @@ describe("Slice 5：审查修复（destroyEntity / 存档防御 / 写盘串行 /
       // 自己的 PlayerState 可见、B 的 sessionId 经共享通路可见、B 的 visibleEntities 被过滤
       expect(decodedA?.sessionId).toBe("sA");
       expect(decodedB?.sessionId).toBe("sB");
-      expect(decodedB?.visibleEntities.has("2")).toBe(false);
+      expect(decodedB?.visibleEntities?.has("2")).toBeFalsy();
 
       // —— join 之后实体进入视野：set 挂 state 后必须 view.add（缺此步内容不编码）——
       const ent1 = new EntityState();
