@@ -18,6 +18,7 @@ import type { ServerRule } from "framework/config/schema/RuleSchema";
 import { EntityState } from "network/colyseus/state/EntityState";
 import { RoomState } from "network/colyseus/state/RoomState";
 import { PlayerState } from "network/colyseus/state/PlayerState";
+import { PROTOCOL_VERSION, checkProtocolCompatibility } from "network/protocol";
 
 /**
  * 碰撞调试快照推送间隔（毫秒）。
@@ -344,6 +345,19 @@ export class GameRoom extends Room<{ state: RoomState }> {
    * 老客户端不传则行为不变），仿真层命中断线保留实体则复用（进度不丢）。
    */
   onJoin(client: Client, options?: Record<string, unknown>): void {
+    // 协议版本握手：字段顺序即线协议，版本不符必须明确拒绝，
+    // 不能让客户端以旧 schema 静默解码错位。缺省版本按旧客户端兼容放行。
+    const protocol = checkProtocolCompatibility(options);
+    if (!protocol.ok) {
+      // 抛出 → Colyseus 拒绝加入并把 message 回给客户端 join 的 reject
+      throw new Error(protocol.message ?? protocol.code ?? "protocol-version-invalid");
+    }
+    if (protocol.clientVersion === undefined) {
+      console.warn(
+        `[GameRoom] join 未提供 protocolVersion，按旧客户端兼容放行（server=${PROTOCOL_VERSION}）session=${client.sessionId}`,
+      );
+    }
+
     // 让仿真层创建/复用玩家实体，拿到稳定网络 ID
     // （options.networkId 为客户端自报的断线前标识，仅结构校验，匹配在仿真层）
     const hintedNetworkId =

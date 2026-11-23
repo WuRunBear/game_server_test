@@ -7,6 +7,8 @@
 > 本文件只规定「生成什么、怎么生成、验收什么」。协议变更时只更新协议文档，本文件仅在坑清单/约束变化时升版本。
 >
 > **使用方法**：两个文件一起粘贴给 AI；若工具一次只能导一个文件，将两份拼接后导入。
+>
+> **版本基线（2026-11-23）**：当前服务端为 `@colyseus/core 0.18.23` / `@colyseus/schema 5.0.43`，配套 Godot Colyseus addon 0.18.9。本文 CDN 示例中的 `@colyseus/sdk@0.17.43` / `@colyseus/schema@4.0.25` 是**旧基线**的浏览器实测地址；0.18 的浏览器 CDN 产物路径尚未验证，故保留原 URL、不擅自改版本号。生成客户端时**协议/Schema 字段以 `CLIENT-INTEGRATION.md` 为准**，并按 join 握手的 `protocolVersion`（见该文档 §1.4）连接；若旧版 SDK 连 0.18 服务端出现解码异常，优先升级/自行确认 CDN 版本，不要改 Schema 字段顺序来迁就。
 
 ---
 
@@ -23,12 +25,14 @@
 | # | 约束 |
 |---|------|
 | 1 | **单文件 index.html**：CSS/JS 全部内联；禁止任何构建工具/npm 包管理器 |
-| 2 | **Colyseus 浏览器 SDK 经 CDN 引入，二选一（两条均浏览器实测通过）**：<br>**方式 A（pkg 官方 unpkg）**：① SDK 全局脚本 `<script src="https://unpkg.com/@colyseus/sdk@0.17.43/dist/colyseus.js">` → 全局 `window.Colyseus.Client`（与服务端 `@colyseus/core 0.17.43` 配套）；② Schema 模块 `<script type="module">import { Schema, MapSchema, defineTypes, type } from "https://unpkg.com/@colyseus/schema@4.0.25/build/index.mjs"</script>` → 模块作用域 `Schema`/`MapSchema`/`defineTypes`。<br>**方式 B（推荐——更简洁，importmap + jsdelivr `+esm`）**：先 `<script type="importmap">` 把 `@colyseus/sdk`/`@colyseus/schema` 映射到 jsdelivr `+esm`，再用 `import * as Colyseus from '@colyseus/sdk'`、`import { Schema, MapSchema, defineTypes } from '@colyseus/schema'`——`Colyseus.Client` 从模块导入、**不挂全局**；**importmap 必须放在所有 module script 之前**。完整写法见下方案例。<br>**⚠️ 禁止**用两个普通 `<script>` 标签分别加载 SDK 与 Schema（如 `<script src="...colyseus.js">` + `<script src="...colyseus-schema.js">`）——普通 script 无法解析裸导入/依赖关系，会报 `colyseus is not defined` / Schema 类未定义。**只能二选一：方式 A（全局脚本+模块导入配对）或方式 B（importmap+纯 ESM），绝不能拆分混用。**<br>**注意**：`colyseus.js` 包无 0.17.x（已改名 `@colyseus/sdk`）；无 `dist/colyseus.min.js`（真实文件是 `dist/colyseus.js`）；0.17 起 Schema 类**不挂** `window.Colyseus` 全局，须从模块导入 |
+| 2 | **Colyseus 浏览器 SDK 经 CDN 引入，二选一（两条均浏览器实测通过）**：<br>**方式 A（pkg 官方 unpkg）**：① SDK 全局脚本 `<script src="https://unpkg.com/@colyseus/sdk@0.17.43/dist/colyseus.js">` → 全局 `window.Colyseus.Client`（旧基线地址；当前服务端为 `@colyseus/core 0.18.23`，见文首版本基线说明）；② Schema 模块 `<script type="module">import { Schema, MapSchema, defineTypes, type } from "https://unpkg.com/@colyseus/schema@4.0.25/build/index.mjs"</script>` → 模块作用域 `Schema`/`MapSchema`/`defineTypes`。<br>**方式 B（推荐——更简洁，importmap + jsdelivr `+esm`）**：先 `<script type="importmap">` 把 `@colyseus/sdk`/`@colyseus/schema` 映射到 jsdelivr `+esm`，再用 `import * as Colyseus from '@colyseus/sdk'`、`import { Schema, MapSchema, defineTypes } from '@colyseus/schema'`——`Colyseus.Client` 从模块导入、**不挂全局**；**importmap 必须放在所有 module script 之前**。完整写法见下方案例。<br>**⚠️ 禁止**用两个普通 `<script>` 标签分别加载 SDK 与 Schema（如 `<script src="...colyseus.js">` + `<script src="...colyseus-schema.js">`）——普通 script 无法解析裸导入/依赖关系，会报 `colyseus is not defined` / Schema 类未定义。**只能二选一：方式 A（全局脚本+模块导入配对）或方式 B（importmap+纯 ESM），绝不能拆分混用。**<br>**注意**：`colyseus.js` 包无 0.17.x（已改名 `@colyseus/sdk`）；无 `dist/colyseus.min.js`（真实文件是 `dist/colyseus.js`）；0.17 起 Schema 类**不挂** `window.Colyseus` 全局，须从模块导入 |
 | 3 | **Schema 类用纯 JS 方式声明**（实测通过）：从 `@colyseus/schema` 模块导入 `Schema`/`MapSchema`/`defineTypes`，用 `defineTypes()`（**不用装饰器**，避免需要编译步骤）；类名/字段名/类型/**字段顺序**严格照抄协议 §3.4——字段顺序是线协议的一部分。完整可运行示例见本表下方 |
 | 4 | **渲染只用原生 Canvas 2D**：实体=色块（圆/矩形）+ 文字标签；禁止引入任何游戏引擎/框架。**澄清：游戏引擎≠CSS 框架，Tailwind 不在此禁令范围**（见下表第 7 条） |
 | 5 | **服务端地址可配置**：页面顶部输入框记住上次输入（localStorage），默认 `ws://localhost:3000`；HTTP 基址由它派生（`ws:`→`http:`，`wss:`→`https:`） |
 | 6 | UI 与注释一律中文 |
 | 7 | **Tailwind 仅用于 DOM 覆盖层 UI**：允许经 Play CDN `<script src="https://cdn.tailwindcss.com"></script>` 引入，用途=仅给 DOM 覆盖层（HUD/面板/按钮）做样式；**canvas 渲染不受影响**，也不作为游戏引擎/框架使用 |
+
+> **join 版本握手**：连接时建议先拉 `GET /client/manifest`，把其中的 `protocolVersion` 作为 join options 传入（`joinOrCreate("game", { protocolVersion })`）；`networkId` 等既有可选参数不受影响。缺省不传仍可连接（旧客户端兼容），但版本不符会被服务端明确拒绝并返回 `protocol-version-mismatch client=<n> server=<n>`。详见 `CLIENT-INTEGRATION.md` §1.4。
 
 ### 约束 2/3 最小可运行示例 · 方式 A（直接复制，纯 JS，无构建；浏览器实测通过）
 
@@ -219,7 +223,7 @@
 
 ## 3. ⚠️ 已知坑（违反任何一条都会“看似连上但显示不对”）
 
-- **K1 visibleEntities 空壳兜底（逐实体）**：受上游 bug 影响（colyseus#935/#936，core 0.17.43），`visibleEntities` 可能解码出空壳实体（`id` 非数字、`values`/`stringValues` 缺失），与正常实体**同表混入**且时好时坏。`visibleEntities` 是**唯一**实体来源（`state` 的 `entities` 已移除，无回退通道）。**规则：逐实体过滤——只使用 `typeof e.id === "number"` 的实体，读取统一走 `e.values?.get(...)` 可选链**；勿按整表校验（混有一个空壳即每帧抛 `Cannot read properties of undefined`）。空壳伴随控制台 `"refId not found"` 报错，属同一 bug 的预期噪音，勿当客户端 bug 追。自身实体也在此表中，空壳时自身状态缺失属预期。服务端升级修复后本条可删除。
+- **K1 visibleEntities 空壳兜底（逐实体）**：受旧基线上游 bug 影响（colyseus#935/#936，core 0.17.x；当前服务端已升至 0.18.23，兜底规则仍建议保留），`visibleEntities` 可能解码出空壳实体（`id` 非数字、`values`/`stringValues` 缺失），与正常实体**同表混入**且时好时坏。`visibleEntities` 是**唯一**实体来源（`state` 的 `entities` 已移除，无回退通道）。**规则：逐实体过滤——只使用 `typeof e.id === "number"` 的实体，读取统一走 `e.values?.get(...)` 可选链**；勿按整表校验（混有一个空壳即每帧抛 `Cannot read properties of undefined`）。空壳伴随控制台 `"refId not found"` 报错，属同一 bug 的预期噪音，勿当客户端 bug 追。自身实体也在此表中，空壳时自身状态缺失属预期。部署方确认升级到修复版本后可删除本条。
 - **K2 seq 无需重传机制**：被拒输入（超速等）会被丢弃，客户端无法感知；只需保证 seq 严格递增、每次携带最新输入即可，后续输入自然覆盖，勿实现复杂重传。
 - **K3 边沿触发**：键盘 `keydown` 有系统自动重复（auto-repeat），必须检查 `event.repeat` 过滤，否则 interact/attack/talk 会被连续触发。
 - **K4 命令失败无回执**：所有命令失败（缺料/满包/距离不够）服务端零副作用且**不回复错误**。UI 不等待响应、不做乐观本地修改，一切以状态同步为准。
@@ -237,7 +241,7 @@
 - **K10（方式 B）页面实际加载两份 schema**：importmap 钉的是 4.0.25，但 SDK 的 `+esm` 内部对 schema 的传递依赖由 CDN 解析为其范围内最新版（实测 4.0.26）——**解码路径用的是 SDK 内部那份**（控制台报错来源会显示 4.0.26）。如需绝对钉版，在 importmap 里把该传递依赖也显式映射。
 - **K11 `EntityState.level`（int8，末尾追加）**：实体带离散层号（缺省 0）。该字段**追加在 `id`/`values`/`stringValues` 之后**——既有三项的**字段索引不变**，旧客户端结构上仍能解码新流（只是读不到层号）；新客户端连旧服务端则缺该字段，按 0 处理即可。客户端声明 schema 时**必须把 `level` 放在最后**（字段顺序即线协议）。渲染时按自身层号过滤异层实体。
 - **K12 重连语义（断线保留）**：服务端**不是**「断线即销毁」——会话断开后玩家实体保留**约 5 分钟**（server 规则 `offlineRetentionTicks`，缺省 tickRate×300s；配 0 才关闭），期间**对所有客户端不可见**（不进快照）。客户端可把自己断线前的 networkId 存本地（localStorage），join 时作为**可选参数**回传：`joinOrCreate("game", { networkId: saved })`——服务端**严格按该 id 匹配**未到期的保留实体：命中则复用同一角色（背包/进度不丢），未命中则新建。**不要**假设「重连一定是新角色」，也不要假设「重连一定恢复原角色」。
-- **K13 冷却/瞬态不同步**：攻击/投掷冷却以 `Cooldown.remainingMs`（**仅玩家实体**）同步——客户端可据此显示冷却条，但**不能**把它当作服务端裁决：真正的冷却由服务端判定，命令失败无回执。其余瞬态组件（如 `Velocity`/`Intent`/`Kind`）仍不同步。
+- **K13 冷却/瞬态不同步**：攻击/投掷冷却以 `Cooldown.remainingMs`（**仅玩家实体**）同步——客户端可据此显示冷却条，但**不能**把它当作服务端裁决：真正的冷却由服务端判定，命令失败无回执。`Kind.value` **已同步**（实体种类见协议 §3.5/§3.6，优先按它分类）；其余瞬态组件（如 `Velocity`/`Intent`）仍不同步。
 - **K14 `RoomState` 末尾四字段（顺序即线协议）**：`weatherId`(string) / `phaseId`(string) / `phaseProgress`(number) / `offers`({map:"string"}) **追加在 `players` 之后**——客户端声明 schema 时必须按此顺序（漏声明会与新服务端错位解码）。旧客户端只声明前四项在结构上仍可解码（读不到这四项）。`phaseId`/`weatherId` 是**配置字符串**（`mild`/`dry`/`wet`/`storm`、`clear`/`rain`/…），语义随配置漂移，**原样显示、不要硬编码取值集**。
 - **K15 `offers` 的可见性与格式**：`state.offers` 的 key 是报价会话 id（字符串），value 是 **JSON 字符串**（需 `JSON.parse`，形如 `{"from":123,"to":456,"give":[["wood",2]],"take":[["shell",5]]}`，`from`/`to` 为 networkId，视角以发起方为基准）。服务端**只把与自己相关的条目**放进你的表里（发起方/接收方可见，他人不可见）——所以读到的每条都与自己相关，可直接渲染。成交/取消后条目消失。发起报价时条款的 `party` 也用 **networkId**（不是服务端 eid），用错会被整条拒绝；条款数量写 `{kind, count}` 即可（`container` 可省略，缺省按背包 inventory 处理）；`offer-accept`/`offer-cancel` 的 `offerId` 直接回传 map 键原值（字符串）即可（数字亦可）。
 - **K16 内容目录（`GET /content`）**：物品/配方/任务/成就/相位/技能的名称与描述由服务端从当前配置导出（`items`/`recipes`/`quests`/`achievements`/`phases`/`skills` 六段）。客户端**不应硬编码静态表**；名称字段是「可直接显示的文本」，配置缺名称时服务端回退为 id/kind 原文（如 `wood`）——不保证是中文。端点不可用（旧服务端）时才退回自备静态表。
@@ -289,3 +293,4 @@
 | v2.2 | 2026-09-23 | 按生成客户端实测反馈修订：K1 改写为**逐实体过滤**（实测空壳与正常实体同表混入、`values`/`stringValues` 整个缺失，旧的整表校验写法会每帧崩；空壳伴随 `"refId not found"` 预期噪音）；新增 K9（join 后首帧 `players` 可能为 `undefined`，读取需判空）；新增 K10（方式 B 下 SDK 传递依赖漂移，页面实际加载 4.0.25/4.0.26 两份 schema）；K5 补 https/wss 部署白名单说明；§P1 相机补渲染缩放建议；昼夜 `hour` 换算语义补至协议文档 §3.1 |
 | v2.3 | 2026-10-21 | 协议扩容同步（协议细节仍以 `CLIENT-INTEGRATION.md` 为唯一权威）：① **§1 约束 3 的两段 Schema 示例补 `EntityState.level`（int8，末尾追加）**——字段顺序即线协议，漏声明会与新服务端错位解码（新增 K11：末尾追加 ⇒ 旧客户端前三项索引不变）；② §P0 补层号过滤与 `Kind.value` 优先辨识；③ §P3 补新命令键位（`R` 搜刮容器面板 / `Y` 取消制作 / `U` 加燃料 / `Q` 投掷瞄准 + `Esc` 取消）；④ §P4 补成长面板（`Progression.*`）、成就（`Achievements.*`）与新解锁提示；⑤ 新增 K12（**重连语义改正**：断线保留约 5 分钟，凭 networkId 复用，旧文档「断线即销毁」已过时）与 K13（冷却等瞬态组件不同步，客户端只能用本地计时提示）；⑥ 验收清单补第 10-14 条（重连复用 / 搜刮面板 / 制作进度与取消 / 投掷瞄准 / 成长成就 HUD） |
 | v2.4 | 2026-10-21 | 协议面补齐（服务端侧）：① **§1 约束 3 的两段 Schema 示例补 `RoomState` 末尾四字段**——`weatherId`(string)/`phaseId`(string)/`phaseProgress`(number)/`offers`({map:"string"})，顺序即线协议（新增 K14）；② 新增 §P1.5 内容目录（`GET /content`：items/recipes/quests/achievements/phases/skills 六段，中文名由服务端从配置导出，客户端不再硬编码静态表）与 K16；③ §P3 对话选项改读 `Dialogue.option.{i}.text`（正文读 `Dialogue.text`），新增交易报价行（条款 `party` 用 networkId）；④ §P4 HUD 补环境三字段与交易面板；⑤ 新增 K15（`offers` 的可见性/JSON 字符串格式/networkId 语义）；⑥ §P1 补「live 几何」说明（写回后 version 变化 → 重新拉取）；⑦ K13 改写：冷却经 `Cooldown.remainingMs`（仅玩家）同步，仍以服务端裁决为准；⑧ 验收清单补第 15-17 条 |
+| v2.5 | 2026-11-23 | CC-08 版本基线修正：① 文首新增版本基线说明——当前服务端 `@colyseus/core 0.18.23` / `@colyseus/schema 5.0.43`、Godot addon 0.18.9；CDN 示例保留旧基线 `@colyseus/sdk@0.17.43` / `@colyseus/schema@4.0.25`（0.18 浏览器 CDN 路径未验证，不擅自改号）；② join 增补 `protocolVersion` 握手说明（从 `/client/manifest` 获取，缺省兼容，版本不符被拒）；③ **K13 修正 `Kind` 矛盾**：`Kind.value` 已同步，仅 `Velocity`/`Intent` 等瞬态不同步；④ K1 的 `0.17.43` 表述改为旧基线并注明当前 0.18.23 |

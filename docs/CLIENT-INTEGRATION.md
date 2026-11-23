@@ -5,7 +5,7 @@
 >
 > **机制 vs 配置产物**：本文规范的是协议**机制与形状**（Schema 字段/顺序、消息名与载荷形状、端点契约、校验与错误语义、特征辨识方法、命令白名单）；文中出现的具体数值/内容清单是当前部署游戏配置的**产物**（以「荒岛求生」配置为例标注），会随 `game/` 配置漂移，各节均标注其配置来源（`game/rules/*.json`、`game/items/`、`game/entities/`、`game/maps/registry.json`、`game.json`），客户端不应硬编码。
 >
-> 技术基线：Colyseus 0.17 + @colyseus/schema 4.x（二进制增量同步，WebSocket 传输）。
+> 技术基线：`@colyseus/core` 0.18.23 + `@colyseus/schema` 5.0.43（二进制增量同步，WebSocket 传输）；配套 Godot Colyseus addon 0.18.9。协议版本号见 §1.4。
 
 ---
 
@@ -49,6 +49,34 @@ const room = await client.joinOrCreate<RoomState>("game");
 - 保留标记**随存档入档**：服务端重启后仍在保留期内的玩家实体依然保留（读档时恢复标记与到期 tick），重连窗口跨重启有效。
 
 > 早期版本文档写「断线即销毁、重连新建」——**已过时**，以本节为准。
+
+### 1.4 协议版本握手
+
+服务端在 join options 中读取整数 `protocolVersion`，与当前 `PROTOCOL_VERSION`（当前为 `1`）比较：
+
+| 客户端上报 | 服务端行为 | 客户端可见错误 |
+|---|---|---|
+| 未提供（旧客户端） | 记一次 warning，**放行** | — |
+| 非整数（字符串/小数/NaN 等） | **拒绝加入** | `protocol-version-invalid client=<原值> server=1` |
+| 整数但与服务端不同 | **拒绝加入** | `protocol-version-mismatch client=<n> server=1` |
+| 与 `PROTOCOL_VERSION` 相同 | 放行 | — |
+
+`protocolVersion` 与 `schemaVersion` 由 `GET /client/manifest` 一并下发（manifest 契约以部署方文档为准；端点尚未部署时可向部署方查询）。客户端应在每次 join 时携带：
+
+```ts
+const manifest = await (await fetch(httpBase + "/client/manifest")).json();
+
+const room = await client.joinOrCreate("game", {
+  // 既有可选参数（断线复用）照常保留
+  networkId: savedNetworkId,
+  // 协议版本：从 manifest 读取，不要硬编码
+  protocolVersion: manifest.protocolVersion,
+});
+```
+
+- 缺省不传仍可连接（旧客户端兼容），但破坏性 schema 变更后旧版本会被**明确拒绝**，而不是静默解码错位。
+- 客户端使用的 schema 副本必须由服务端 schema codegen 生成（Godot：`godot-client/generated/schema.gd`，由 `pnpm schema:gen` 产出）；`schemaVersion` 仅用于诊断，**字段顺序仍以生成物为准**。
+- 收到上述错误消息时应提示用户升级客户端，不要重试同一版本（重试必然再次被拒）。
 
 ---
 
@@ -197,7 +225,7 @@ Colyseus Schema 增量同步（补丁 + 全量握手）。**客户端必须声�
 - 该表仅对自己可见（服务端按连接过滤，经 `$filter` per-client 编码），不要假设能看到其他玩家的表。
 - 跨图实体被过滤：玩家只看到**同一地图**（`PlayerState.mapId`）内的实体 + 半径内；换图后旧图实体随即从此表移除。
 - 这是**唯一**的实体交付路径（破坏性变更，旧客户端读取 `RoomState` 的 `entities` 会失败）。
-- **上游解码 bug 兜底（core 0.17.43）**：该表可能解码出空壳实体（`id` 非数字、`values`/`stringValues` 缺失），与正常实体同表混入且时好时坏。客户端应**逐实体过滤**（仅使用 `typeof id === "number"` 的实体）并以可选链读取字段；空壳伴随控制台 `"refId not found"` 报错，属预期噪音，服务端升级 colyseus 后消除。
+- **上游解码 bug 兜底（core 0.17.x 旧基线）**：旧版服务端上该表可能解码出空壳实体（`id` 非数字、`values`/`stringValues` 缺失），与正常实体同表混入且时好时坏。当前服务端基线已升至 0.18.23，但客户端仍建议**逐实体过滤**（仅使用 `typeof id === "number"` 的实体）并以可选链读取字段；空壳伴随控制台 `"refId not found"` 报错，属旧版上游 bug 的预期噪音。
 
 ### 3.3 EntityState（单实体）
 
@@ -715,7 +743,7 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 | 连接失败/握手无响应 | Schema 与服务端不一致（字段顺序/类型）、地址错误、CORS 白名单未含客户端 Origin |
 | 角色不动 | 输入超速被拒（超限帧被丢弃、seq 不推进、无需重发）；或未发 `input`（只发 state 监听） |
 | 实体表为空 | 实体恒在自己 `visibleEntities`（首帧后才开始填充）；若持续为空，检查是否同一地图/半径内无实体、或 Schema 声明顺序与服务端不一致 |
-| 控制台报 `"refId not found"`、实体字段偶发消失 | 上游解码 bug（core 0.17.43）：`visibleEntities` 混入空壳实体，按 §3.2 末尾的兜底规则逐实体过滤即可容忍；服务端升级 colyseus 后消除 |
+| 控制台报 `"refId not found"`、实体字段偶发消失 | 旧基线（core 0.17.x）的上游解码 bug：`visibleEntities` 混入空壳实体，按 §3.2 末尾的兜底规则逐实体过滤即可容忍；当前服务端基线为 0.18.23，客户端仍建议保留兜底 |
 | 命令"没反应" | 命令失败无回执：缺料/满包/频率超限/距离不够，观察状态确认 |
 | 投掷"没反应" | 武器槽装备的物品没有投掷档案（服务端要求 `throw` 段）；或服务端冷却未结束（`Cooldown.remainingMs` 已同步但仍以服务端裁决为准，冷却结束前命令会被静默拒收） |
 | 报价列表为空 | `RoomState.offers` 只含**与自己相关**的条目（发起方/接收方可见）；或报价已成交/取消（条目移除）。参与方 id 用 **networkId**（自己 `PlayerState.entityId`、对方 `EntityState.id`），不是服务端 eid |
