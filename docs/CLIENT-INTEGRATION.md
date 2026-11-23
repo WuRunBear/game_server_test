@@ -562,7 +562,7 @@ export class RoomState extends Schema {
 | 容器物品清单 | `Inventory.{i}.kind/count/durability` | `items[].kind` + 物品定义字段（`/content` 的 `items` 段；**耐久上限**也在其中） |
 | 配方名称与解锁条件 | `Crafting.{i}.recipeId` | `recipes[].id/desc/unlock`（`/content` 的 `recipes` 段） |
 | 物品名称 | `Inventory.{i}.kind` / `ItemMeta.kind` | `items[]`（`/content` 的 `items` 段；含堆叠上限/耐久/食用/穿戴/放置/投掷档案） |
-| 环境相位与天气 | `RoomState.phaseId/phaseProgress/weatherId` | `phases[].id/durationTicks/weather/modifiers`（`/content` 的 `phases` 段） |
+| 环境相位与天气 | `RoomState.phaseId/phaseProgress/weatherId/weatherIntensity/seasonId/dayIndex` | `phases[].id/durationTicks/weather(intensity)/modifiers` 与 `seasons[]`（`/content`） |
 
 > 兼容说明：`/content` 不可用时（旧服务端）客户端仍可退回到自备静态表的旧做法——协议本身不依赖该端点。
 
@@ -741,7 +741,10 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
     { "id": "village_friend", "title": "渔村的熟人", "desc": "与渔村势力声望达到 10。", "condition": "factionRepAtLeast:village:10", "reward": { … } }
   ],
   "phases": [
-    { "id": "mild", "durationTicks": 24000, "weather": [{ "id": "clear", "weight": 5 }], "modifiers": { "temperatureOffset": 0 } }
+    { "id": "mild", "durationTicks": 24000, "weather": [{ "id": "clear", "weight": 5, "intensity": 0 }], "modifiers": { "temperatureOffset": 0 } }
+  ],
+  "seasons": [
+    { "id": "spring", "durationTicks": 60000 }
   ],
   "skills": [{ "id": "combat", "label": "战斗" }]
 }
@@ -759,7 +762,8 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 | | `title`/`desc` | 任务标题/描述（配置无该字段时按展示名/目标形态生成可读兜底文案） |
 | `achievements` | `title`/`desc` | 取配置的名称/描述字段（缺省时用展示名/条件兜底） |
 | | `condition` | 解锁条件（服务端裁决） |
-| `phases` | `id`/`durationTicks`/`weather`/`modifiers` | 环境相位定义（与 `RoomState.phaseId` 同源命名空间） |
+| `phases` | `id`/`durationTicks`/`weather`/`modifiers` | 环境相位定义（与 `RoomState.phaseId` 同源命名空间）；`weather[].intensity` 为 0..1 强度（缺省 0） |
+| `seasons` | `id`/`durationTicks` | 季节循环（与 `RoomState.seasonId` 同源；未配置为空数组） |
 | `skills` | `id`/`label` | 技能 id 与展示名（`Progression.skill.{id}` 同源） |
 
 > **展示名兜底链**：配置自带字段（成就的 name/description）→ 服务端登记的展示名（游戏层注册的中文名）→ **配置 id/kind 原文**（如 `wood`、`collect_axe`）。客户端应把 `title`/`label`/`desc` 当作**可直接显示的文本**处理，不要假定其一定是中文或一定是 id。

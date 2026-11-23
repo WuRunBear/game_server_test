@@ -302,3 +302,4 @@
 | v3.1 | 2026-11-23 | CC-10 玩家身份：join options 可带 `displayName/characterId/appearance`（规范化后入档，重连不覆盖非空值）；`PlayerState` 末尾追加三字段；`Equipment.weaponKind/toolKind/armorKind` 派生同步（只曝三个装备槽，不露背包）。服务端不校验资料真实性（账号体系属 CC-15） |
 | v3.2 | 2026-11-23 | CC-14 网络手感：服务端固定步长 accumulator（20tps→50ms/帧，积压丢弃不补帧加速）；`RoomState.serverTimeMs`（逻辑时间=tick×fixedDtMs）；`PlayerState.lastProcessedSeq`（仅被接受输入推进，用于对账/丢弃过期预测）。重连仍走 networkId，鉴权/预测未做 |
 | v3.3 | 2026-11-23 | CC-12 天气/季节：`RoomState` 末尾追加 `dayIndex`（24h 日计数）、`seasonId`（可配 seasons，未配置空串）、`weatherIntensity`（0..1）；`weather-change` 事件带 intensity，新增 `season-change`（仅变化时发）。温度未建模（无基准温度配置） |
+| v3.4 | 2026-11-23 | CC-12 收尾：`/content` 的 `phases[].weather[]` 增加 `intensity`（0..1），根级新增 `seasons: [{id,durationTicks}]`；与 `RoomState.weatherIntensity/seasonId` 同源 |
