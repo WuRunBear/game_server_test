@@ -883,12 +883,12 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | CC-03 | Action Timeline + ActionState | P0 | 已完成（第一切片） | R2 | fixer | 2026-11-23 | `8fdbe37`；attack/gather/throw 阶段化；action 13/13 + 全量 1318 passed；place/deconstruct 等仍瞬时 |
 | CC-04 | Client Event Outbox + Command Result | P0 | 已完成 | R3 | fixer | 2026-11-23 | `1bd60e6`；events 19/19 + 全量 1337 passed；debug_colliders 仍保留 eid 兼容字段 |
 | CC-05 | Map Client View | P0 | 已完成 | R4 | fixer | 2026-11-23 | `a9253f1` / godot `d35ee59`；mapVersion + delta + render + collision + exposure + map-graph；19 new tests、全量 1356 passed |
-| CC-06 | Query / Affordance | P0 | 待执行 | - | - | 2026-11-23 | 与 CC-05 共享 `server.ts`，需分轮 |
+| CC-06 | Query / Affordance | P0 | 进行中 | R5 | fixer | 2026-11-23 | 独占 server.ts/query 模块/只读访问器 |
 | CC-07 | State Sync Completion | P0 | 已完成 | R1 | fixer | 2026-11-23 | `7f10d8d`；netsync-completeness 13/13 + 全量 1266 passed（仅基线 2 fails）；另修 `spawn` 的 `Transform.scale` 初始化 |
 | CC-08 | Protocol / Schema 工具链 | P0 | 已完成 | R1 | fixer | 2026-11-23 | server `5bdfa9d` / godot `903f659`；protocol-version + schema-gdscript + schema:check 全绿 |
 | CC-09 | UI Data Projection | P1 | 已完成 | R2 | fixer | 2026-11-23 | `4536320`；content-projection 15/15 + 旧 `/content` 3/3；新增 factions/stationTypes/damageTypes 与任务/成就/技能字段 |
 | CC-10 | Player Profile | P1 | 待执行 | - | - | 2026-11-23 | - |
-| CC-11 | Audio / VFX | P1 | 待执行 | - | - | 2026-11-23 | 依赖 CC-04 |
+| CC-11 | Audio / VFX | P1 | 进行中 | R5 | fixer | 2026-11-23 | 依赖 CC-04（已交付） |
 | CC-12 | Weather / Season View | P1 | 待执行 | - | - | 2026-11-23 | - |
 | CC-13 | Map Decoration / World Map | P1 | 待执行 | - | - | 2026-11-23 | 需先定装饰模型 |
 | CC-14 | Network Feel | P1 | 待执行 | - | - | 2026-11-23 | - |
@@ -927,3 +927,4 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | 2026-11-23 | R3 | CC-04 | 已完成 | `1bd60e6`；`events` 批量（self/nearby/map/world）+ `command-result` 全量回执；hit/death/action/gather/craft/quest/achievement/level-up/raid/weather/map/terrain；19 tests、全量 1337 passed |
 | 2026-11-23 | R4 | CC-05 | 已派发 | `PlayerState.mapVersion`（末尾追加）+ `/maps/runtime?sinceVersion` delta + `/maps/render` 有效地面 + `/maps/collision` + `Space.exposure` + `/world/map-graph` |
 | 2026-11-23 | R4 | CC-05 | 已完成 | `a9253f1` + godot `d35ee59`；delta 三路径/写回历史、有效地面缓存、正式碰撞（networkId）、室内外、世界图；schema:gen/check 双绿；19 new tests、全量 1356 passed |
+| 2026-11-23 | R5 | CC-06 / CC-11 | 已派发 | CC-06 查询/放置预览/合成/商店/任务/成就/技能；CC-11 audio/vfx id 契约 + manifest/事件挂接 |
