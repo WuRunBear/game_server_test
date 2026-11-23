@@ -888,7 +888,7 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | CC-08 | Protocol / Schema 工具链 | P0 | 已完成 | R1 | fixer | 2026-11-23 | server `5bdfa9d` / godot `903f659`；protocol-version + schema-gdscript + schema:check 全绿 |
 | CC-09 | UI Data Projection | P1 | 已完成 | R2 | fixer | 2026-11-23 | `4536320`；content-projection 15/15 + 旧 `/content` 3/3；新增 factions/stationTypes/damageTypes 与任务/成就/技能字段 |
 | CC-10 | Player Profile | P1 | 待执行 | - | - | 2026-11-23 | - |
-| CC-11 | Audio / VFX | P1 | 进行中 | R5 | fixer | 2026-11-23 | 依赖 CC-04（已交付） |
+| CC-11 | Audio / VFX | P1 | 已完成 | R5 | fixer | 2026-11-23 | `0076608`；audio/vfx 不透明 id + manifest 段 + 事件挂 sfx/vfx；20 tests；animations 仍空 |
 | CC-12 | Weather / Season View | P1 | 待执行 | - | - | 2026-11-23 | - |
 | CC-13 | Map Decoration / World Map | P1 | 待执行 | - | - | 2026-11-23 | 需先定装饰模型 |
 | CC-14 | Network Feel | P1 | 待执行 | - | - | 2026-11-23 | - |
@@ -928,3 +928,4 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | 2026-11-23 | R4 | CC-05 | 已派发 | `PlayerState.mapVersion`（末尾追加）+ `/maps/runtime?sinceVersion` delta + `/maps/render` 有效地面 + `/maps/collision` + `Space.exposure` + `/world/map-graph` |
 | 2026-11-23 | R4 | CC-05 | 已完成 | `a9253f1` + godot `d35ee59`；delta 三路径/写回历史、有效地面缓存、正式碰撞（networkId）、室内外、世界图；schema:gen/check 双绿；19 new tests、全量 1356 passed |
 | 2026-11-23 | R5 | CC-06 / CC-11 | 已派发 | CC-06 查询/放置预览/合成/商店/任务/成就/技能；CC-11 audio/vfx id 契约 + manifest/事件挂接 |
+| 2026-11-23 | R5 | CC-11 | 已完成 | `0076608`；`game/presentation/{audio,vfx}.json` 不透明 id；manifest `audio/vfx` 段 + 事件 `sfx/vfx`；20 tests、全量 1375 passed |
