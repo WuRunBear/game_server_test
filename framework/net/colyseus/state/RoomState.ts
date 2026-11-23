@@ -156,4 +156,20 @@ export class RoomState extends Schema {
   @view()
   @type({ map: "string" })
   offers: OfferSummaries = new OfferSummaries();
+
+  /**
+   * 逻辑服务器时间（毫秒，CC-14）= `tick × fixedDtMs`。
+   *
+   * **语义**：
+   * - 与 `tick` 是同一逻辑时钟的两种单位（`serverTimeMs = tick * fixedDtMs`），
+   *   由 GameRoom 在 applySnapshot 中写入仿真层的世界 tick；
+   * - **不是墙钟时间**：不读 `Date.now()`、不含真实流逝的停顿/抖动。客户端用
+   *   它把自己的插值/对账时钟对齐到服务端逻辑时间轴；需要秒数时按相邻两次
+   *   `serverTimeMs` 的差推算 tick 频率，不要和本地墙钟混用；
+   * - 固定步长恒定（如 20tps → 50ms/tick），客户端可安全做 `tick*step` 外推。
+   *
+   * 追加在 `offers` 之后，已有字段索引不变；默认 0（尚无 tick）。
+   */
+  @type("float64")
+  serverTimeMs: number = 0;
 }

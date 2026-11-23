@@ -279,6 +279,7 @@ describe("PlayerState 字段顺序（线协议索引）", () => {
       "displayName",
       "characterId",
       "appearance",
+      "lastProcessedSeq",
     ]);
   });
 });

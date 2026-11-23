@@ -117,4 +117,23 @@ export class PlayerState extends Schema {
    */
   @type("string")
   appearance: string = "";
+
+  /**
+   * 该会话**已接受**的最大输入 seq（CC-14 输入 ack）。
+   *
+   * **语义**（与 GameSimulation.submitInput 的入口判定严格一致）：
+   * - 客户端输入按 seq 去重；只有 `seq > 已记录` 且通过移动校验才被接受；
+   * - 正常递增输入 → 本字段跟随最新已接受 seq（服务端已“消化到这一条”）；
+   * - 超速/非法输入被拒 → **不推进**（客户端无法靠重发绕过）；
+   * - 乱序/重复（seq ≤ 已记录）→ 不推进；
+   * - 0 = 尚无已接受输入（新连接；重连复用实体后从新会话的 ack 重新起算）。
+   *
+   * GameRoom 每 tick 从仿真层只读查询写入；客户端据此做服务端对账/预测回滚
+   * （`RoomState.tick` 与 `serverTimeMs` 提供对应逻辑时间）。该字段是“已接受”
+   * 而非“已产生可见效果”的语义，客户端应与状态快照同一 tick 消费。
+   *
+   * 追加在 `appearance` 之后，已有字段索引不变。
+   */
+  @type("uint32")
+  lastProcessedSeq: number = 0;
 }

@@ -20,6 +20,9 @@
 //   phaseProgress（number，当前相位进度 0..1）、offers（{map:"string"}，
 //   报价摘要：offerId → JSON 字符串 `{"from","to","give","take"}`；
 //   from/to 为 networkId，视角以发起方为基准；只有参与方可见该条目）。
+// - CC-14 Network Feel（各自末尾追加，旧索引不变）：
+//   RoomState.serverTimeMs（float64，逻辑服务器时间 = tick × fixedDtMs，非墙钟）、
+//   PlayerState.lastProcessedSeq（uint32，该会话已接受的最大输入 seq；被拒输入不推进）。
 // - 动态 key 空间扩展（不改变 schema 字段索引，旧客户端结构上可解码，
 //   但需补渲染才可见）：
 //   EntityState.values：`Structure.role|connectLow|connectHigh|connectDir`
@@ -53,6 +56,7 @@ export class PlayerState extends Schema {
     @type("string") public displayName!: string;
     @type("string") public characterId!: string;
     @type("string") public appearance!: string;
+    @type("uint32") public lastProcessedSeq!: number;
 }
 
 export class RoomState extends Schema {
@@ -64,4 +68,5 @@ export class RoomState extends Schema {
     @type("string") public phaseId!: string;
     @type("number") public phaseProgress!: number;
     @type({ map: "string" }) public offers: MapSchema<string> = new MapSchema<string>();
+    @type("float64") public serverTimeMs!: number;
 }

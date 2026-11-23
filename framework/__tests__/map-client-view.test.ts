@@ -468,6 +468,7 @@ describe("③ Space.exposure 与 PlayerState.mapVersion", () => {
       "displayName",
       "characterId",
       "appearance",
+      "lastProcessedSeq",
     ];
     expect(fields).toEqual(expectedFields);
 

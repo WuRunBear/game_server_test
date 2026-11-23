@@ -109,6 +109,17 @@ export interface SimulationPort {
   submitInput(sessionId: string, input: PlayerInput): void;
 
   /**
+   * 取某会话**已接受**的最大输入 seq（CC-14 输入 ack；只读）。
+   *
+   * 只统计通过 seq 去重与输入校验的输入：超速/非法/乱序/重复被拒时不推进。
+   * GameRoom 每 tick 把它写入 `PlayerState.lastProcessedSeq`；未实现/无输入
+   * 时按 0 处理（客户端据此判断“服务端已消化到哪一条输入”）。
+   *
+   * @param sessionId Colyseus 连接标识
+   */
+  getLastProcessedSeq?(sessionId: string): number;
+
+  /**
    * 提交一条玩家命令（离散动作，非逐帧）。
    *
    * 立即执行服务端权威变更（如背包原子），不入帧缓存、不做 seq 去重。

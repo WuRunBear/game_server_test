@@ -1092,6 +1092,21 @@ export class GameSimulation implements SimulationPort {
   }
 
   /**
+   * 取某会话**已接受**的最大输入 seq（CC-14 输入 ack；只读）。
+   *
+   * 语义与 `submitInput` 的入口判定严格一致：
+   * - 通过 seq 去重（seq > 已记录）且通过输入校验 → 记录并成为 ack；
+   * - 超速/非法移动分量/乱序/重复被拒 → 不推进（客户端重发也绕不过）；
+   * - 会话未绑定或尚无输入 → 0。
+   *
+   * GameRoom 每 tick 把它写入 `PlayerState.lastProcessedSeq`，客户端据此做
+   * 输入对账/预测回滚。查询无副作用，不改任何仿真状态。
+   */
+  getLastProcessedSeq(sessionId: string): number {
+    return this.lastSeqBySessionId.get(sessionId) ?? 0;
+  }
+
+  /**
    * 提交玩家命令（离散动作）：食用 / 丢弃 / 槽位移动 / 制作 / 放置 ...
    * 立即执行服务端权威变更；返回统一 `CommandResult`（成功也回执）。
    *

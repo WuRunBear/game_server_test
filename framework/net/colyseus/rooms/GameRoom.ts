@@ -12,6 +12,7 @@ import { StateView } from "@colyseus/schema";
 
 import { createGameSimulation, type SimulationPort } from "simulation";
 import type { PlayerInput, PlayerCommand, TickResult, EntitySnapshot, TickSnapshot, OfferSummary } from "simulation/types";
+import type { ClientEvent } from "simulation/clientEvents";
 import type {
   AffordanceQuery,
   CraftQuery,
@@ -33,6 +34,15 @@ import { PROTOCOL_VERSION, checkProtocolCompatibility } from "network/protocol";
  * 又不会挤占正常同步带宽。
  */
 const DEBUG_COLLIDERS_PUSH_INTERVAL_MS = 500;
+
+/**
+ * 单次 `setSimulationInterval` 回调最多推进的固定步数（CC-14）。
+ *
+ * 取 5：20tps（fixedDtMs=50）下最多吸收 250ms 的调度停顿，超过部分直接丢弃
+ * ——避免「越卡越补、越补越卡」的死亡螺旋。丢步期间逻辑时间变慢，但仿真
+ * 始终以 fixedDtMs 单步推进，tick/dt 同基（客户端插值不会看到时间跳变）。
+ */
+export const MAX_SIM_STEPS_PER_TICK = 5;
 
 /**
  * 输入消息类型守卫：判断收到的消息是否为合法的 PlayerInput 格式。
@@ -269,6 +279,25 @@ export class GameRoom extends Room<{ state: RoomState }> {
   private debugPushCooldownMs = 0;
 
   /**
+   * 固定仿真步长（毫秒，CC-14）。
+   *
+   * onCreate 按 `gameDef.tickRate` 派生（与 `GameInstance` 的
+   * `world.time.fixedDtMs` 同一公式：20tps → 50ms）。applySnapshot 用它把
+   * 逻辑 tick 换算为 `RoomState.serverTimeMs`；0 = 尚未创建（测试直接调
+   * applySnapshot 时 serverTimeMs 保持 0）。
+   */
+  private fixedDtMs = 0;
+
+  /**
+   * 固定步长累加器（毫秒，CC-14；跨回调保留）。
+   *
+   * 每次仿真回调累加实际流逝时间，每消费一个 fixedDtMs 推进一帧；不足一步时
+   * 余量保留到后续回调（严格 accumulator：仿真速度 = 墙钟时间 / fixedDtMs）。
+   * 超限时丢弃余量，保证累加器不会无界增长。
+   */
+  private accumulatorMs = 0;
+
+  /**
    * 上一 tick 结束（已从共享报价表删除）的报价条目 id。
    *
    * 用途：让「曾看到该条目」的客户端仍能收到**删除操作**——报价表的删除
@@ -306,6 +335,9 @@ export class GameRoom extends Room<{ state: RoomState }> {
 
     // 计算固定步长（如 tickRate=20 → fixedDtMs=50）
     const fixedDtMs = Math.max(1, Math.floor(1000 / gameDef.tickRate));
+    // 与 GameInstance 的 world.time.fixedDtMs 同一公式；accumulator/serverTimeMs
+    // 都以它为唯一时间基（不把实际 delta 直接当仿真 dt）。
+    this.fixedDtMs = fixedDtMs;
 
     // 读档预载已移入 createGameSimulation 装配处（repository + saveId 注入，
     // 快照经 BootDeps 单一通道进 bootMaps/restoreWorld——读档通道唯一化）
@@ -452,6 +484,9 @@ export class GameRoom extends Room<{ state: RoomState }> {
     const playerState = new PlayerState();
     playerState.sessionId = client.sessionId;
     playerState.entityId = networkId;
+    // CC-14：新连接尚无已接受输入；ack 从 0 起，下一 tick 起由 applySnapshot
+    // 从仿真层只读查询刷新（重连复用实体时客户端 seq 可继续递增，ack 跟随）。
+    playerState.lastProcessedSeq = this.sim.getLastProcessedSeq?.(client.sessionId) ?? 0;
     playerState.visibleEntities.ownerSessionId = client.sessionId;
     // 展示资料：join 当帧即写入（不必等下一 tick 的 applySnapshot），此后每 tick
     // 由 applySnapshot 从仿真层只读访问器刷新。
@@ -668,22 +703,85 @@ export class GameRoom extends Room<{ state: RoomState }> {
   /**
    * 每帧 tick 回调——由 Colyseus setSimulationInterval 触发。
    *
-   * 四步：
-   * 1. sim.tick(dtMs) — 推进仿真，得到快照 + per-client 客户端事件
-   * 2. applySnapshot — 把快照写入 RoomState（触发 Colyseus 增量同步）
-   * 3. sendClientEvents — 状态同步之后批量发送表现事件
-   * 4. pushCollisionDebugSnapshots — 节流推送调试数据
+   * 固定步长 accumulator（CC-14）：
+   * 1. 累加实际流逝时间（`deltaTimeMs <= 0` 用 fixedDtMs 兜底，保持旧行为）；
+   * 2. 只有累加满 fixedDtMs 才推进（每步 dt 恒为 fixedDtMs），最多
+   *    `MAX_SIM_STEPS_PER_TICK` 步；不足一步时**保留余量并直接返回**——不推进、
+   *    不写 RoomState、不发事件，保证仿真速度严格 = 墙钟时间 / fixedDtMs；
+   * 3. 超限丢弃剩余余量并告警（防死亡螺旋）；
+   * 4. 多步时只 apply **最后一步**快照；各步客户端事件按会话合并后一次发送
+   *    （seq 由仿真层全局单调分配，拼接后不重排、不重复、不丢弃）；
+   * 5. 调试碰撞推送仍按实际流逝时间节流（仅在有推进的回调中累计/推送）。
    *
-   * @param deltaTimeMs Colyseus 提供的实际流逝时间
-   * @param fixedDtMs 固定步长（兜底值，deltaTimeMs 可能为 0）
+   * @param deltaTimeMs Colyseus 提供的实际流逝时间（毫秒）
+   * @param fixedDtMs 固定步长（毫秒；onCreate 按 tickRate 派生，与仿真层一致）
    */
   private onTick(deltaTimeMs: number, fixedDtMs: number): void {
-    const dtMs = deltaTimeMs > 0 ? deltaTimeMs : fixedDtMs;
-    const result = this.sim.tick(dtMs);
-    this.applySnapshot(result);
-    // 表现事件在状态同步之后发送（同一 tick 内顺序稳定；无事件不发空包）。
-    this.sendClientEvents(result);
-    this.pushCollisionDebugSnapshots(dtMs);
+    const stepMs = fixedDtMs > 0 ? fixedDtMs : 1;
+    this.fixedDtMs = stepMs;
+    const elapsedMs = deltaTimeMs > 0 ? deltaTimeMs : stepMs;
+    this.accumulatorMs += elapsedMs;
+
+    let steps = 0;
+    let lastResult: TickResult | undefined;
+    /** 多步事件合并表：sessionId → 按步序拼接的事件数组。 */
+    const mergedEvents = new Map<string, ClientEvent[]>();
+
+    while (this.accumulatorMs >= stepMs && steps < MAX_SIM_STEPS_PER_TICK) {
+      lastResult = this.sim.tick(stepMs);
+      this.mergeClientEvents(mergedEvents, lastResult.clientEvents);
+      this.accumulatorMs -= stepMs;
+      steps += 1;
+    }
+
+    if (this.accumulatorMs >= stepMs) {
+      // 仍有整步积压 = 触达步数上限：丢弃剩余余量，防止恢复后连续爆步。
+      console.warn("[GameRoom] 固定步长积压超限：丢弃剩余 accumulator", {
+        elapsedMs,
+        fixedDtMs: stepMs,
+        steps,
+        droppedMs: Math.round(this.accumulatorMs),
+      });
+      this.accumulatorMs = 0;
+    }
+
+    if (steps === 0) {
+      // 严格 accumulator：不足一个固定步长不推进，也不写 RoomState/发事件。
+      // 余量保留到后续回调，保证仿真速度 = 墙钟 / fixedDtMs，不会因定时器
+      // 早触发而加速。
+      return;
+    }
+
+    // 防御性收窄：steps > 0 时 lastResult 必有值。
+    if (!lastResult) return;
+
+    // 多步时只同步最后一步快照（中间快照不写 RoomState，避免无谓 diff 抖动）。
+    this.applySnapshot(lastResult, stepMs);
+    // 表现事件在状态同步之后发送；同一会话的多步事件已按步序合并。
+    this.sendClientEvents({ clientEvents: mergedEvents });
+    this.pushCollisionDebugSnapshots(elapsedMs);
+  }
+
+  /**
+   * 把一步的 per-session 客户端事件合并进累计表（保持步序）。
+   *
+   * 同一会话跨步的数组按步顺序拼接；`ClientEvent.seq` 由仿真层全局单调分配，
+   * 拼接后每个会话仍严格递增。无事件的会话不建空数组（客户端不发空包）。
+   */
+  private mergeClientEvents(
+    target: Map<string, ClientEvent[]>,
+    source: Map<string, ClientEvent[]> | undefined,
+  ): void {
+    if (!source || source.size === 0) return;
+    for (const [sessionId, events] of source) {
+      if (events.length === 0) continue;
+      const existing = target.get(sessionId);
+      if (existing) {
+        existing.push(...events);
+      } else {
+        target.set(sessionId, [...events]);
+      }
+    }
   }
 
   /**
@@ -692,7 +790,7 @@ export class GameRoom extends Room<{ state: RoomState }> {
    * 载荷固定为 `{ events: ClientEvent[] }`；只发给有事件的**在线**连接
    * （断线保留玩家不在 `this.clients` 中，天然不接收；重连从新事件开始）。
    */
-  private sendClientEvents(result: TickResult): void {
+  private sendClientEvents(result: Pick<TickResult, "clientEvents">): void {
     const perClient = result.clientEvents;
     if (!perClient || perClient.size === 0) return;
 
@@ -710,11 +808,16 @@ export class GameRoom extends Room<{ state: RoomState }> {
    * （per-client diff，Colyseus 按连接分别增量同步）——每个客户端只见
    * 自己视野内实体。
    *
-   * @param result 仿真产出的本帧结果
+   * @param result 仿真产出的本帧结果（多步时传最后一步）
+   * @param stepMs 固定步长（毫秒；tick → serverTimeMs 的唯一换算基）。
+   *   缺省用 onCreate 派生的 `fixedDtMs`（直接调本方法的测试可显式传入）。
    */
-  private applySnapshot(result: TickResult): void {
+  private applySnapshot(result: TickResult, stepMs = this.fixedDtMs): void {
     const snapshot = result.snapshot;
     this.state.tick = snapshot.tick;
+    // CC-14 逻辑服务器时间：与 tick 同基（tick × fixedDtMs），不是墙钟时间；
+    // 客户端只用它做自己的插值/对账时钟对齐，禁止与 Date.now() 混用。
+    this.state.serverTimeMs = stepMs > 0 ? snapshot.tick * stepMs : 0;
     if (snapshot.timeOfDay) {
       this.state.hour = snapshot.timeOfDay.hour;
       this.state.phase = snapshot.timeOfDay.phase;
@@ -734,6 +837,8 @@ export class GameRoom extends Room<{ state: RoomState }> {
       // CC-05：每 tick 写入玩家当前地图的几何内容指纹；换图后立即反映新图
       // 版本（客户端据 mapVersion 变化拉 /maps/runtime?sinceVersion=）。
       playerState.mapVersion = this.sim.getMapVersion?.(playerState.mapId) ?? "";
+      // CC-14 输入 ack：仿真层已接受的最大 seq（被拒输入不推进）。
+      playerState.lastProcessedSeq = this.sim.getLastProcessedSeq?.(client.sessionId) ?? 0;
       // CC-10：展示资料从仿真层只读访问器刷新（断线保留玩家不在 clients 中，
       // 不会写；其资料仍在实体上，重连后由新 PlayerState 取回）。
       const profile = this.sim.getPlayerProfile?.(playerState.entityId);
