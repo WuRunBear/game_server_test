@@ -36,6 +36,8 @@ import { stateMachineSystem } from "framework/simulation/stateMachine/stateMachi
 import { createPopulationSystem } from "framework/simulation/population/populationSystem";
 import { projectileSystem } from "framework/systems/gameplay/projectileSystem";
 import { progressionSystem, validateProgressionRules } from "framework/systems/gameplay/progression";
+import { createActionSystem } from "framework/simulation/actions/actionSystem";
+import { ActionSystemConfigSchema } from "framework/config/schema/ActionSchema";
 
 export function registerBuiltinSystems(
   systemRegistry: SystemRegistry,
@@ -141,6 +143,22 @@ export function registerBuiltinSystems(
     }),
     factory: (_world: GameWorld, config?: Record<string, unknown>) => createInteractionSystem(config),
     after: ["gathering"],
+  });
+
+  // 动作时间轴：把 attack/gather/throw 从同 tick 瞬时结算改为服务端权威的
+  // 阶段过程。排在 interaction 之后（意图在同一 tick 启动动作），并显式排在
+  // equipment/progression/death 之前：
+  // - progression 之前 → 事件阶段击杀/采集的经验同 tick 结算；
+  // - death 之前 → 事件阶段击杀同 tick 进入死亡处理；
+  // - 不重排 combat/physics（它们在既有顺序中位于 interaction 之前，移动锁由
+  //   applyInputs 在下一 tick 生效，本 tick 位移已在 movement 中结算）。
+  systemRegistry.register({
+    id: "action",
+    description: "动作时间轴：按 actions 配置推进动作阶段，在事件阶段调用战斗/采集/投掷既有原子。",
+    configSchema: ActionSystemConfigSchema,
+    factory: (world: GameWorld, config?: Record<string, unknown>) => createActionSystem(world, config),
+    after: ["interaction"],
+    before: ["equipment", "progression", "death"],
   });
 
   systemRegistry.register({

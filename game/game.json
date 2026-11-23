@@ -45,6 +45,13 @@
     { "id": "gathering" },
     { "id": "stateMachine" },
     { "id": "interaction", "config": { "range": 24 } },
+    {
+      "id": "action",
+      "config": {
+        "actionsPath": "game/actions/actions.json",
+        "intentActions": { "attack": "attack", "interact": "gather", "throw": "throw" }
+      }
+    },
     { "id": "equipment" },
     { "id": "progression" },
     { "id": "death" },
@@ -98,7 +105,12 @@
       { "component": "StateMachine", "fields": ["state", "stateTick"] },
       { "component": "Modifiers", "fields": ["stats"] },
       { "component": "ExpiresAt", "fields": ["remainingTicks"] },
-      { "component": "Ledger", "fields": ["entries"] }
+      { "component": "Ledger", "fields": ["entries"] },
+      {
+        "component": "Action",
+        "tags": ["Player"],
+        "fields": ["actionId", "startedTick", "durationTicks", "phase", "phaseIndex", "target", "dirX", "dirY"]
+      }
     ]
   }
 }

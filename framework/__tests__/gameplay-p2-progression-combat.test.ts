@@ -34,6 +34,8 @@ import { Progression } from "framework/components/progression";
 import { initInventory } from "framework/components/inventory";
 import { attackTarget } from "framework/systems/gameplay/combatSystem";
 import { interactionSystem } from "framework/systems/gameplay/interactionSystem";
+import { tickActionStates } from "framework/simulation/actions/actionSystem";
+import { ActionInput, ActionState } from "framework/simulation/actions/actionState";
 import {
   progressionSystem,
   addXp,
@@ -64,10 +66,27 @@ beforeAll(() => {
 /** AoS 数组是模块级单例：清空 Progression，防跨用例 eid 复用串扰。 */
 beforeEach(() => {
   for (let i = 0; i < Progression.length; i++) Progression[i] = undefined;
+  // 动作状态同为模块级 AoS 瞬态：清空防上一 world 的同 eid 动作残留
+  for (let i = 0; i < ActionState.length; i++) ActionState[i] = undefined;
+  for (let i = 0; i < ActionInput.length; i++) ActionInput[i] = undefined;
+  // Cooldown 是 legacy SoA 全局数组：清 0 防跨 world 同 eid 冷却残留
+  for (let i = 0; i < Cooldown.remainingMs.length; i++) Cooldown.remainingMs[i] = 0;
 });
 
 function newWorld(): GameWorld {
   return createGameInstance(def).world;
+}
+
+/**
+ * 动作时间轴语义：interact 启动 gather，harvest 在 swing 阶段（elapsed 3）
+ * 才结算。手动推进完整动作（10 tick，含 recovery）并运行 actionSystem，
+ * 供不经过 GameSimulation 的真实配置用例复用。
+ */
+function runGatherSwing(world: GameWorld): void {
+  for (let i = 0; i < 10; i++) {
+    world.time.tick += 1;
+    tickActionStates(world);
+  }
 }
 
 function spawn(world: GameWorld, kind: string, x = 0, y = 0): number {
@@ -139,6 +158,7 @@ describe("P2 ① 经验与等级阈值", () => {
 
     Intent[player] = "interact";
     interactionSystem(world);
+    runGatherSwing(world);
 
     expect(ResourceNode[rock]!.remaining).toBe(4);
     expect(Progression[player]!.totalXp).toBe(4);
@@ -195,6 +215,7 @@ describe("P2 ② 技能加成影响真实数值", () => {
     // 1 级：基线 1 个
     Intent[player] = "interact";
     interactionSystem(world);
+    runGatherSwing(world);
     expect(Inventory[player]!.slots.filter((s) => s?.kind === "stone").length).toBe(1);
     expect(Inventory[player]!.slots[0]).toMatchObject({ kind: "stone", count: 1 });
 
@@ -202,8 +223,10 @@ describe("P2 ② 技能加成影响真实数值", () => {
     addXp(world, player, 100, "gathering");
     expect(getEquipModifiers(world, player).gatherMult).toBeCloseTo(1.5);
     ResourceNode[rock]!.remaining = 5;
+    Cooldown.remainingMs[player] = 0; // 动作级冷却重置（等价时间自然流逝）
     Intent[player] = "interact";
     interactionSystem(world);
+    runGatherSwing(world);
     expect(Inventory[player]!.slots[0]).toMatchObject({ kind: "stone", count: 3 });
   });
 });
@@ -371,9 +394,14 @@ describe("P2 ⑦ 真实配置端到端：击杀 4 只野猪升到 2 级", () => 
       Health.current[boar] = 60;
       Cooldown.remainingMs[player] = 0;
       Intent[player] = "attack";
-      // GameSimulation.tick 走完整系统链：interaction 攻击 → progression 结算击杀经验
+      // GameSimulation.tick 走完整系统链：interaction 启动动作 → active/hit
+      // 事件阶段调用 attackTarget → progression 同 tick 结算击杀经验。
       sim.tick(50);
+      // attack 配置：elapsed 4 进入 active 才结算（start 后第 4 个 tick）
+      for (let wait = 0; wait < 4; wait++) sim.tick(50);
       expect(Health.current[boar] ?? 0).toBeLessThanOrEqual(0);
+      // 等动作总时长（12 tick）结束，避免非 interruptible 动作拒绝下一轮启动
+      for (let wait = 0; wait < 8; wait++) sim.tick(50);
     }
 
     expect(Progression[player]!.totalXp).toBe(100);

@@ -12,10 +12,11 @@
  *
  * ## 派生投影（无独立 AoS 组件的同步键）
  *
- * buildSnapshot 的派生分支当前只硬编码了 `Crafting`（见 netSyncDerived），
- * 无法在 GameSimulation 之外注册新的派生伪组件。为不修改传输层/仿真层，
- * 少数跨组件的派生键挂在 **Kind 适配器**上输出（Kind 条目无 tags、遍历全体
- * 带 NetworkId 的实体，是唯一覆盖所有实体的适配器扩展点）：
+ * buildSnapshot 的派生分支当前包含 `Crafting`（world.craftingJobs 任务表）与
+ * `Action`（动作时间轴瞬态 ActionState），分别由 netSyncDerived 登记、在
+ * GameSimulation.buildSnapshot 展平。少数跨组件的派生键仍挂在 **Kind 适配器**
+ * 上输出（Kind 条目无 tags、遍历全体带 NetworkId 的实体，是唯一覆盖所有实体
+ * 的适配器扩展点）：
  * - `Category.value`（string）—— 框架通用实体分类，见 categoryOf；
  * - `Projectile.ownerNetworkId`（number）—— 投射物主人的 networkId（0=无主），
  *   **绝不输出 owner eid**；
@@ -36,6 +37,11 @@ import { Ledger } from "components/ledger";
 import { ExpiresAt } from "framework/simulation/timer/timer";
 import { StateMachine } from "framework/simulation/stateMachine/stateMachine";
 import { Modifiers } from "framework/simulation/modifiers/modifiers";
+import {
+  ActionState,
+  getActionDefinition,
+  phaseIdAt,
+} from "framework/simulation/actions/actionState";
 
 /**
  * AoS 适配器的展平输出——纯数据，无 ECS 引用。
@@ -382,6 +388,49 @@ registerAosSyncAdapter("Ledger", (_world, eid, fields) => {
     for (const f of fields) {
       if (f === "entries") out.numbers[`Ledger.${kind}`] = count;
     }
+  }
+  return out;
+});
+
+/**
+ * 内建适配器：Action（动作时间轴瞬态状态，fields 由 netSync 白名单控制）。
+ *
+ * 键与语义（全部与 `RoomState.tick` 同基，客户端只读）：
+ * - `Action.actionId`（strings）：动作 id（配置字符串）；
+ * - `Action.startedTick` / `Action.durationTicks`（values）：动画进度基准；
+ * - `Action.phase`（strings）/ `Action.phaseIndex`（values）：当前阶段；
+ * - `Action.target`（values）：目标 **networkId**（0 = 无目标，绝不输出 eid）；
+ * - `Action.dirX` / `Action.dirY`（values）：朝向单位向量。
+ *
+ * 无动作时不写任何键；GameRoom 的 key diff 会清掉上一帧残留。目标实体已销毁/
+ * 无 NetworkId 时同样不写 target 键（客户端按无目标处理）。
+ */
+registerAosSyncAdapter("Action", (world, eid, fields) => {
+  const out = empty();
+  const state = ActionState[eid];
+  if (!state) return out;
+  const definition = getActionDefinition(world, state.actionId);
+  for (const field of fields) {
+    if (field === "actionId") out.strings["Action.actionId"] = state.actionId;
+    else if (field === "startedTick") out.numbers["Action.startedTick"] = state.startedTick;
+    else if (field === "durationTicks") out.numbers["Action.durationTicks"] = state.durationTicks;
+    else if (field === "phaseIndex") out.numbers["Action.phaseIndex"] = state.phaseIndex;
+    else if (field === "phase") {
+      out.strings["Action.phase"] =
+        state.phase || (definition ? phaseIdAt(definition, state.phaseIndex) : "");
+    } else if (field === "target") {
+      // 优先动作启动时解析的 networkId（目标在 windup 内死亡/销毁也保持稳定，
+      // 客户端能继续朝向原目标）；无目标写 0（与 Projectile.ownerNetworkId 同
+      // 约定），绝不输出 eid。
+      if (state.targetNetworkId !== undefined) {
+        out.numbers["Action.target"] = state.targetNetworkId;
+      } else if (state.targetEid >= 0 && hasComponent(world, state.targetEid, NetworkId)) {
+        out.numbers["Action.target"] = NetworkId.value[state.targetEid];
+      } else {
+        out.numbers["Action.target"] = 0;
+      }
+    } else if (field === "dirX") out.numbers["Action.dirX"] = state.dirX;
+    else if (field === "dirY") out.numbers["Action.dirY"] = state.dirY;
   }
   return out;
 });

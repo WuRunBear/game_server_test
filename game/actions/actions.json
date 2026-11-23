@@ -1,0 +1,43 @@
+{
+  "actions": {
+    "attack": {
+      "durationTicks": 12,
+      "phases": [
+        { "id": "windup", "endTick": 4 },
+        { "id": "active", "endTick": 7 },
+        { "id": "recovery", "endTick": 12 }
+      ],
+      "events": [{ "phase": "active", "type": "hit" }],
+      "lockMovement": true,
+      "interruptible": false,
+      "cooldownTicks": 20,
+      "cancelOnDamage": false
+    },
+    "gather": {
+      "durationTicks": 10,
+      "phases": [
+        { "id": "windup", "endTick": 3 },
+        { "id": "swing", "endTick": 6 },
+        { "id": "recovery", "endTick": 10 }
+      ],
+      "events": [{ "phase": "swing", "type": "harvest" }],
+      "lockMovement": true,
+      "interruptible": false,
+      "cooldownTicks": 14,
+      "cancelOnDamage": false
+    },
+    "throw": {
+      "durationTicks": 8,
+      "phases": [
+        { "id": "windup", "endTick": 4 },
+        { "id": "release", "endTick": 5 },
+        { "id": "recovery", "endTick": 8 }
+      ],
+      "events": [{ "phase": "release", "type": "spawn-projectile" }],
+      "lockMovement": true,
+      "interruptible": false,
+      "cooldownTicks": 20,
+      "cancelOnDamage": false
+    }
+  }
+}

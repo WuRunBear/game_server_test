@@ -40,6 +40,21 @@ export interface PlayerInput {
    * 由 interactionSystem 在该 tick 内消费并清空（talk 意图路由 NPC）。
    */
   talk?: boolean;
+  /**
+   * 可选目标实体 **networkId**（不是 eid）：attack/interact 优先指向该实体。
+   *
+   * 解析失败/不在范围/类型不匹配时 interactionSystem 回退「最近目标」；无论
+   * 显式目标还是回退结果，最终解析出的实体都会写入服务端 ActionState，客户端
+   * 只从 `Action.target`（networkId）读取。缺省时行为与历史一致。
+   */
+  target?: number;
+  /**
+   * 可选瞄准点世界坐标 x（与 aimY 成对）。朝向优先由瞄准点得出；缺省按
+   * 目标方向/移动输入/前方回退。非法值会被忽略（不拒绝整条输入）。
+   */
+  aimX?: number;
+  /** 可选瞄准点世界坐标 y（与 aimX 成对）。 */
+  aimY?: number;
 }
 
 /**

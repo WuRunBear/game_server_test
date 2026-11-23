@@ -37,6 +37,15 @@ import { stepFuelBurn, refuelStation, validateFuelRules, fastForwardFuelBurn } f
 import { placeEntity } from "framework/systems/gameplay/placeableSystem";
 import { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";
 import { throwWeapon } from "framework/systems/gameplay/projectileSystem";
+import {
+  startThrowAction,
+} from "framework/simulation/actions/actionSystem";
+import {
+  ActionInput,
+  ActionState,
+  clearActionState,
+  getIntentActionId,
+} from "framework/simulation/actions/actionState";
 import { advanceDialogue } from "framework/systems/gameplay/dialogueSystem";
 import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
 import { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
@@ -56,6 +65,7 @@ import type { ServerRule } from "framework/config/schema/RuleSchema";
 import { computeInterest } from "./interest";
 import { createInputGuard, type InputGuard } from "./inputValidation";
 import { CRAFTING_SYNC_COMPONENT } from "./netSyncDerived";
+import { ACTION_SYNC_COMPONENT } from "framework/simulation/actions/actionState";
 import { openOffer, acceptOffer, cancelOffer, isValidSettleTerms } from "framework/economy/offer";
 import { queueEvent } from "framework/simulation/events/eventBus";
 import { mixSeed } from "framework/simulation/rng";
@@ -93,6 +103,21 @@ function normalizeMoveAxis(value: unknown): number | undefined {
   if (value === undefined || value === null) return 0;
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   return Math.max(-MAX_INPUT_AXIS, Math.min(MAX_INPUT_AXIS, value));
+}
+
+/**
+ * 可选目标 networkId 归一：只接受正整数（协议层稳定 id）；非法/缺省返回
+ * undefined（由 interactionSystem 回退最近目标，不拒绝整条输入）。
+ */
+function normalizeTargetNetworkId(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) return undefined;
+  return value;
+}
+
+/** 可选瞄准坐标归一：必须有限数；缺省/非法返回 undefined。 */
+function normalizeAimCoordinate(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return value;
 }
 
 import type { SimulationPort } from "./SimulationPort";
@@ -522,6 +547,9 @@ export class GameSimulation implements SimulationPort {
     }
 
     // 建立 sessionId → eid 映射，后续输入可以通过 sessionId 找到玩家实体
+    // 动作状态是瞬态：重连复用/新生成都从干净状态开始（eid 复用防串台）
+    clearActionState(eid);
+    ActionInput[eid] = undefined;
     this.playerEidBySessionId.set(sessionId, eid);
 
     return { networkId: NetworkId.value[eid] };
@@ -584,6 +612,9 @@ export class GameSimulation implements SimulationPort {
   removePlayer(sessionId: string): void {
     const eid = this.playerEidBySessionId.get(sessionId);
     if (typeof eid === "number") {
+      // 断线即取消进行中的动作（保留实体也不应继续挥砍/采集）
+      clearActionState(eid);
+      ActionInput[eid] = undefined;
       if (this.offlineRetentionTicks > 0) {
         // 保留：挂标记 + 到期 tick（标记是"按标记跳过"排除逻辑的唯一依据）。
         addComponent(this.world, eid, Offline);
@@ -645,6 +676,16 @@ export class GameSimulation implements SimulationPort {
       attack: input.attack === true,
       talk: input.talk === true,
     };
+    // 可选目标/瞄准：target 是 networkId（不是 eid）；解析失败由 interaction
+    // 回退最近目标，绝不因可选字段非法而丢弃整条移动输入。
+    const target = normalizeTargetNetworkId(input.target);
+    const aimX = normalizeAimCoordinate(input.aimX);
+    const aimY = normalizeAimCoordinate(input.aimY);
+    if (target !== undefined) normalized.target = target;
+    if (aimX !== undefined && aimY !== undefined) {
+      normalized.aimX = aimX;
+      normalized.aimY = aimY;
+    }
 
     const lastSeq = this.lastSeqBySessionId.get(sessionId) ?? 0;
     if (seq <= lastSeq) return;
@@ -726,14 +767,24 @@ export class GameSimulation implements SimulationPort {
         return this.finishCommand(eid, command.type, placeEntity(this.world, eid, command.slot ?? -1, command.x ?? 0, command.y ?? 0));
       case "deconstruct":
         return this.finishCommand(eid, command.type, deconstructEntity(this.world, eid, command.target ?? -1));
-      case "throw":
-        // 投掷：装备 weapon 槽物品需声明 throw 档案；方向优先取瞄准点 x/y，
-        // 缺省按最近敌人/移动朝向回退（见 projectileSystem.throwWeapon）。
+      case "throw": {
+        // 投掷：配置了动作时间轴时只**启动动作**，投射物在 release 事件阶段由
+        // throwWeapon 生成；未配置时保持旧瞬时投掷（向后兼容）。
+        // 方向优先取瞄准点 x/y，缺省按最近敌人/移动朝向回退。
+        const throwActionId = getIntentActionId(this.world, "throw");
+        if (throwActionId) {
+          return this.finishCommand(
+            eid,
+            command.type,
+            startThrowAction(this.world, eid, throwActionId, command.x, command.y),
+          );
+        }
         return this.finishCommand(
           eid,
           command.type,
           throwWeapon(this.world, eid, command.x, command.y),
         );
+      }
       case "dialogue":
         return this.finishCommand(eid, command.type, advanceDialogue(this.world, eid, command.option ?? -1));
       case "offer": {
@@ -1003,6 +1054,8 @@ export class GameSimulation implements SimulationPort {
     for (const eid of this.playerEidBySessionId.values()) {
       Velocity.vx[eid] = 0;
       Velocity.vy[eid] = 0;
+      // 动作载荷是单帧脉冲：无新 interact/attack 输入则清空（不跨帧堆积）
+      ActionInput[eid] = undefined;
     }
 
     for (const [sessionId, input] of this.latestInputBySessionId) {
@@ -1010,8 +1063,21 @@ export class GameSimulation implements SimulationPort {
       if (typeof eid !== "number") continue;
       // 死亡/重生窗口内（原地重置语义，实体未移除）：不接收移动与意图输入
       if ((Health.current[eid] ?? 0) <= 0) continue;
-      Velocity.vx[eid] = input.moveX;
-      Velocity.vy[eid] = input.moveY;
+      // 动作锁移动：锁定期清零速度（不把本帧移动输入写进 ECS），动作结束/
+      // 取消后的下一 tick 自动恢复；interruptible 动作仍允许输入意图替换。
+      const action = ActionState[eid];
+      if (!action?.locked) {
+        Velocity.vx[eid] = input.moveX;
+        Velocity.vy[eid] = input.moveY;
+      }
+      if (input.interact || input.attack) {
+        ActionInput[eid] = {
+          ...(input.target !== undefined ? { target: input.target } : {}),
+          ...(input.aimX !== undefined && input.aimY !== undefined
+            ? { aimX: input.aimX, aimY: input.aimY }
+            : {}),
+        };
+      }
       // 交互/攻击意图：本帧按下则置位，由 interactionSystem 在 step 中消费并清空
       if (input.interact) {
         Intent[eid] = "interact";
@@ -1090,6 +1156,13 @@ export class GameSimulation implements SimulationPort {
         continue;
       }
 
+      // 派生投影：动作时间轴瞬态状态（ActionState 不注册持久组件，避免入档/
+      // 恢复出指向旧 eid 的动作；每帧从 AoS 状态经适配器展平 Action.* key）
+      if (field.component === ACTION_SYNC_COMPONENT) {
+        this.writeActionProjection(field, ensure);
+        continue;
+      }
+
       const comp = this.componentRegistry.get(field.component) as
         | Record<string, unknown>
         | unknown[]
@@ -1135,6 +1208,35 @@ export class GameSimulation implements SimulationPort {
     }
 
     return snapshotShell;
+  }
+
+  /**
+   * 动作时间轴派生投影（`component: "Action"` netSync 条目）。
+   *
+   * ActionState 是瞬态 AoS 状态（不注册为持久组件、不入档），这里按 netSync
+   * 白名单经 AoS 适配器展平为 `Action.*` 动态 key：
+   * - `Action.actionId` / `Action.phase`（stringValues）
+   * - `Action.startedTick` / `durationTicks` / `phaseIndex` / `target`（values；
+   *   target 是 **networkId**，适配器绝不输出 eid）
+   * - `Action.dirX` / `Action.dirY`（values）
+   *
+   * 无动作的实体不写入任何 Action.* key → GameRoom key diff 清掉旧残留。
+   */
+  private writeActionProjection(
+    field: { fields: string[]; tags?: string[] },
+    ensure: (id: number, eid: number) => EntitySnapshot,
+  ): void {
+    const adapter = getAosSyncAdapter(ACTION_SYNC_COMPONENT);
+    if (!adapter) return;
+    for (const eid of this.queryByTags(field.tags)) {
+      if (!ActionState[eid]) continue;
+      // 断线保留期实体不进快照（与 SoA/AoS 路径同一门控）
+      if (isOfflineRetained(this.world, eid)) continue;
+      const snap = ensure(NetworkId.value[eid], eid);
+      const result = adapter(this.world, eid, field.fields);
+      Object.assign(snap.values, result.numbers);
+      Object.assign(snap.strings, result.strings);
+    }
   }
 
   /**
