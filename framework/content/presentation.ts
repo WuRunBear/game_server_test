@@ -6,6 +6,7 @@
  *   并登记为当前活动配置；
  * - 查询函数只做「每图覆盖 → 全局默认」的合并查找，不解释 category /
  *   autotileGroup / footstepId / visualId 等不透明字符串；
+ * - 实体表现（`entities`）按 kind 查询/列出，字段同样是不透明引用；
  * - `validatePresentation` 是纯函数：检查地图 registry 与表现条目的覆盖关系，
  *   并检查配置中实际引用的 tile 语义 id 是否都有定义（返回错误列表，不抛）。
  *
@@ -16,6 +17,7 @@
 import type { MapConfig } from "framework/config/schema/MapRegistrySchema";
 import {
   PresentationConfigSchema,
+  type EntityPresentation,
   type MapPresentation,
   type PresentationConfig,
   type PresentationLevelSemantics,
@@ -104,6 +106,20 @@ export function listTileSemantics(mapId: string): TileSemanticsTable {
 /** 单图层边界语义（未配置时 undefined）。 */
 export function getLevelSemantics(mapId: string): PresentationLevelSemantics | undefined {
   return activePresentation?.maps[mapId]?.levelSemantics;
+}
+
+/** 单个实体 kind 的表现条目（未加载/未配置该 kind 时 undefined）。 */
+export function getEntityPresentation(kind: string): EntityPresentation | undefined {
+  return activePresentation?.entities?.[kind];
+}
+
+/**
+ * 全部实体表现条目（未加载时为冻结空对象；供 manifest / 调试输出）。
+ *
+ * 返回已登记配置中的实体表现表（未配置时为空对象），不复制、不解释字段。
+ */
+export function listEntityPresentations(): Readonly<Record<string, EntityPresentation>> {
+  return activePresentation?.entities ?? Object.freeze({});
 }
 
 /** 把 unknown 收窄为普通对象（排除 null 与数组）。 */

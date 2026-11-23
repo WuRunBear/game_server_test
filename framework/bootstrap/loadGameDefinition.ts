@@ -46,6 +46,7 @@ import { tiledRegionNames } from "map/generate/blocks/tiledSource";
 import { stampTemplateRegionNames } from "map/generate/blocks/stampTemplate";
 import {
   PresentationConfigSchema,
+  type EntityPresentation,
   type MapPresentation,
   type PresentationConfig,
   type TileSemanticSpec,
@@ -90,22 +91,31 @@ function loadFilesByGlob(baseDir: string, pattern: string): string[] {
 
 /** 表现语义配置的约定路径（相对 game.json 所在目录，game.json 未声明 presentation 时尝试）。 */
 const DEFAULT_PRESENTATION_PATH = "presentation/maps.json";
+/** 实体表现配置的约定路径（与 maps.json 同目录；存在即合并，重复 kind 报错）。 */
+const DEFAULT_ENTITIES_PRESENTATION_PATH = "presentation/entities.json";
 
 /**
- * 读取表现配置文件（单文件或 `*` glob）：逐文件 zod 校验后按**文件路径排序**
- * 合并——`tileSemantics` 与 `maps` 都按 key 合并，跨文件重复 key 即配置错误
- * （不做静默覆盖，避免加载顺序决定语义）。每份文件都是完整的配置形状
- * （只承担全局语义表时 `maps` 写 `{}`）。空匹配为显式配置错误。
+ * 读取表现配置文件（一个或多个 glob）：逐文件 zod 校验后按**文件绝对路径排序**
+ * 合并——`tileSemantics` / `maps` / `entities` 都按 key 合并，跨文件重复 key
+ * 即配置错误（不做静默覆盖，避免加载顺序决定语义）。每份文件都是表现配置的
+ * 子集形状（只承担实体表现时可只写 `entities`；`maps` / `tileSemantics`
+ * 缺省为空表）。空匹配为显式配置错误。
  */
-function loadPresentationFiles(baseDir: string, pattern: string): PresentationConfig {
-  const files = loadFilesByGlob(baseDir, pattern).sort();
-  if (files.length === 0) {
-    throw new Error(`presentation path "${pattern}" matched no JSON files (resolved against ${baseDir})`);
+function loadPresentationFiles(baseDir: string, patterns: readonly string[]): PresentationConfig {
+  const files = new Set<string>();
+  for (const pattern of patterns) {
+    const matched = loadFilesByGlob(baseDir, pattern).sort();
+    if (matched.length === 0) {
+      throw new Error(`presentation path "${pattern}" matched no JSON files (resolved against ${baseDir})`);
+    }
+    for (const file of matched) files.add(file);
   }
+  const sortedFiles = [...files].sort();
 
   const tileSemantics: Record<string, TileSemanticSpec> = {};
   const maps: Record<string, MapPresentation> = {};
-  for (const file of files) {
+  const entities: Record<string, EntityPresentation> = {};
+  for (const file of sortedFiles) {
     let raw: unknown;
     try {
       raw = readJsonFile(file);
@@ -134,26 +144,40 @@ function loadPresentationFiles(baseDir: string, pattern: string): PresentationCo
       }
       maps[key] = entry;
     }
+    for (const [kind, entry] of Object.entries(document.entities ?? {})) {
+      if (Object.hasOwn(entities, kind)) {
+        throw new Error(`presentation: duplicate entity presentation "${kind}" in ${file}`);
+      }
+      entities[kind] = entry;
+    }
   }
 
-  return loadPresentation({ tileSemantics, maps });
+  return loadPresentation({ tileSemantics, maps, entities });
 }
 
 /**
  * 加载游戏的表现语义配置：
  * 1. game.json 显式 `presentation` 路径（单文件或 glob）→ 必须能匹配到文件；
  * 2. 未声明时，若 `<gameDir>/presentation/maps.json` 存在 → 按约定加载；
- * 3. 都不存在 → 清空活动配置并返回 undefined（旧游戏/测试不受影响）。
+ * 3. `<gameDir>/presentation/entities.json` 存在 → 始终合并实体表现（重复 kind
+ *    报错；显式 glob 已包含时按绝对路径去重，不会重复解析）；
+ * 4. 都不存在 → 清空活动配置并返回 undefined（旧游戏/测试不受影响）。
  */
 function loadPresentationForGame(baseDir: string, configuredPath?: string): PresentationConfig | undefined {
+  const patterns: string[] = [];
   if (configuredPath) {
-    return loadPresentationFiles(baseDir, configuredPath);
+    patterns.push(configuredPath);
+  } else if (existsSync(resolve(baseDir, DEFAULT_PRESENTATION_PATH))) {
+    patterns.push(DEFAULT_PRESENTATION_PATH);
   }
-  if (existsSync(resolve(baseDir, DEFAULT_PRESENTATION_PATH))) {
-    return loadPresentationFiles(baseDir, DEFAULT_PRESENTATION_PATH);
+  if (existsSync(resolve(baseDir, DEFAULT_ENTITIES_PRESENTATION_PATH))) {
+    patterns.push(DEFAULT_ENTITIES_PRESENTATION_PATH);
   }
-  clearPresentation();
-  return undefined;
+  if (patterns.length === 0) {
+    clearPresentation();
+    return undefined;
+  }
+  return loadPresentationFiles(baseDir, patterns);
 }
 
 function loadArchetypesFiles(baseDir: string, entityPattern?: string): ArchetypeSpec[] {

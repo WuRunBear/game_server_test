@@ -1,0 +1,244 @@
+{
+  "entities": {
+    "berry_bush": {
+      "displayName": "浆果丛",
+      "category": "resource",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "boar": {
+      "displayName": "野猪",
+      "category": "enemy",
+      "size": { "w": 20, "h": 14 },
+      "shadow": true
+    },
+    "boss_alpha": {
+      "displayName": "首领巨兽",
+      "category": "enemy",
+      "size": { "w": 32, "h": 28 },
+      "shadow": true
+    },
+    "campfire": {
+      "displayName": "篝火",
+      "category": "structure",
+      "size": { "w": 24, "h": 24 },
+      "shadow": false
+    },
+    "carrot_patch": {
+      "displayName": "胡萝卜田",
+      "category": "resource",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "corpse": {
+      "displayName": "尸体",
+      "category": "container",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "crab": {
+      "displayName": "螃蟹",
+      "category": "enemy",
+      "size": { "w": 14, "h": 8 },
+      "shadow": true
+    },
+    "door": {
+      "displayName": "门",
+      "category": "structure",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "driftwood": {
+      "displayName": "浮木",
+      "category": "resource",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "fence": {
+      "displayName": "栅栏",
+      "category": "structure",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "floor": {
+      "displayName": "地板",
+      "category": "structure",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "floor_upper": {
+      "displayName": "上层地板",
+      "category": "structure",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "frog": {
+      "displayName": "青蛙",
+      "category": "enemy",
+      "size": { "w": 12, "h": 8 },
+      "shadow": true
+    },
+    "furniture": {
+      "displayName": "家具",
+      "category": "structure",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "gold_rock": {
+      "displayName": "金矿石",
+      "category": "resource",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "item": {
+      "displayName": "掉落物",
+      "category": "item",
+      "size": { "w": 12, "h": 12 },
+      "shadow": false
+    },
+    "mushroom": {
+      "displayName": "蘑菇",
+      "category": "resource",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "nest_frog": {
+      "displayName": "蛙巢",
+      "category": "enemy",
+      "size": { "w": 20, "h": 20 },
+      "shadow": true
+    },
+    "nest_spider": {
+      "displayName": "蛛巢",
+      "category": "enemy",
+      "size": { "w": 24, "h": 24 },
+      "shadow": true
+    },
+    "player": {
+      "displayName": "玩家",
+      "category": "player",
+      "size": { "w": 8, "h": 8 },
+      "shadow": true
+    },
+    "portal": {
+      "displayName": "传送门",
+      "category": "other",
+      "size": { "w": 32, "h": 32 },
+      "shadow": false
+    },
+    "portal_back": {
+      "displayName": "返回传送门",
+      "category": "other",
+      "size": { "w": 32, "h": 32 },
+      "shadow": false
+    },
+    "portal_ruins": {
+      "displayName": "遗迹传送门",
+      "category": "other",
+      "size": { "w": 32, "h": 32 },
+      "shadow": false
+    },
+    "portal_ruins_back": {
+      "displayName": "遗迹返回传送门",
+      "category": "other",
+      "size": { "w": 32, "h": 32 },
+      "shadow": false
+    },
+    "portal_swamp": {
+      "displayName": "沼泽传送门",
+      "category": "other",
+      "size": { "w": 32, "h": 32 },
+      "shadow": false
+    },
+    "portal_swamp_back": {
+      "displayName": "沼泽返回传送门",
+      "category": "other",
+      "size": { "w": 32, "h": 32 },
+      "shadow": false
+    },
+    "rabbit": {
+      "displayName": "兔子",
+      "category": "enemy",
+      "size": { "w": 12, "h": 10 },
+      "shadow": true
+    },
+    "reed": {
+      "displayName": "芦苇",
+      "category": "resource",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "rock": {
+      "displayName": "石头",
+      "category": "resource",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "shell_node": {
+      "displayName": "贝壳堆",
+      "category": "resource",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "spider": {
+      "displayName": "蜘蛛",
+      "category": "enemy",
+      "size": { "w": 16, "h": 12 },
+      "shadow": true
+    },
+    "stairs_down": {
+      "displayName": "下行楼梯",
+      "category": "structure",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "stairs_up": {
+      "displayName": "上行楼梯",
+      "category": "structure",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "tentacle": {
+      "displayName": "触手",
+      "category": "enemy",
+      "size": { "w": 20, "h": 20 },
+      "shadow": true
+    },
+    "tree": {
+      "displayName": "树",
+      "category": "resource",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "villager": {
+      "displayName": "村民",
+      "category": "npc",
+      "size": { "w": 16, "h": 16 },
+      "shadow": true
+    },
+    "wall": {
+      "displayName": "墙",
+      "category": "structure",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "wall_upper": {
+      "displayName": "上层墙",
+      "category": "structure",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "water_pool": {
+      "displayName": "水潭",
+      "category": "resource",
+      "size": { "w": 16, "h": 16 },
+      "shadow": false
+    },
+    "wolf": {
+      "displayName": "狼",
+      "category": "enemy",
+      "size": { "w": 22, "h": 14 },
+      "shadow": true
+    }
+  }
+}

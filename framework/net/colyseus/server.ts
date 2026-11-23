@@ -1,8 +1,9 @@
 /**
  * Colyseus 服务端装配：创建 WebSocket 传输层、注册单房间类型
- * （game）、启动一个常驻房间，并挂载少量调试 HTTP 端点
- * （/health、/content、/maps/runtime、/maps/meta、/debug/colliders）。游戏逻辑全部在
- * 仿真层，本文件只负责把 Colyseus 接到 GameRoom 上。
+ * （game）、启动一个常驻房间，并挂载少量静态/调试 HTTP 端点
+ * （/health、/client/manifest、/content、/maps/runtime、/maps/meta、
+ * /debug/colliders）。游戏逻辑全部在仿真层，本文件只负责把 Colyseus 接到
+ * GameRoom 上。
  */
 import http from "node:http";
 
@@ -18,8 +19,28 @@ import { serializeGeometry, type SerializedMapGeometry } from "map/geometry/snap
 import { describeGeometry, type GeometryMetaInfo } from "map/geometry/version";
 import type { MapGeometry } from "map/geometry/types";
 import { buildContentCatalog } from "framework/content/catalog";
+import { buildClientManifest } from "framework/content/manifest";
 import { GameRoom } from "network/colyseus/rooms/GameRoom";
 import type { Logger } from "utils/logger";
+
+/**
+ * `If-None-Match` 与当前强 ETag 的比较（RFC 7232 weak comparison）。
+ *
+ * 支持逗号分隔列表与 `*`；忽略客户端带来的 `W/` 弱前缀（服务端 ETag 恒为
+ * 强 ETag）。任何候选命中即视为未修改。
+ */
+function ifNoneMatchHit(header: unknown, etag: string): boolean {
+  const raw = Array.isArray(header) ? header.join(",") : header;
+  if (typeof raw !== "string" || raw.trim().length === 0) return false;
+  if (raw.trim() === "*") return true;
+
+  const target = etag.startsWith("W/") ? etag.slice(2) : etag;
+  return raw.split(",").some((candidate) => {
+    const trimmed = candidate.trim();
+    if (!trimmed) return false;
+    return (trimmed.startsWith("W/") ? trimmed.slice(2) : trimmed) === target;
+  });
+}
 
 /**
  * Colyseus 服务对象的最小封装。
@@ -77,6 +98,20 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
     );
     geometryCache.set(config.key, geometry);
     return geometry;
+  };
+
+  // /client/manifest 数据源：启动期配置解析完成后即不可变，首次请求构建一次并
+  // 缓存序列化结果（不参与 tick；不阻塞房间）。
+  let clientManifestCache: { body: string; etag: string } | undefined;
+  const clientManifestOf = (): { body: string; etag: string } => {
+    if (!clientManifestCache) {
+      const manifest = buildClientManifest(gameDef);
+      clientManifestCache = {
+        body: JSON.stringify(manifest),
+        etag: `"${manifest.contentVersion}"`,
+      };
+    }
+    return clientManifestCache;
   };
 
   let persistentRoomId: string | undefined;
@@ -172,6 +207,24 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
 
       app.get("/health", (_req: any, res: any) => {
         res.status(200).json({ ok: true });
+      });
+
+      // 客户端静态契约（一次性拉取地图/图块语义/实体表现/物品/规则/netSync）。
+      // 版本即强 ETag（内容哈希）：配置启动后不变，故首次构建后缓存；
+      // `Cache-Control: no-cache` 要求客户端每次带 If-None-Match 复验。
+      app.get("/client/manifest", (req: any, res: any) => {
+        const manifest = clientManifestOf();
+        res.setHeader("ETag", manifest.etag);
+        res.setHeader("Cache-Control", "no-cache");
+
+        if (ifNoneMatchHit(req.headers?.["if-none-match"], manifest.etag)) {
+          res.status(304).end();
+          return;
+        }
+
+        res.status(200);
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.send(manifest.body);
       });
 
       // 内容目录（静态表的服务端单一来源）：客户端一次拉取即拿到当前
