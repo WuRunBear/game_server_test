@@ -23,6 +23,11 @@
 // - CC-14 Network Feel（各自末尾追加，旧索引不变）：
 //   RoomState.serverTimeMs（float64，逻辑服务器时间 = tick × fixedDtMs，非墙钟）、
 //   PlayerState.lastProcessedSeq（uint32，该会话已接受的最大输入 seq；被拒输入不推进）。
+// - CC-12 Weather / Season View（RoomState 末尾追加，旧索引不变）：
+//   dayIndex（uint32，daynight 24 小时日计数：tick 0/hour 8 = 第 0 天，跨午夜 +1；
+//   不是相位程序的 phaseAt().dayIndex）、seasonId（string，environment.seasons
+//   循环；未配置空串）、weatherIntensity（float64，被选中天气的 intensity [0,1]；
+//   未配置 0）。温度不建模：配置只有 temperatureOffset 修饰值，无基准温度。
 // - 动态 key 空间扩展（不改变 schema 字段索引，旧客户端结构上可解码，
 //   但需补渲染才可见）：
 //   EntityState.values：`Structure.role|connectLow|connectHigh|connectDir`
@@ -69,4 +74,7 @@ export class RoomState extends Schema {
     @type("number") public phaseProgress!: number;
     @type({ map: "string" }) public offers: MapSchema<string> = new MapSchema<string>();
     @type("float64") public serverTimeMs!: number;
+    @type("uint32") public dayIndex!: number;
+    @type("string") public seasonId!: string;
+    @type("float64") public weatherIntensity!: number;
 }

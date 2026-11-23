@@ -172,4 +172,34 @@ export class RoomState extends Schema {
    */
   @type("float64")
   serverTimeMs: number = 0;
+
+  /**
+   * 24 小时日计数（CC-12，来自 daynight 规则）。
+   *
+   * **语义**：tick 0 / hour=8 为第 0 天，每跨午夜（24h 回绕）+1；第 0 天只有
+   * 8→24 时的 16 小时，之后每天 24 小时。**不是** `phaseId` 所属环境相位
+   * 程序的周期索引（`phaseAt().dayIndex`）——两者周期可以完全不同。
+   *
+   * 追加在 `serverTimeMs` 之后，已有字段索引不变；无 daynight 规则时恒 0。
+   */
+  @type("uint32")
+  dayIndex: number = 0;
+
+  /**
+   * 当前季节 id（CC-12，来自 environment.seasons 循环）。
+   *
+   * 季节 id 是**配置字符串**（game/ 定义），框架只透传；未配置 seasons 时
+   * 为空串。与 `phaseId` 相互独立（季节周期通常远长于环境相位周期）。
+   */
+  @type("string")
+  seasonId: string = "";
+
+  /**
+   * 当前天气表现强度 [0, 1]（CC-12，来自被选中天气条目的 intensity）。
+   *
+   * 由服务端配置驱动（未配置 intensity 时 0）；客户端可据此调节雨雪粒子密度/
+   * 雾浓度等表现，不要自行推断或编造强度。
+   */
+  @type("float64")
+  weatherIntensity: number = 0;
 }

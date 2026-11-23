@@ -412,6 +412,26 @@ export const PhaseWeatherOptionSchema = z.object({
   id: z.string(),
   /** 抽样权重（正数；同相位内按权重比例抽样）。 */
   weight: z.number().positive(),
+  /**
+   * 该天气的表现强度 [0, 1]（可选；缺省 0）。
+   *
+   * 框架只把强度当标量透传给客户端（RoomState.weatherIntensity /
+   * weather-change 事件），不解释其美术/玩法含义。
+   */
+  intensity: z.number().min(0).max(1).optional(),
+});
+
+/**
+ * 季节定义（environment.seasons 的单项）：按数组顺序循环，绝对 tick 对齐。
+ *
+ * 季节是**独立于相位程序**的展示/气候周期：`seasonAt` 以各季 durationTicks
+ * 之和为一周期循环，跨周期不漂移；未配置 seasons 时 seasonId 恒空串。
+ */
+export const EnvironmentSeasonSchema = z.object({
+  /** 季节 id（配置字符串；框架只当不透明标识）。 */
+  id: z.string().min(1),
+  /** 季节时长（tick，正整数）。 */
+  durationTicks: z.number().int().positive(),
 });
 
 /**
@@ -474,8 +494,8 @@ export const EnvironmentPhaseSchema = z.object({
  * 环境/相位时钟全局规则（game/rules/environment.json）：作用于 environmentSystem。
  *
  * 相位与天气皆为 tick 的纯函数（见 framework/simulation/worldClock）——本规则
- * 只描述相位程序与天气抽样参数，不含任何运行时累积状态；字段语义游戏无关
- * （相位/天气 id 均来自配置字符串）。
+ * 只描述相位程序、可选季节程序与天气抽样参数，不含任何运行时累积状态；
+ * 字段语义游戏无关（相位/季节/天气 id 均来自配置字符串）。
  */
 export const EnvironmentRuleSchema = z
   .object({
@@ -485,6 +505,12 @@ export const EnvironmentRuleSchema = z
     weatherSlotTicks: z.number().int().positive(),
     /** 相位程序（按数组顺序循环；一周期 = 各相位时长之和）。 */
     phases: z.array(EnvironmentPhaseSchema).min(1),
+    /**
+     * 季节程序（可选）：按数组顺序循环，各季 durationTicks 之和为一周期；
+     * 绝对 tick 对齐（跨周期不漂移）。缺省 = 无季节（seasonId 恒空串）。
+     * 与 phases 相互独立：相位描述环境相位，季节描述更长的展示/气候周期。
+     */
+    seasons: z.array(EnvironmentSeasonSchema).min(1).optional(),
     /**
      * 派生地面覆盖（查询期派生，不写回底板）：按相位把某些地面语义映射为
      * 另一种「有效语义」，支持层号/相位进度/区域/坐标 hash 斑驳条件。
@@ -504,6 +530,18 @@ export const EnvironmentRuleSchema = z
         });
       }
       seen.add(phase.id);
+    });
+
+    const seenSeasons = new Set<string>();
+    (rule.seasons ?? []).forEach((season, index) => {
+      if (seenSeasons.has(season.id)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `duplicate season id "${season.id}"`,
+          path: ["seasons", index, "id"],
+        });
+      }
+      seenSeasons.add(season.id);
     });
 
     (rule.groundOverrides ?? []).forEach((override, index) => {
@@ -541,6 +579,8 @@ export const EnvironmentRuleSchema = z
 
 /** 相位修饰数值类型推断（即 environment.json 的 modifiers 值）。 */
 export type EnvironmentModifier = z.infer<typeof EnvironmentModifierSchema>;
+/** 季节定义类型推断（environment.seasons 的单项）。 */
+export type EnvironmentSeason = z.infer<typeof EnvironmentSeasonSchema>;
 /** 派生地面覆盖规则类型推断。 */
 export type GroundOverride = z.infer<typeof GroundOverrideSchema>;
 /** 相位天气候选类型推断。 */

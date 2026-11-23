@@ -258,12 +258,26 @@ export interface TickSnapshot {
    */
   timeOfDay?: { hour: number; phase: number };
   /**
-   * world 级环境状态（相位/天气：同样是 tick 的纯函数派生）。
+   * world 级环境状态（相位/天气/季节：同样是 tick 的纯函数派生）。
    *
-   * 传输层写入 RoomState 的 weatherId/phaseId/phaseProgress 三个字段；
-   * 无 environment 规则时为 undefined（传输层按空串/0 兜底）。
+   * 传输层写入 RoomState 的 weatherId/phaseId/phaseProgress 与新追加的
+   * dayIndex/seasonId/weatherIntensity 字段；无 environment 规则时
+   * weatherId/seasonId 为空串、数值为 0。
+   *
+   * **dayIndex 语义**：daynight 规则的 24 小时日计数（tick 0 = 第 0 天 /
+   * hour 8，跨午夜 +1）；不是 `phaseAt().dayIndex` 的“环境相位周期索引”。
    */
-  environment?: { weatherId: string; phaseId: string; phaseProgress: number };
+  environment?: {
+    weatherId: string;
+    phaseId: string;
+    phaseProgress: number;
+    /** 24 小时日计数（daynight 规则；无规则 = 0）。 */
+    dayIndex: number;
+    /** 当前季节 id（environment.seasons 循环；未配置 = ""）。 */
+    seasonId: string;
+    /** 当前天气表现强度 [0, 1]（weather.intensity；未配置 = 0）。 */
+    weatherIntensity: number;
+  };
   /**
    * 进行中的报价会话摘要（offerId → 条款摘要）。
    *

@@ -80,8 +80,18 @@ import { isGameplayReachable } from "framework/utils/gameplayDistance";
 import { advanceDialogue } from "framework/systems/gameplay/dialogueSystem";
 import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
 import { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
-import { timeOfDayOf } from "framework/simulation/worldClock/dayNight";
-import { environmentAt } from "framework/simulation/worldClock";
+import {
+  dayNightDayIndex,
+  getDayNightRule,
+  tickRateOf,
+  timeOfDayOf,
+} from "framework/simulation/worldClock/dayNight";
+import {
+  environmentAt,
+  getEnvironmentRule,
+  seasonAt,
+  weatherAt,
+} from "framework/simulation/worldClock";
 import { evolve } from "map/evolution/engine";
 import { createMapEvolveDeps } from "map/runtime/evolveDeps";
 import { mapSeedOf } from "map/runtime/mapSeeds";
@@ -310,10 +320,12 @@ export class GameSimulation implements SimulationPort {
   /**
    * CC-04 变化检测状态（首帧只记录基线，不发事件）：
    * - 天气 id：environmentSystem 每 tick 重算；
+   * - 季节 id：CC-12 每 tick 从 environment.seasons 派生；
    * - 每玩家地图：snapshot.playerMaps；
    * - 每图地形 version：terrainWriteback 后重算。
    */
   private lastWeatherId?: string;
+  private lastSeasonId?: string;
   private lastMapIdBySessionId = new Map<string, string>();
   private lastTerrainVersionByMapId = new Map<string, string>();
 
@@ -636,17 +648,27 @@ export class GameSimulation implements SimulationPort {
 
   /**
    * 世界级变化检测（每 tick，系统跑完后）：
-   * - `weather-change`：weatherId 变化 → world；
+   * - `weather-change`：weatherId 变化 → world（载荷含 intensity）；
+   * - `season-change`：seasonId 变化 → world（载荷 seasonId/dayIndex/tick）；
    * - `map-change`：玩家所属图变化 → self（from/to/mapVersion）；
    * - `terrain-writeback`：地图 geometry.version 变化 → map（无逐格 delta）。
    *
    * 全部采用「首帧记基线、之后比较」语义，避免开机即为所有图/玩家补发事件。
+   * 环境字段取本帧快照（与 environmentAt 同源纯函数），不依赖缓存写入时序。
    */
   private detectWorldChanges(snapshot: TickSnapshot): void {
     const tick = this.world.time.tick;
-    const environment = this.world.time.environment;
+    const cached = this.world.time.environment;
+    const environment = snapshot.environment ?? {
+      weatherId: cached.weatherId,
+      phaseId: cached.phaseId,
+      phaseProgress: cached.progress,
+      dayIndex: 0,
+      seasonId: "",
+      weatherIntensity: 0,
+    };
 
-    // 天气
+    // 天气（CC-12：附带强度，客户端可直接驱动雨雪粒子密度）
     if (this.lastWeatherId !== undefined && environment.weatherId !== this.lastWeatherId) {
       emitClientEvent(
         this.world,
@@ -654,12 +676,28 @@ export class GameSimulation implements SimulationPort {
         {
           weatherId: environment.weatherId,
           phaseId: environment.phaseId,
+          intensity: environment.weatherIntensity,
           tick,
         },
         "world",
       );
     }
     this.lastWeatherId = environment.weatherId;
+
+    // 季节（CC-12）：只在季节 id 变化时发一次 world 事件；首帧只记基线。
+    if (this.lastSeasonId !== undefined && environment.seasonId !== this.lastSeasonId) {
+      emitClientEvent(
+        this.world,
+        "season-change",
+        {
+          seasonId: environment.seasonId,
+          dayIndex: environment.dayIndex,
+          tick,
+        },
+        "world",
+      );
+    }
+    this.lastSeasonId = environment.seasonId;
 
     // 换图（per-player）
     for (const [sessionId, mapId] of snapshot.playerMaps) {
@@ -1852,8 +1890,19 @@ export class GameSimulation implements SimulationPort {
       playerMaps.set(sessionId, entityMapOf(this.world, eid));
     }
     // 环境派生（相位/天气/进度）：tick 的纯函数（environmentAt），与
-    // environmentSystem 的缓存同源——离线补差后同样正确。
+    // environmentSystem 的缓存同源——离线补差后同样正确。CC-12 追加：
+    // - dayIndex = daynight 24h 日计数（与 environment 的 phase dayIndex 不同义）；
+    // - seasonId = environment.seasons 循环（未配置为空串）；
+    // - weatherIntensity = 当前天气条目的 intensity（未配置 0）。
     const environment = environmentAt(this.world);
+    const environmentRule = getEnvironmentRule(this.world);
+    const season = seasonAt(tick, environmentRule);
+    const weatherIntensity = environmentRule ? weatherAt(tick, environmentRule).intensity : 0;
+    const dayIndex = dayNightDayIndex(
+      tick,
+      getDayNightRule(this.world),
+      tickRateOf(this.world),
+    );
     // CC-05：室内/露天派生键的同 tick 格缓存（同格只做一次围合洪泛）。
     const spaceExposureCache: SpaceExposureCellCache = new Map();
     const snapshotShell = {
@@ -1864,6 +1913,9 @@ export class GameSimulation implements SimulationPort {
         weatherId: environment.weatherId,
         phaseId: environment.phaseId,
         phaseProgress: environment.progress,
+        dayIndex,
+        seasonId: season.seasonId,
+        weatherIntensity,
       },
       offers: this.buildOfferSummaries(),
       playerMaps,

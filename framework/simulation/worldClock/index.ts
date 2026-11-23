@@ -7,7 +7,10 @@
  *   槽对齐语义一致）。当前相位索引/进度/日索引都是派生值，求值只依赖 tick。
  * - 天气：`weatherAt(tick, rule)`。天气槽 `weatherSlot = floor(tick /
  *   weatherSlotTicks)`；天气由 A1 确定性随机服务从「本相位（该槽起始 tick
- *   所属相位）的天气候选 + 权重」里抽样——同 (seed, slot) 恒同结果。
+ *   所属相位）的天气候选 + 权重」里抽样——同 (seed, slot) 恒同结果；同时
+ *   透传被选中天气条目的 intensity（未配置 0）。
+ * - 季节：`seasonAt(tick, rule)`。可选 `rule.seasons` 按数组顺序循环，绝对
+ *   tick 对齐；未配置时 seasonId 为空串。季节与相位周期相互独立。
  *
  * 因此任意 tick 可直接求值：离线补差天然正确，不需要逐 tick 重放相位/天气。
  *
@@ -28,10 +31,30 @@ export interface PhaseView {
   phaseIndex: number;
   /** 相位 id（配置字符串）。 */
   phaseId: string;
-  /** 相位内进度 [0, 1)。 */
+  /** 环境相位内进度 [0, 1)。 */
   progress: number;
-  /** 已完成的完整相位循环数（floor(tick / 一周期总 tick)）。 */
+  /**
+   * 已完成的完整相位循环数（floor(tick / 一周期总 tick)）。
+   *
+   * **注意**：这是环境相位程序的周期索引，不是 daynight 规则的 24 小时日
+   * 计数；后者见 `dayNightDayIndex`（tick 0 = 第 0 天 / hour 8，跨午夜 +1）。
+   */
   dayIndex: number;
+}
+
+/**
+ * 季节求值结果（tick 的纯函数）。
+ *
+ * 与 `PhaseView` 相互独立：季节周期来自可选的 `rule.seasons`，按数组顺序
+ * 循环、绝对 tick 对齐；未配置季节时返回空季节（`seasonId=""`、进度 0）。
+ */
+export interface SeasonView {
+  /** 季节 id（配置字符串；未配置为空串）。 */
+  seasonId: string;
+  /** 季节在规则 seasons 数组中的索引（0 起；未配置为 0）。 */
+  seasonIndex: number;
+  /** 季节内进度 [0, 1)（未配置为 0）。 */
+  progress: number;
 }
 
 /** 环境派生视图（相位 + 天气 + 修饰数值）。 */
@@ -120,6 +143,45 @@ export function phaseAt(tick: Tick, rule: EnvironmentRule): PhaseView {
   return { phaseIndex: index, phaseId: phase.id, progress, dayIndex };
 }
 
+/** 未配置季节时的中性季节视图。 */
+export const NO_SEASON: SeasonView = { seasonId: "", seasonIndex: 0, progress: 0 };
+
+/**
+ * 季节求值（纯函数）：按 `rule.seasons` 数组顺序循环，绝对 tick 对齐。
+ *
+ * 一周期 = 各季 durationTicks 之和；`t = tick mod cycle`，季节 i 占据
+ * `[cum_i, cum_i + dur_i)`；边界 tick 归下一季。跨周期不漂移（tick k×cycle
+ * 恒回第 0 季、进度 0），同 tick 恒同值。未配置 `seasons`（或空数组/非法
+ * 总时长）时返回 `NO_SEASON`（seasonId 空串）。
+ *
+ * 季节与 `phaseAt` 的相位程序**互不影响**：两者可以各有各的周期。
+ */
+export function seasonAt(tick: Tick, rule: EnvironmentRule | undefined): SeasonView {
+  const seasons = rule?.seasons;
+  if (!seasons || seasons.length === 0) return NO_SEASON;
+
+  let cycle = 0;
+  for (const season of seasons) cycle += season.durationTicks;
+  if (!(cycle > 0)) return NO_SEASON;
+
+  const t = ((tick % cycle) + cycle) % cycle;
+  let acc = 0;
+  for (let i = 0; i < seasons.length; i++) {
+    const duration = seasons[i].durationTicks;
+    if (t < acc + duration) {
+      return {
+        seasonId: seasons[i].id,
+        seasonIndex: i,
+        progress: duration > 0 ? (t - acc) / duration : 0,
+      };
+    }
+    acc += duration;
+  }
+  // 理论上不可达（t < cycle）；浮点/非法配置兜底为最后一季起点。
+  const lastIndex = seasons.length - 1;
+  return { seasonId: seasons[lastIndex].id, seasonIndex: lastIndex, progress: 0 };
+}
+
 /** 当前天气槽索引（floor(tick / weatherSlotTicks)）。 */
 export function weatherSlotAt(tick: Tick, rule: EnvironmentRule): number {
   const slotTicks = rule.weatherSlotTicks;
@@ -131,27 +193,36 @@ export function weatherSlotAt(tick: Tick, rule: EnvironmentRule): number {
  *
  * 天气槽起始 tick 所属相位决定候选表；用 A1 确定性随机服务按权重抽样——
  * 同 (seed, slot) 恒同结果，异 slot 序列互不相关。该相位无候选时返回空串。
+ * `intensity` 取被选中天气条目的 intensity（未配置 = 0）。
  */
 export function weatherAt(
   tick: Tick,
   rule: EnvironmentRule,
-): { weatherId: string; weatherSlot: number } {
+): { weatherId: string; weatherSlot: number; intensity: number } {
   const slot = weatherSlotAt(tick, rule);
   const slotStart = slot * rule.weatherSlotTicks;
   const ownerPhase = phaseAt(slotStart, rule);
   const candidates = rule.phases[ownerPhase.phaseIndex]?.weather ?? [];
-  if (candidates.length === 0) return { weatherId: "", weatherSlot: slot };
+  if (candidates.length === 0) return { weatherId: "", weatherSlot: slot, intensity: 0 };
 
   let totalWeight = 0;
   for (const option of candidates) totalWeight += option.weight;
   const roll = rngFrom(rule.seed ?? 0, "weather", slot).next() * totalWeight;
 
+  let selected = candidates[candidates.length - 1];
   let acc = 0;
   for (const option of candidates) {
     acc += option.weight;
-    if (roll < acc) return { weatherId: option.id, weatherSlot: slot };
+    if (roll < acc) {
+      selected = option;
+      break;
+    }
   }
-  return { weatherId: candidates[candidates.length - 1].id, weatherSlot: slot };
+  return {
+    weatherId: selected.id,
+    weatherSlot: slot,
+    intensity: selected.intensity ?? 0,
+  };
 }
 
 /** 相位修饰数值求值：数值常量原样返回；`{ from, to }` 按进度线性插值。 */
@@ -200,6 +271,7 @@ export {
 // 昼夜时钟（hour/phase 同为 tick 纯函数派生，与上面的相位/天气共用同一时钟源）
 export {
   DEFAULT_DAYNIGHT_START_HOUR,
+  dayNightDayIndex,
   dayTicks,
   getDayNightRule,
   phaseOfHour,

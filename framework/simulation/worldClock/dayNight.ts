@@ -98,6 +98,41 @@ export function timeOfDayAt(
 }
 
 /**
+ * 24 小时日计数（daynight 规则；与 `phaseAt().dayIndex` 的**环境相位周期索引**
+ * 语义不同，不要混用）。
+ *
+ * 契约：
+ * - 第 0 天从 tick 0 / hour=START_HOUR（8 时）开始；
+ * - 每跨一次午夜（hour 24→0 回绕）日计数 +1；因此第 0 天只有
+ *   `(24 - START_HOUR)/24` 个 dayTicks（8 时→24 时，16 小时），之后每天 24 小时；
+ * - 纯函数：同 tick 恒同值，跨周期无累积误差；无 daynight 规则 → 0。
+ *
+ * 公式（整数运算，避免浮点边界误差）：
+ * ```
+ * dayTicks = round(cycleLengthSec × tickRate)
+ * dayIndex = floor((tick × 24 + dayTicks × START_HOUR) / (dayTicks × 24))
+ * ```
+ * 等价于 `floor(tick / dayTicks + START_HOUR / 24)`：把 tick 0 的“日进度”
+ * 平移到午夜对齐后再按整日取整。
+ *
+ * @param tick 世界逻辑帧号
+ * @param rule daynight 规则（undefined → 0）
+ * @param tickRate 每秒 tick 数（缺省 20，仅供裸 world/测试使用）
+ */
+export function dayNightDayIndex(
+  tick: Tick,
+  rule: DayNightRule | undefined,
+  tickRate: number = FALLBACK_TICK_RATE,
+): number {
+  const total = dayTicks(rule, tickRate);
+  if (total <= 0) return 0;
+  const numerator = tick * 24 + total * DEFAULT_DAYNIGHT_START_HOUR;
+  const denominator = total * 24;
+  const dayIndex = Math.floor(numerator / denominator);
+  return Number.isFinite(dayIndex) ? dayIndex : 0;
+}
+
+/**
  * 读当前昼夜状态：有 daynight 规则时**从 tick 现场派生**（与推进路径无关），
  * 否则回退 `world.time.timeOfDay` 缓存（无规则 = 时间冻结的既有语义）。
  */

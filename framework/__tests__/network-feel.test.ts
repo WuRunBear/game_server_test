@@ -88,8 +88,12 @@ function schemaFields(source: string, className: string): string[] {
 // ─── schema 形状 ─────────────────────────────────────────────────────────
 
 describe("CC-14 schema 字段", () => {
-  it("默认值：serverTimeMs=0、lastProcessedSeq=0", () => {
-    expect(new RoomState().serverTimeMs).toBe(0);
+  it("默认值：serverTimeMs=0、lastProcessedSeq=0；CC-12 字段 0/空串/0", () => {
+    const room = new RoomState();
+    expect(room.serverTimeMs).toBe(0);
+    expect(room.dayIndex).toBe(0);
+    expect(room.seasonId).toBe("");
+    expect(room.weatherIntensity).toBe(0);
     expect(new PlayerState().lastProcessedSeq).toBe(0);
   });
 
@@ -105,6 +109,9 @@ describe("CC-14 schema 字段", () => {
       "phaseProgress",
       "offers",
       "serverTimeMs",
+      "dayIndex",
+      "seasonId",
+      "weatherIntensity",
     ]);
     expect(Object.getOwnPropertyNames(PlayerState.prototype)).toEqual([
       "constructor",
@@ -124,7 +131,9 @@ describe("CC-14 schema 字段", () => {
     const client = readFileSync("src/network/colyseus/client-schema/schema.ts", "utf8");
     const roomFields = schemaFields(client, "RoomState");
     const playerFields = schemaFields(client, "PlayerState");
-    expect(roomFields.at(-1)).toBe('"float64":serverTimeMs');
+    expect(roomFields.at(-3)).toBe('"uint32":dayIndex');
+    expect(roomFields.at(-2)).toBe('"string":seasonId');
+    expect(roomFields.at(-1)).toBe('"float64":weatherIntensity');
     expect(roomFields.slice(0, 8)).toEqual([
       '"uint32":tick',
       '"float64":hour',
@@ -149,7 +158,11 @@ describe("CC-14 schema 字段", () => {
       const fieldNames = (block: string): string[] =>
         [...block.matchAll(/Field\.new\("(\w+)"/g)].map((match) => match[1]!);
       expect(fieldNames(playerBlock).at(-1)).toBe("lastProcessedSeq");
-      expect(fieldNames(roomBlock).at(-1)).toBe("serverTimeMs");
+      expect(fieldNames(roomBlock).slice(-3)).toEqual([
+        "dayIndex",
+        "seasonId",
+        "weatherIntensity",
+      ]);
     }
   });
 

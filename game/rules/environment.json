@@ -7,9 +7,9 @@
       "durationTicks": 24000,
       "modifiers": { "temperatureOffset": 0, "growthScale": 1 },
       "weather": [
-        { "id": "clear", "weight": 5 },
-        { "id": "rain", "weight": 2 },
-        { "id": "fog", "weight": 1 }
+        { "id": "clear", "weight": 5, "intensity": 0 },
+        { "id": "rain", "weight": 2, "intensity": 0.4 },
+        { "id": "fog", "weight": 1, "intensity": 0.2 }
       ]
     },
     {
@@ -20,8 +20,8 @@
         "growthScale": { "from": 0.8, "to": 0.3 }
       },
       "weather": [
-        { "id": "clear", "weight": 7 },
-        { "id": "drought", "weight": 2 }
+        { "id": "clear", "weight": 7, "intensity": 0 },
+        { "id": "drought", "weight": 2, "intensity": 0.7 }
       ]
     },
     {
@@ -32,9 +32,9 @@
         "growthScale": { "from": 0.3, "to": 1.2 }
       },
       "weather": [
-        { "id": "rain", "weight": 6 },
-        { "id": "fog", "weight": 2 },
-        { "id": "clear", "weight": 1 }
+        { "id": "rain", "weight": 6, "intensity": 0.4 },
+        { "id": "fog", "weight": 2, "intensity": 0.2 },
+        { "id": "clear", "weight": 1, "intensity": 0 }
       ]
     },
     {
@@ -45,10 +45,16 @@
         "growthScale": 0.5
       },
       "weather": [
-        { "id": "storm", "weight": 5 },
-        { "id": "rain", "weight": 3 }
+        { "id": "storm", "weight": 5, "intensity": 1 },
+        { "id": "rain", "weight": 3, "intensity": 0.4 }
       ]
     }
+  ],
+  "seasons": [
+    { "id": "spring", "durationTicks": 60000 },
+    { "id": "summer", "durationTicks": 60000 },
+    { "id": "autumn", "durationTicks": 60000 },
+    { "id": "winter", "durationTicks": 60000 }
   ],
   "groundOverrides": [
     { "phaseId": "dry", "fromSemantic": 3, "toSemantic": 12, "coverage": { "from": 0.2, "to": 0.55 } },

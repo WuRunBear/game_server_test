@@ -823,10 +823,14 @@ export class GameRoom extends Room<{ state: RoomState }> {
       this.state.phase = snapshot.timeOfDay.phase;
     }
     // 环境派生（相位/天气/进度）：tick 的纯函数，仿真层每帧算出后写入。
+    // CC-12 追加：dayIndex（daynight 24h 日计数）、seasonId、weatherIntensity。
     if (snapshot.environment) {
       this.state.weatherId = snapshot.environment.weatherId;
       this.state.phaseId = snapshot.environment.phaseId;
       this.state.phaseProgress = snapshot.environment.phaseProgress;
+      this.state.dayIndex = snapshot.environment.dayIndex;
+      this.state.seasonId = snapshot.environment.seasonId;
+      this.state.weatherIntensity = snapshot.environment.weatherIntensity;
     }
     // per-client 地图状态：每玩家从 snapshot.playerMaps 写入各自 PlayerState
     // （playerMaps 恒存在，todo 10；PlayerState.mapId 为 T12 新增字段）。
