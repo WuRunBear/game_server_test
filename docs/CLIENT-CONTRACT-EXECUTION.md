@@ -906,7 +906,7 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
    - 未完成项 / 风险 / 建议下一步；
    - 可直接粘贴的状态块（CC、状态、日期、证据）。
 4. **状态改为「已完成」的条件**：该 CC 小节的「验收」全部满足，且受影响的检查通过（`pnpm test`、`pnpm build`、`pnpm tools validate`、`pnpm schema:check`）。
-5. **基线已知失败**（不是回归，不要为此阻塞）：`framework/__tests__/maps-http.test.ts` 有 2 个用例在干净基线上就失败（地图 `version` 指纹 `4490e6ee` vs `a0726bcf`）。新增代码不得扩大失败面；若任务正好触及该测试，可顺手修。
+5. **测试基线已全绿**（2026-11-24）：`maps-http.test.ts` 改用一次性 `SAVE_DIR`，不再读到 `data/saves/main.json` 里的地形写回；全量 1466 passed / 0 failed、`pnpm build` 通过。后续改动不得引入失败。
 6. **提交策略：每个 lane 完成后立即单独提交**，不攒到最后统一提交。子代理不自行 `git commit`（同一工作树并发执行会互相混入文件、争抢 index.lock）；由编排者在子代理报告后，按该 CC 的文件清单显式 `git add <paths>` 后提交，提交信息带 CC 编号（如 `feat(client-contract): CC-02 map/tile semantics`），并把 commit hash 记入 §12.3 备注。
 7. 不启动 `pnpm dev`（端口留给人工冒烟）、不新增依赖，除非该 CC 明确要求且在本节记录原因。
 7. 任何跨出「文件所有权」的改动，先停在报告中说明，不要擅自修改其他 CC 的领地。
@@ -938,3 +938,4 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | 2026-11-23 | R8 | CC-12 | 已完成 | `b510295` + godot `8ea966d`；dayNightDayIndex 公式、4 季配置、天气 intensity、season-change；16 tests、全量 1441 passed；`/content` 的 seasons/intensity 由 CC-09 收尾补齐 |
 | 2026-11-23 | R9 | CC-13 | 已派发 | `game/presentation/decor.json` + `/maps/decor` 确定性点集 + manifest decor ids；不做 Tiled 装饰层/autotile mask |
 | 2026-11-24 | R9 | CC-13 | 已完成（本切片） | `e309b45`；8 图 decor 规则、确定性 hash/缓存、`/maps/decor`、manifest `decor.ids`；19 tests、全量 1464 passed；Tiled 装饰层/autotile 未做 |
+| 2026-11-24 | R9 | 测试基线 | 已修复 | `a6a4e58`；maps-http 隔离 `SAVE_DIR`，全量 1466 passed / 0 failed、build OK；此前 2 个 version 指纹失败不再存在 |
