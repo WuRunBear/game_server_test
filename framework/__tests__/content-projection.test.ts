@@ -227,6 +227,56 @@ describe("CC-09 skills：曲线与每技能加成", () => {
   });
 });
 
+describe("CC-12 环境：季节与天气强度", () => {
+  it("真实配置：4 季 × 60000 tick，天气强度与 environment.json 一致", () => {
+    expect(catalog.seasons).toEqual([
+      { id: "spring", durationTicks: 60000 },
+      { id: "summer", durationTicks: 60000 },
+      { id: "autumn", durationTicks: 60000 },
+      { id: "winter", durationTicks: 60000 },
+    ]);
+
+    const storm = catalog.phases.find((phase) => phase.id === "storm")!;
+    expect(storm.weather).toEqual([
+      { id: "storm", weight: 5, intensity: 1 },
+      { id: "rain", weight: 3, intensity: 0.4 },
+    ]);
+
+    const mild = catalog.phases.find((phase) => phase.id === "mild")!;
+    expect(mild.weather).toEqual([
+      { id: "clear", weight: 5, intensity: 0 },
+      { id: "rain", weight: 2, intensity: 0.4 },
+      { id: "fog", weight: 1, intensity: 0.2 },
+    ]);
+    for (const phase of catalog.phases) {
+      for (const weather of phase.weather) {
+        expect(weather.intensity).toBeGreaterThanOrEqual(0);
+        expect(weather.intensity).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("未配置 seasons → []；天气未声明 intensity → 0", () => {
+    const environment = gameDef.resolvedRules["environment"] as Record<string, unknown>;
+    const synthetic = {
+      ...gameDef,
+      resolvedRules: {
+        ...gameDef.resolvedRules,
+        environment: {
+          ...environment,
+          seasons: undefined,
+          phases: [{ id: "only", durationTicks: 10, weather: [{ id: "clear", weight: 1 }] }],
+        },
+      },
+    } as unknown as LoadedGameDefinition;
+    const projected = buildContentCatalog(synthetic);
+    expect(projected.seasons).toEqual([]);
+    expect(projected.phases).toEqual([
+      { id: "only", durationTicks: 10, weather: [{ id: "clear", weight: 1, intensity: 0 }] },
+    ]);
+  });
+});
+
 describe("CC-09 新段：factions / stationTypes / damageTypes", () => {
   it("factions 来自 factions 规则，名称配置优先", () => {
     expect(catalog.factions).toEqual([

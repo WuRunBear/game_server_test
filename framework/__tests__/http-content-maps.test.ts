@@ -181,9 +181,9 @@ describe("GET /content（内容目录：消除客户端硬编码静态表）", (
     const mild = content.phases[0]!;
     expect(mild.durationTicks).toBe(24000);
     expect(mild.weather).toEqual([
-      { id: "clear", weight: 5 },
-      { id: "rain", weight: 2 },
-      { id: "fog", weight: 1 },
+      { id: "clear", weight: 5, intensity: 0 },
+      { id: "rain", weight: 2, intensity: 0.4 },
+      { id: "fog", weight: 1, intensity: 0.2 },
     ]);
     expect(mild.modifiers).toMatchObject({ temperatureOffset: 0, growthScale: 1 });
 

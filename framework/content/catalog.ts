@@ -31,7 +31,8 @@
  *   craftingSystem 解析，本文件按原始声明投影，durationTicks 缺省 0）
  * - `quests` ← game/quests/*.json（任务定义）
  * - `achievements` ← game/rules/achievements.json（成就定义）
- * - `phases` ← game/rules/environment.json（相位定义）
+ * - `phases` ← game/rules/environment.json（相位定义 + 每相位天气候选强度）
+ * - `seasons` ← game/rules/environment.json（季节程序；未配置时为空数组）
  * - `skills` ← game/rules/progression.json（技能定义 + 等级曲线）
  * - `factions` ← game/rules/factions.json（势力定义）
  * - `stationTypes` ← recipes.stationType ∪ 实体 CraftingStation.stationType
@@ -174,16 +175,34 @@ export interface ContentAchievement {
   reward?: unknown;
 }
 
+/** 相位内的天气候选（id + 抽样权重 + 表现强度）。 */
+export interface ContentWeatherOption {
+  /** 天气 id（配置字符串；框架只当不透明标识）。 */
+  id: string;
+  /** 抽样权重。 */
+  weight: number;
+  /** 表现强度 [0, 1]（配置缺省 0；框架只透传，不解释含义）。 */
+  intensity: number;
+}
+
 /** 相位条目（环境规则的相位定义）。 */
 export interface ContentPhase {
   /** 相位 id。 */
   id: string;
   /** 相位时长（tick）。 */
   durationTicks: number;
-  /** 该相位的天气候选（id + 权重）。 */
-  weather: Array<{ id: string; weight: number }>;
+  /** 该相位的天气候选（id + 权重 + 强度）。 */
+  weather: ContentWeatherOption[];
   /** 相位修饰值（常量或 {from,to} 线性插值声明，原样透传）。 */
   modifiers?: Record<string, unknown>;
+}
+
+/** 季节条目（环境规则的季节程序；独立于相位循环）。 */
+export interface ContentSeason {
+  /** 季节 id（配置字符串）。 */
+  id: string;
+  /** 季节时长（tick）；各季时长之和为一个季节周期。 */
+  durationTicks: number;
 }
 
 /** 等级曲线（与 progression 系统的运行时有效值一致：缺省补框架缺省曲线）。 */
@@ -264,6 +283,8 @@ export interface ContentCatalog {
   stationTypes: ContentStationType[];
   /** 伤害类型清单（配置中实际出现的类型）。 */
   damageTypes: ContentDamageType[];
+  /** 季节程序清单（配置未声明 seasons 时为空数组）。 */
+  seasons: ContentSeason[];
 }
 
 /** 任务状态枚举（与 questSystem 的状态编号一致）。 */
@@ -413,7 +434,11 @@ function toContentPhase(phase: EnvironmentRule["phases"][number]): ContentPhase 
   const entry: ContentPhase = {
     id: phase.id,
     durationTicks: phase.durationTicks,
-    weather: (phase.weather ?? []).map((option) => ({ id: option.id, weight: option.weight })),
+    weather: (phase.weather ?? []).map((option) => ({
+      id: option.id,
+      weight: option.weight,
+      intensity: option.intensity ?? 0,
+    })),
   };
   const modifiers = pick(phase, "modifiers");
   if (modifiers !== undefined) entry.modifiers = modifiers as Record<string, unknown>;
@@ -564,6 +589,10 @@ export function buildContentCatalog(gameDef: LoadedGameDefinition): ContentCatal
     damageTypes: collectDamageTypes(gameDef).map((id) => ({
       id,
       label: resolveContentLabel("damageType", id),
+    })),
+    seasons: (environment?.seasons ?? []).map((season) => ({
+      id: season.id,
+      durationTicks: season.durationTicks,
     })),
   };
 }
