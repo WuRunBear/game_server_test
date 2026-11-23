@@ -882,7 +882,7 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | CC-02 | 地图/图块语义表 | P0 | 已完成 | R1 | fixer | 2026-11-23 | `2a9eeee`；presentation 18/18 + validate 8 图/13 语义；约定路径 `game/presentation/maps.json` |
 | CC-03 | Action Timeline + ActionState | P0 | 已完成（第一切片） | R2 | fixer | 2026-11-23 | `8fdbe37`；attack/gather/throw 阶段化；action 13/13 + 全量 1318 passed；place/deconstruct 等仍瞬时 |
 | CC-04 | Client Event Outbox + Command Result | P0 | 已完成 | R3 | fixer | 2026-11-23 | `1bd60e6`；events 19/19 + 全量 1337 passed；debug_colliders 仍保留 eid 兼容字段 |
-| CC-05 | Map Client View | P0 | 进行中 | R4 | fixer | 2026-11-23 | 独占 GameRoom/PlayerState/server.ts；含 mapVersion schema 追加 |
+| CC-05 | Map Client View | P0 | 已完成 | R4 | fixer | 2026-11-23 | `a9253f1` / godot `d35ee59`；mapVersion + delta + render + collision + exposure + map-graph；19 new tests、全量 1356 passed |
 | CC-06 | Query / Affordance | P0 | 待执行 | - | - | 2026-11-23 | 与 CC-05 共享 `server.ts`，需分轮 |
 | CC-07 | State Sync Completion | P0 | 已完成 | R1 | fixer | 2026-11-23 | `7f10d8d`；netsync-completeness 13/13 + 全量 1266 passed（仅基线 2 fails）；另修 `spawn` 的 `Transform.scale` 初始化 |
 | CC-08 | Protocol / Schema 工具链 | P0 | 已完成 | R1 | fixer | 2026-11-23 | server `5bdfa9d` / godot `903f659`；protocol-version + schema-gdscript + schema:check 全绿 |
@@ -926,3 +926,4 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | 2026-11-23 | R3 | CC-04 | 已派发 | 独占 GameRoom/GameSimulation/types/eventBus；事件 outbox + 命令回执；单 lane（与后续地图视图共享 GameRoom，顺序执行） |
 | 2026-11-23 | R3 | CC-04 | 已完成 | `1bd60e6`；`events` 批量（self/nearby/map/world）+ `command-result` 全量回执；hit/death/action/gather/craft/quest/achievement/level-up/raid/weather/map/terrain；19 tests、全量 1337 passed |
 | 2026-11-23 | R4 | CC-05 | 已派发 | `PlayerState.mapVersion`（末尾追加）+ `/maps/runtime?sinceVersion` delta + `/maps/render` 有效地面 + `/maps/collision` + `Space.exposure` + `/world/map-graph` |
+| 2026-11-23 | R4 | CC-05 | 已完成 | `a9253f1` + godot `d35ee59`；delta 三路径/写回历史、有效地面缓存、正式碰撞（networkId）、室内外、世界图；schema:gen/check 双绿；19 new tests、全量 1356 passed |

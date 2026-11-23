@@ -286,6 +286,7 @@ Colyseus Schema 增量同步（补丁 + 全量握手）。**客户端必须声�
 | `entityId` | uint32 | 自己控制的实体 NetworkId（`players.get(room.sessionId).entityId`） |
 | `mapId` | string | 该玩家**当前所在地图 id**（per-player）：仅当**该玩家自己**走进传送门触发换图时变化，其他玩家不受影响 |
 | `visibleEntities` | map\<string, EntityState\> | 本玩家可见实体表（**唯一的实体来源**）：key = NetworkId 字符串，只含本玩家可见实体 |
+| `mapVersion` | string | 玩家当前地图的几何内容指纹（`MapGeometry.version`），每 tick 同步；变化时用旧值作 `sinceVersion` 拉 `/maps/runtime` 增量（§5） |
 
 **兴趣裁剪（重要）**：实体同步**恒**走每个玩家自己的 `visibleEntities`——自 per-player 协议起，`RoomState` 的 `entities` 已移除，**不存在**房间级实体表或兼容通道：
 - 自己（`entityId` 对应实体）恒在表中；其他实体进入半径（由 server 规则配置，见 `game/rules/server.json` 的 `viewRadiusTiles`——格，加载期换算为像素；未配置时同图全量）才出现，离开即被删除。
@@ -330,6 +331,7 @@ export class PlayerState extends Schema {
   @type("uint32") entityId: number = 0;
   @type("string") mapId: string = "";
   @type({ map: EntityState }) visibleEntities = new MapSchema<EntityState>();
+  @type("string") mapVersion: string = "";   // 末尾追加：当前地图 version（旧字段索引不变）
 }
 
 export class RoomState extends Schema {
@@ -363,6 +365,7 @@ export class RoomState extends Schema {
 | Transform | `Transform.x/y/rot/scale` | 世界坐标（像素，中心点）、旋转、缩放。`scale` 语义中性值为 1；若读到 0（旧存档/旧服务端未初始化），客户端按 1 处理 |
 | Kind | `Kind.value` | 实体种类（原型 kind 字符串，如 `corpse` / `tree` / `boss_alpha`）——**客户端辨识实体的首选依据**（见 §3.6） |
 | Category | `Category.value` | 框架通用分类（`player/enemy/npc/projectile/structure/resource/container/item/other`），服务端按标签/组件派生；客户端选渲染与交互路径时优先用它，无需用 `Health+Needs` 猜 |
+| Space | `Space.exposure` | 玩家所在格的服务端派生空间语义：`indoor` / `outdoor`（头顶有板 + 围合判定）；用于室内外音效/天气/遮挡表现。仅玩家同步，缺省不写键 |
 | Health | `Health.current/max` | 当前/最大血量（血条比例 = current / max） |
 | Attack | `Attack.value/range` | 攻击力与射程（像素） |
 | Defense | `Defense.value` | 防御力 |
@@ -582,12 +585,20 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 | 端点 | 说明 |
 |------|------|
 | `GET /health` | 健康检查，`{"ok":true}` |
+| `GET /client/manifest` | **客户端静态契约**：协议/内容/schema 版本、tickRate、world tile、serverRules、netSync 字段表、地图+图块语义、实体表现、物品索引；带强 `ETag`（=`contentVersion`）与 `If-None-Match` 304。见 §1.4 |
 | `GET /content` | **内容目录**（静态表的单一来源，见 §5.2.1） |
-| `GET /maps/runtime?mapId=<key>` | 地图几何全图快照：网格尺寸、地面语义 `tiles`、通行位图 `walkable`、区域 `regions`/`regionOfTile`、内容版本。用于客户端加载地图/碰撞。`mapId` 可选：省略时返回默认地图（game.json `map.default`，即 `/maps/meta` 的 `default` 字段）；未知 key（含空串）返回 404，错误体附可用图列表 |
+| `GET /maps/runtime?mapId=<key>&sinceVersion=<v>` | 地图几何快照。无 `sinceVersion`：全量（`tiles`/`walkable`/`level`/`regions`/`regionOfTile`/`version`）；`sinceVersion` 等于当前：`{key,version,unchanged:true}`；已知历史版本：`{key,version,baseVersion,modifications:[{tileIndex,field,value}]}`；未知版本回退全量。`mapId` 省略时返回默认图；未知 key 404。见下方增量说明 |
 | `GET /maps/meta` | 地图清单：默认图 key 与全部地图的元信息（含 version）。客户端可先拉取清单列出地图、预检版本，再按需拉取 runtime |
-| `GET /debug/colliders` | 房间碰撞体调试快照（房间未就绪时 404） |
+| `GET /maps/render?mapId=<key>` | **有效地面**：`{key,baseVersion,renderVersion,phaseId,phaseProgress,tiles}`；`tiles` 是当前相位/天气派生后的逐格语义（不写回底板），`renderVersion` 是缓存键 |
+| `GET /maps/collision?mapId=<key>&level=<n>` | **正式静态碰撞/占用**：`{key,version,level,grid,walkable,occupants}`；`walkable` = 该层地形+楼板通行位，`occupants` 用 networkId（不是 eid）。用于放置预览/客户端碰撞镜像/遮挡 |
+| `GET /world/map-graph` | 世界图：`{maps:[{id,displayName,connections:[{to,kind,x?,y?}]}]}`（数据来自 presentation，缺省回退 registry） |
+| `GET /debug/colliders` | 房间碰撞体调试快照（房间未就绪时 404；调试用，不是正式碰撞源） |
 
 > **地图几何来源（live 优先）**：`/maps/runtime` 与 `/maps/meta` 优先返回**活动房间的实时几何**（含运行期写回的结果，如野火焦土——`tiles`/`walkable`/`level` 已变，`version` 指纹随之变化）；房间未就绪（服务刚启动、或房间创建失败）时回退为「按配置重建」的视图。两种视图在**没有任何写回**时内容一致，因此客户端按 `{key, version}` 缓存仍然安全；若运行期发生地形改写，`version` 会变，客户端据此重新拉取。
+
+> **地图版本订阅（CC-05）**：`PlayerState.mapVersion` 每 tick 同步玩家当前地图的 `version`。客户端检测到它变化时，用上次的 `version` 作为 `sinceVersion` 请求 `/maps/runtime` 增量（`modifications` 为稀疏终态，直接覆盖对应格即可，不要按事件流重放）。增量只覆盖 `tiles/walkable/level`；`regions/regionOfTile` 与 grid 变化只能靠全量（当前运行期写回不改区域/grid）。未知/过旧 `sinceVersion` 会自动回退全量，客户端按响应里有没有 `modifications` 分支处理即可。
+
+> **有效地面 vs 底板**：`/maps/runtime` 的 `tiles` 是**底板**（写回后的持久值）；`/maps/render` 的 `tiles` 是**当前 tick 的有效地面**（相位/天气覆盖派生，如季节雪地/湿润地面，不写回）。渲染季节/天气时应叠加 `/maps/render`，不要把派生结果写回本地底板缓存。`Space.exposure`（`indoor/outdoor`）是玩家所在格的服务端派生值（§3.5），用于室内外音效/天气表现。
 
 
 `/maps/runtime` 返回示例（**以当前 game/ 配置「荒岛求生」为例**——地图清单/尺寸/区域名均为配置产物，随配置漂移）：
