@@ -114,8 +114,10 @@ const room = await client.joinOrCreate("game", {
 ### 2.2 离散命令 — 消息名 `"command"`
 
 ```jsonc
-{ "type": "craft", "recipe": "<recipeId>" }
+{ "type": "craft", "recipe": "<recipeId>", "requestId": "c-17" }
 ```
+
+`requestId` 可选（字符串）；原样回传在 `command-result` 中，用于把回执和本地 UI 操作对上。缺省时也会回一条（无 requestId）。
 
 命令类型与参数：
 
@@ -162,8 +164,69 @@ const room = await client.joinOrCreate("game", {
 | 项 | 值 |
 |----|----|
 | 频率上限 | 由 server 规则 `maxCommandsPerSec`（`game/rules/server.json`）限定（滑动窗口），超出被拒 |
-| 失败语义 | 任何命令失败（缺料/满包/距离不够/无权拆除等）**无错误回执**，服务端零副作用；客户端以状态变化为准 |
+| 失败语义 | 任何命令失败（缺料/满包/距离不够/无权拆除等）服务端零副作用，并回 `command-result { ok:false, code }`（见 §2.3）；客户端可用 `code` 提示，但最终状态仍以 `RoomState` 为准 |
 | 命令不进入 `seq` 去重 | 重复发送会被多次执行，客户端自行防抖 |
+
+---
+
+### 2.3 下行通知 — 消息名 `"command-result"` 与 `"events"`
+
+服务端主动推送两类消息，客户端用 `room.onMessage(type, handler)` 接收。
+
+#### `command-result`
+
+每条 `command` 都会回一条（包括守卫失败/参数非法）：
+
+```jsonc
+{ "requestId": "c-17", "type": "craft", "ok": false, "code": "no_item", "data": {} }
+```
+
+| 字段 | 说明 |
+|---|---|
+| `requestId` | 原样回传客户端上行的 `requestId`（未提供则省略） |
+| `type` | 命令 type（便于日志/UI） |
+| `ok` | 是否成功 |
+| `code` | 失败原因码：`invalid` / `no_item` / `inventory_full` / `out_of_range` / `cooldown` / `rate_limited` / `dead` / `not_owner` / `blocked` / `unknown` |
+| `data` | 可选附加数据（当前可能为空） |
+
+> 回执是**授权结果**，不是状态同步：成功后仍以 `RoomState` 的变化为准。`unknown` 表示服务端无法在不复制规则的前提下细分，客户端按通用失败提示。
+
+#### `events`
+
+每 tick 批量推送本客户端可见的表现事件（无事件不发包）：
+
+```jsonc
+{
+  "events": [
+    { "seq": 1042, "tick": 88123, "type": "hit", "data": { "attacker": 7, "target": 12, "damage": 18, "crit": false, "damageType": "pierce" } },
+    { "seq": 1043, "tick": 88123, "type": "action-phase", "data": { "actionId": "attack", "actor": 7, "target": 12, "phase": "active", "phaseIndex": 1, "tick": 88123 } }
+  ]
+}
+```
+
+- `seq` 是服务端全局单调序号；按客户端过滤后**会有空洞**，只保证严格递增。客户端按 `seq` 去重/判新旧，不要假设连续。
+- 事件是**通知**，不是权威状态；缺失/重复都不应改变客户端以 `RoomState` 为准的最终状态。重连不补发历史事件。
+- 服务端按受众过滤：`self`（仅当事人）、`nearby`（同图+半径）、`map`（同图）、`world`（全房间）。实体引用一律 **networkId**，不出现 eid。
+- 首批事件类型：
+
+| type | 典型受众 | data（实体均为 networkId） |
+|---|---|---|
+| `hit` | nearby | `attacker,target,damage,crit?,damageType?` |
+| `death` | nearby | `victim,killer?,kind?` |
+| `action-start` / `action-phase` / `action-hit` / `action-end` / `action-cancel` | nearby | `actionId,actor,target?,phase,phaseIndex?,tick,reason?` |
+| `gather` | self | `actor,node?,items:[[kind,count]],xp` |
+| `craft-start` / `craft-complete` / `craft-cancel` | self | `player,recipeId,outputs?/durationTicks?/finishTick?` |
+| `quest-update` / `quest-complete` | self | `questId,state,count` |
+| `achievement` | self | `player,achievementId,name?` |
+| `level-up` | self | `player,level,skill?` |
+| `respawn` | self | `player,mapId` |
+| `item-break` | self | `player,kind?,slot?` |
+| `raid-warning` | map | `remainingTicks` |
+| `weather-change` | world | `weatherId,phaseId,tick` |
+| `map-change` | self | `from,to,mapVersion?` |
+| `terrain-writeback` | map | `mapId,version` |
+
+> 事件只覆盖服务端已接线的产生点；未列出的玩法反馈仍以状态 diff 为准。
 
 ---
 
@@ -334,7 +397,7 @@ export class RoomState extends Schema {
 | Progression | `Progression.skill.{skillId}.xp/level` | 按技能 id 展开的技能经验/等级（skillId 由 progression 规则配置约定） |
 | Achievements | `Achievements.{achievementId}` | 已解锁成就（数值 **1 = 已解锁**；id 由 achievements 规则配置约定） |
 | Crafting | `Crafting.{i}.recipeId`（stringValues）、`Crafting.{i}.remainingTicks/progress/suspended`（values） | **进行中的制作**：`recipeId`=配方 id、`remainingTicks`=距完成剩余 tick（0=到点）、`progress`=时间进度 0–1（挂起时恒 1）、`suspended`=1 表示到点但产出条件未满足（背包满/站点失效）；任务完成/取消后整条消失 |
-| Cooldown | `Cooldown.remainingMs` | 攻击/投掷冷却剩余毫秒（**所有带 Cooldown 的实体**，含玩家与敌怪；服务端权威、每帧递减）。供客户端显示冷却提示——但**冷却是否结束仍以服务端裁决为准**（命令失败无回执） |
+| Cooldown | `Cooldown.remainingMs` | 攻击/投掷冷却剩余毫秒（**所有带 Cooldown 的实体**，含玩家与敌怪；服务端权威、每帧递减）。供客户端显示冷却提示——但**冷却是否结束仍以服务端裁决为准**（冷却中发命令会回 `command-result code=cooldown`） |
 | Action | `Action.actionId`（stringValues）；`Action.startedTick/durationTicks/phaseIndex/target/dirX/dirY`（values）；`Action.phase`（stringValues） | 当前动作时间轴（**仅玩家**）：`actionId`=配置动作 id，`startedTick`/`durationTicks`=动画进度基准（`(RoomState.tick - startedTick) / durationTicks`），`phase/phaseIndex`=当前阶段，`target`=目标 **networkId**（0=无目标），`dirX/dirY`=朝向单位向量。无动作时整组 key 消失；阶段/事件帧详见 §3.7 |
 | Ledger | `Ledger.{kind}` | 账本/商店库存：按物品 kind 展平的计数（数值） |
 | StateMachine | `StateMachine.state`（stringValues）、`StateMachine.stateTick`（values） | 通用状态机当前状态 id（配置字符串，如 `alive`/`burning`/`burnt`）与进入该状态的**绝对 tick**；动画进度 = `(RoomState.tick - stateTick) / 配置时长` |
@@ -427,7 +490,7 @@ export class RoomState extends Schema {
 - 客户端**不应内置配方清单**。如需展示配方列表：由宿主游戏注入配置，或等服务端后续提供配方查询端点；最小客户端做法是按配置文件静态生成或由开发者手动维护。
 - 站点要求（`stationType`）语义由 crafting 配置定义（当前示例：0=通用/无站点要求，其他值对应具体站点类型）。
 - **延时制作**：`durationTicks` 非 0 的配方在制作期间挂出 `Crafting.{i}.*`（§3.5）；`craft-cancel{recipe}` 按配方 id 取消（同一配方同一时刻至多一个任务）。
-- **解锁条件**：配方可带 `unlock.condition`（条件串，如 `inPhase:storm`、`progressAtLeast:<kind>:<n>`）。条件语义由配置约定，**服务端裁决**——客户端可把条件渲染成提示，但**不要**据此禁止发命令（命令失败无回执，见 §2.2）。
+- **解锁条件**：配方可带 `unlock.condition`（条件串，如 `inPhase:storm`、`progressAtLeast:<kind>:<n>`）。条件语义由配置约定，**服务端裁决**——客户端可把条件渲染成提示，但**不要**据此禁止发命令（失败会回 `command-result`，部分条件失败可能归为 `unknown`，见 §2.3）。
 
 ### 4.5 建造
 
@@ -779,7 +842,7 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 | 角色不动 | 输入超速被拒（超限帧被丢弃、seq 不推进、无需重发）；或未发 `input`（只发 state 监听） |
 | 实体表为空 | 实体恒在自己 `visibleEntities`（首帧后才开始填充）；若持续为空，检查是否同一地图/半径内无实体、或 Schema 声明顺序与服务端不一致 |
 | 控制台报 `"refId not found"`、实体字段偶发消失 | 旧基线（core 0.17.x）的上游解码 bug：`visibleEntities` 混入空壳实体，按 §3.2 末尾的兜底规则逐实体过滤即可容忍；当前服务端基线为 0.18.23，客户端仍建议保留兜底 |
-| 命令"没反应" | 命令失败无回执：缺料/满包/频率超限/距离不够，观察状态确认 |
+| 命令"没反应" | 先看 `command-result` 的 `code`（缺料 `no_item`/满包 `inventory_full`/超距 `out_of_range`/限频 `rate_limited`/冷却 `cooldown` 等）；`unknown` 时再观察状态（§2.3） |
 | 投掷"没反应" | 武器槽装备的物品没有投掷档案（服务端要求 `throw` 段）；或服务端冷却未结束（`Cooldown.remainingMs` 已同步但仍以服务端裁决为准，冷却结束前命令会被静默拒收） |
 | 报价列表为空 | `RoomState.offers` 只含**与自己相关**的条目（发起方/接收方可见）；或报价已成交/取消（条目移除）。参与方 id 用 **networkId**（自己 `PlayerState.entityId`、对方 `EntityState.id`），不是服务端 eid |
 | 中文名显示为英文/原文 | 该条目在配置里没有名称字段且服务端未登记展示名——`/content` 的兜底链末端即 id/kind 原文（§5.2.1） |

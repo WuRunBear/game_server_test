@@ -210,7 +210,7 @@
 | 对话选项 | 自身实体存在 `Dialogue.option.{i}.text` 时渲染按钮列表（正文读 `Dialogue.text`），点击发 `{type:"dialogue",option:i}` |
 | 交易报价 | 读 `state.offers`（map：offerId → JSON 字符串）渲染待处理报价；确认发 `{type:"offer-accept",offerId}`、撤销发 `{type:"offer-cancel",offerId}`；发起报价时条款的 `party` 用 **networkId**（自己 `players.get(sessionId).entityId`、对方可见实体的 `id`） |
 
-> 面板类 UI 的通用约定：**命令失败无回执**（坑 K4），所以面板只做「提示 + 乐观展示」，不等待响应；列表类 DOM 若需定时刷新，**按内容签名重建**，避免整表重绘打断玩家点击。
+> 面板类 UI 的通用约定：命令现在会回 `command-result { requestId, ok, code }`（坑 K4 已更新）——面板应携带 `requestId` 并按回执提示失败；列表类 DOM 若需定时刷新，**按内容签名重建**，避免整表重绘打断玩家点击。
 
 ### P4 状态 HUD
 
@@ -226,7 +226,7 @@
 - **K1 visibleEntities 空壳兜底（逐实体）**：受旧基线上游 bug 影响（colyseus#935/#936，core 0.17.x；当前服务端已升至 0.18.23，兜底规则仍建议保留），`visibleEntities` 可能解码出空壳实体（`id` 非数字、`values`/`stringValues` 缺失），与正常实体**同表混入**且时好时坏。`visibleEntities` 是**唯一**实体来源（`state` 的 `entities` 已移除，无回退通道）。**规则：逐实体过滤——只使用 `typeof e.id === "number"` 的实体，读取统一走 `e.values?.get(...)` 可选链**；勿按整表校验（混有一个空壳即每帧抛 `Cannot read properties of undefined`）。空壳伴随控制台 `"refId not found"` 报错，属同一 bug 的预期噪音，勿当客户端 bug 追。自身实体也在此表中，空壳时自身状态缺失属预期。部署方确认升级到修复版本后可删除本条。
 - **K2 seq 无需重传机制**：被拒输入（超速等）会被丢弃，客户端无法感知；只需保证 seq 严格递增、每次携带最新输入即可，后续输入自然覆盖，勿实现复杂重传。
 - **K3 边沿触发**：键盘 `keydown` 有系统自动重复（auto-repeat），必须检查 `event.repeat` 过滤，否则 interact/attack/talk 会被连续触发。
-- **K4 命令失败无回执**：所有命令失败（缺料/满包/距离不够）服务端零副作用且**不回复错误**。UI 不等待响应、不做乐观本地修改，一切以状态同步为准。
+- **K4 命令回执**：每条 `command` 都会回 `command-result { requestId?, type, ok, code? }`（含失败：`invalid/no_item/inventory_full/out_of_range/cooldown/rate_limited/dead/not_owner/blocked/unknown`）。上行时带上 `requestId` 以便对账；失败服务端零副作用，成功仍以 `RoomState` 为准，不做乐观本地修改。
 - **K5 CORS**：HTTP 端点受 `CORS_ORIGINS` 白名单限制（服务端默认 `http://localhost:5173`）。运行方式二选一：① 用任意静态服务器把页面跑在 `http://localhost:5173`（如 `npx serve -l 5173` 或 `python3 -m http.server 5173`）；② 在服务端 `.env` 设 `CORS_ORIGINS=<你的页面地址>` 后重启。https/wss 部署同理：页面 Origin（`https://...`）与派生的 https 端点都需在白名单内。
 - **K6 换图改为 per-player**：玩家踩传送门只切换**该玩家自己**的地图（其 `players.get(room.sessionId).mapId` 变化），其他玩家的 `mapId` 不受影响、画面不切换——不再有房间级全员换图。
 - **K7 权威模型**：服务端权威模拟，客户端**不做位移预测**，位置完全以同步状态为准（最小版直接读最新值渲染即可，不需要插值）。
@@ -241,7 +241,7 @@
 - **K10（方式 B）页面实际加载两份 schema**：importmap 钉的是 4.0.25，但 SDK 的 `+esm` 内部对 schema 的传递依赖由 CDN 解析为其范围内最新版（实测 4.0.26）——**解码路径用的是 SDK 内部那份**（控制台报错来源会显示 4.0.26）。如需绝对钉版，在 importmap 里把该传递依赖也显式映射。
 - **K11 `EntityState.level`（int8，末尾追加）**：实体带离散层号（缺省 0）。该字段**追加在 `id`/`values`/`stringValues` 之后**——既有三项的**字段索引不变**，旧客户端结构上仍能解码新流（只是读不到层号）；新客户端连旧服务端则缺该字段，按 0 处理即可。客户端声明 schema 时**必须把 `level` 放在最后**（字段顺序即线协议）。渲染时按自身层号过滤异层实体。
 - **K12 重连语义（断线保留）**：服务端**不是**「断线即销毁」——会话断开后玩家实体保留**约 5 分钟**（server 规则 `offlineRetentionTicks`，缺省 tickRate×300s；配 0 才关闭），期间**对所有客户端不可见**（不进快照）。客户端可把自己断线前的 networkId 存本地（localStorage），join 时作为**可选参数**回传：`joinOrCreate("game", { networkId: saved })`——服务端**严格按该 id 匹配**未到期的保留实体：命中则复用同一角色（背包/进度不丢），未命中则新建。**不要**假设「重连一定是新角色」，也不要假设「重连一定恢复原角色」。
-- **K13 冷却/瞬态不同步**：攻击/投掷冷却以 `Cooldown.remainingMs`（**所有带 Cooldown 的实体**，含敌怪）同步——客户端可据此显示冷却条，但**不能**把它当作服务端裁决：真正的冷却由服务端判定，命令失败无回执。`Kind.value`、`Category.value`、`Velocity.vx/vy`、`Transform.rot/scale`、`StateMachine.*`、`Modifiers.*` **已同步**（分类见协议 §3.5/§3.6）；`Intent` 等纯输入意图仍不同步。
+- **K13 冷却/瞬态不同步**：攻击/投掷冷却以 `Cooldown.remainingMs`（**所有带 Cooldown 的实体**，含敌怪）同步——客户端可据此显示冷却条，但**不能**把它当作服务端裁决：真正的冷却由服务端判定，冷却中命令会回 `command-result code=cooldown`。`Kind.value`、`Category.value`、`Velocity.vx/vy`、`Transform.rot/scale`、`StateMachine.*`、`Modifiers.*`、`Action.*` **已同步**（分类见协议 §3.5/§3.6/§3.7）；`Intent` 等纯输入意图仍不同步。
 - **K14 `RoomState` 末尾四字段（顺序即线协议）**：`weatherId`(string) / `phaseId`(string) / `phaseProgress`(number) / `offers`({map:"string"}) **追加在 `players` 之后**——客户端声明 schema 时必须按此顺序（漏声明会与新服务端错位解码）。旧客户端只声明前四项在结构上仍可解码（读不到这四项）。`phaseId`/`weatherId` 是**配置字符串**（`mild`/`dry`/`wet`/`storm`、`clear`/`rain`/…），语义随配置漂移，**原样显示、不要硬编码取值集**。
 - **K15 `offers` 的可见性与格式**：`state.offers` 的 key 是报价会话 id（字符串），value 是 **JSON 字符串**（需 `JSON.parse`，形如 `{"from":123,"to":456,"give":[["wood",2]],"take":[["shell",5]]}`，`from`/`to` 为 networkId，视角以发起方为基准）。服务端**只把与自己相关的条目**放进你的表里（发起方/接收方可见，他人不可见）——所以读到的每条都与自己相关，可直接渲染。成交/取消后条目消失。发起报价时条款的 `party` 也用 **networkId**（不是服务端 eid），用错会被整条拒绝；条款数量写 `{kind, count}` 即可（`container` 可省略，缺省按背包 inventory 处理）；`offer-accept`/`offer-cancel` 的 `offerId` 直接回传 map 键原值（字符串）即可（数字亦可）。
 - **K16 内容目录（`GET /content`）**：物品/配方/任务/成就/相位/技能的名称与描述由服务端从当前配置导出（`items`/`recipes`/`quests`/`achievements`/`phases`/`skills` 六段）。客户端**不应硬编码静态表**；名称字段是「可直接显示的文本」，配置缺名称时服务端回退为 id/kind 原文（如 `wood`）——不保证是中文。端点不可用（旧服务端）时才退回自备静态表。
@@ -295,3 +295,4 @@
 | v2.4 | 2026-10-21 | 协议面补齐（服务端侧）：① **§1 约束 3 的两段 Schema 示例补 `RoomState` 末尾四字段**——`weatherId`(string)/`phaseId`(string)/`phaseProgress`(number)/`offers`({map:"string"})，顺序即线协议（新增 K14）；② 新增 §P1.5 内容目录（`GET /content`：items/recipes/quests/achievements/phases/skills 六段，中文名由服务端从配置导出，客户端不再硬编码静态表）与 K16；③ §P3 对话选项改读 `Dialogue.option.{i}.text`（正文读 `Dialogue.text`），新增交易报价行（条款 `party` 用 networkId）；④ §P4 HUD 补环境三字段与交易面板；⑤ 新增 K15（`offers` 的可见性/JSON 字符串格式/networkId 语义）；⑥ §P1 补「live 几何」说明（写回后 version 变化 → 重新拉取）；⑦ K13 改写：冷却经 `Cooldown.remainingMs`（仅玩家）同步，仍以服务端裁决为准；⑧ 验收清单补第 15-17 条 |
 | v2.5 | 2026-11-23 | CC-08 版本基线修正：① 文首新增版本基线说明——当前服务端 `@colyseus/core 0.18.23` / `@colyseus/schema 5.0.43`、Godot addon 0.18.9；CDN 示例保留旧基线 `@colyseus/sdk@0.17.43` / `@colyseus/schema@4.0.25`（0.18 浏览器 CDN 路径未验证，不擅自改号）；② join 增补 `protocolVersion` 握手说明（从 `/client/manifest` 获取，缺省兼容，版本不符被拒）；③ **K13 修正 `Kind` 矛盾**：`Kind.value` 已同步，仅 `Velocity`/`Intent` 等瞬态不同步；④ K1 的 `0.17.43` 表述改为旧基线并注明当前 0.18.23 |
 | v2.6 | 2026-11-23 | CC-07 状态同步补全：`Health.max`、`Attack.*`、`Defense.value`、`Team.id`、`Perception.visionRadius`、`Transform.rot/scale`、`Velocity.vx/vy`、`StateMachine.state/stateTick`、`Modifiers.*`、`ExpiresAt/Lifetime.remainingTicks`、`Projectile.vx/vy/lifeMs/radius/damage/ownerNetworkId`、`ResourceNode.max/infinite`、`LightSource.fuelInfinite`、`Placeable.ownerNetworkId`、`GridOccupancy.cellLevel`、`Inventory/ItemMeta.spoilAt`、`Ledger.*`、`Category.value` 进入快照（协议 §3.5）；K13 按实际同步面改写（Cooldown 全实体、Velocity 已同步，仅 Intent 等意图仍不同步） |
+| v2.7 | 2026-11-23 | CC-04 反馈层：`command` 增加 `requestId`，服务端每条命令回 `command-result {requestId,type,ok,code}`（失败零副作用）；新增 `events` 批量推送（seq 全局单调、按受众过滤、实体一律 networkId）；K4 由「无回执」改写为回执契约；K13 补 `Action.*` 已同步与 `cooldown` 错误码 |
