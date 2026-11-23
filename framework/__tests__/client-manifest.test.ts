@@ -77,6 +77,7 @@ describe("client manifest: 形状与版本", () => {
         "statusEffects",
         "tickRate",
         "tileSemantics",
+        "vfx",
         "world",
       ].sort(),
     );
@@ -89,7 +90,7 @@ describe("client manifest: 形状与版本", () => {
     expect(manifest.contentVersion).toMatch(/^[0-9a-f]{8}$/);
   });
 
-  it("tickRate / world 来自 game.json；未实现段为空数组/空对象", () => {
+  it("tickRate / world 来自 game.json；动画/状态效果未实现段为空结构", () => {
     expect(manifest.tickRate).toBe(gameDef.tickRate);
     expect(manifest.world).toEqual({
       tileWidth: gameDef.world.tile.width,
@@ -98,7 +99,9 @@ describe("client manifest: 形状与版本", () => {
     // world.storyHeight 当前没有配置来源，不得出现魔法数
     expect("storyHeight" in manifest.world).toBe(false);
     expect(manifest.animations).toEqual({});
-    expect(manifest.audio).toEqual({});
+    // 音频/VFX 已由 game/presentation/{audio,vfx}.json 提供（形状固定）
+    expect(manifest.audio.sfx).toContain("sfx_hit");
+    expect(manifest.vfx.effects).toContain("vfx_hit");
     expect(manifest.statusEffects).toEqual([]);
   });
 

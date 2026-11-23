@@ -1,0 +1,14 @@
+{
+  "effects": {
+    "vfx_hit": {},
+    "vfx_death": {},
+    "vfx_chop": {},
+    "vfx_weather": {}
+  },
+  "events": {
+    "hit": ["vfx_hit"],
+    "death": ["vfx_death"],
+    "gather": ["vfx_chop"],
+    "weather-change": ["vfx_weather"]
+  }
+}

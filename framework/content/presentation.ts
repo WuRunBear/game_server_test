@@ -3,12 +3,15 @@
  *
  * 职责边界（框架游戏无关）：
  * - `loadPresentation` 把一份原始 JSON 经 PresentationSchema 校验后**深度冻结**
- *   并登记为当前活动配置；
+ *   并登记为当前活动配置；音频/VFX 的事件引用（事件 type → sfx/effect id）
+ *   在登记前校验，未知 id 直接抛错；
  * - 查询函数只做「每图覆盖 → 全局默认」的合并查找，不解释 category /
- *   autotileGroup / footstepId / visualId 等不透明字符串；
+ *   autotileGroup / footstepId / visualId / sfx / effect 等不透明字符串；
  * - 实体表现（`entities`）按 kind 查询/列出，字段同样是不透明引用；
+ * - 音频/VFX 按事件 type 查询要播放的 id 数组（无配置/无映射返回空数组）；
  * - `validatePresentation` 是纯函数：检查地图 registry 与表现条目的覆盖关系，
- *   并检查配置中实际引用的 tile 语义 id 是否都有定义（返回错误列表，不抛）。
+ *   检查配置中实际引用的 tile 语义 id 是否都有定义，并复核 audio/vfx 的事件
+ *   引用（返回错误列表，不抛）。
  *
  * 生命周期：表现配置属于**游戏内容**，不是 ECS 状态；同进程只保留最近一次
  * `loadGameDefinition` 装入的配置（load 全量替换，无 presentation 的旧游戏会
@@ -17,12 +20,14 @@
 import type { MapConfig } from "framework/config/schema/MapRegistrySchema";
 import {
   PresentationConfigSchema,
+  type AudioPresentation,
   type EntityPresentation,
   type MapPresentation,
   type PresentationConfig,
   type PresentationLevelSemantics,
   type TileSemanticSpec,
   type TileSemanticsTable,
+  type VfxPresentation,
 } from "framework/config/schema/PresentationSchema";
 
 /** 完整性校验所需的最小游戏定义切片（避免与 loader 互相依赖）。 */
@@ -58,14 +63,56 @@ function deepFreeze<T>(value: T): T {
 }
 
 /**
+ * 校验音频/VFX 事件映射的 id 引用（纯函数，返回人类可读错误列表）。
+ *
+ * 规则：`audio.events[type]` 的每个 id 必须是 `audio.sfx` 中已登记的 key；
+ * `vfx.events[type]` 的每个 id 必须是 `vfx.effects` 中已登记的 key。事件 type
+ * 本身不校验（由玩法系统决定，配置可先行）。无 audio/vfx 段时返回空数组。
+ */
+export function validateAudioVfxReferences(config: PresentationConfig): string[] {
+  const errors: string[] = [];
+
+  const audio = config.audio;
+  if (audio) {
+    for (const [eventType, ids] of Object.entries(audio.events)) {
+      for (const id of ids) {
+        if (!Object.hasOwn(audio.sfx, id)) {
+          errors.push(`presentation: audio event "${eventType}" references unknown sfx "${id}"`);
+        }
+      }
+    }
+  }
+
+  const vfx = config.vfx;
+  if (vfx) {
+    for (const [eventType, ids] of Object.entries(vfx.events)) {
+      for (const id of ids) {
+        if (!Object.hasOwn(vfx.effects, id)) {
+          errors.push(`presentation: vfx event "${eventType}" references unknown effect "${id}"`);
+        }
+      }
+    }
+  }
+
+  return errors;
+}
+
+/**
  * 校验一份表现配置并登记为当前活动配置。
+ *
+ * 音频/VFX 的事件引用不完整（未知 sfx/effect id）→ 抛错，不登记半成品配置。
  *
  * @param raw 原始 JSON（未校验）
  * @returns 深度冻结后的配置（同时成为查询函数的当前数据源）
  * @throws ZodError 当结构/字段/tile id 键非法时
+ * @throws Error 当 audio/vfx 事件引用未知 id 时
  */
 export function loadPresentation(raw: unknown): PresentationConfig {
   const parsed = PresentationConfigSchema.parse(raw);
+  const referenceErrors = validateAudioVfxReferences(parsed);
+  if (referenceErrors.length > 0) {
+    throw new Error(referenceErrors.join("; "));
+  }
   const frozen = deepFreeze(parsed);
   activePresentation = frozen;
   return frozen;
@@ -120,6 +167,36 @@ export function getEntityPresentation(kind: string): EntityPresentation | undefi
  */
 export function listEntityPresentations(): Readonly<Record<string, EntityPresentation>> {
   return activePresentation?.entities ?? Object.freeze({});
+}
+
+/**
+ * 音频表现（未加载/未配置时为 undefined）。
+ *
+ * 只返回不透明 id 表与事件映射；服务端不持有资源。
+ */
+export function getAudioPresentation(): AudioPresentation | undefined {
+  return activePresentation?.audio;
+}
+
+/** VFX 表现（未加载/未配置时为 undefined）。 */
+export function getVfxPresentation(): VfxPresentation | undefined {
+  return activePresentation?.vfx;
+}
+
+/**
+ * 某客户端事件 type 要播放的音效 id 列表（保持配置顺序）。
+ *
+ * 无配置/无该事件映射时返回空数组（调用方无需判空）。
+ */
+export function audioIdsForEvent(type: string): string[] {
+  const ids = activePresentation?.audio?.events[type];
+  return ids ? [...ids] : [];
+}
+
+/** 某客户端事件 type 要播放的特效 id 列表（无配置/无映射返回空数组）。 */
+export function vfxIdsForEvent(type: string): string[] {
+  const ids = activePresentation?.vfx?.events[type];
+  return ids ? [...ids] : [];
 }
 
 /** 把 unknown 收窄为普通对象（排除 null 与数组）。 */
@@ -286,7 +363,9 @@ export function validatePresentation(gameDef: PresentationValidationContext): Pr
   const config = gameDef.resolvedPresentation;
   if (!config) return { ok: true, errors: [] };
 
-  const errors: string[] = [];
+  // 音频/VFX 事件引用（防御性复核：loadPresentation 已在加载期拦截；手工
+  // 构造的 resolvedPresentation 也走同一规则）
+  const errors: string[] = validateAudioVfxReferences(config);
   const mapConfigs = gameDef.resolvedMapConfigs ?? [];
   const registryKeys = new Set(mapConfigs.map((map) => map.key));
 

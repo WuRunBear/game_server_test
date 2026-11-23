@@ -267,7 +267,14 @@ describe("CC-04 客户端事件：受众与隐私", () => {
     const near = sim.tick(50);
     const deathA = eventsOf(near, "s1", "death");
     expect(deathA).toHaveLength(1);
-    expect(deathA[0]!.data).toEqual({ victim: net2, killer: net1, kind: "boar" });
+    expect(deathA[0]!.data).toEqual({
+      victim: net2,
+      killer: net1,
+      kind: "boar",
+      // CC-11：表现事件按 type 挂不透明 id（audio.json / vfx.json）
+      sfx: ["sfx_death"],
+      vfx: ["vfx_death"],
+    });
     expect(deathA[0]!.data).not.toHaveProperty("eid");
 
     // B 换到另一张图后再死：A 在同图但事件锚点在 B 的新图 → 不发给 A。

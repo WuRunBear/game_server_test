@@ -9,18 +9,20 @@
  *   表现配置（`game/presentation/*.json`，见 PresentationSchema）；
  * - 物品/势力/站点/伤害类型等目录段直接复用 `buildContentCatalog`
  *   （`/content` 的同一数据源，见 CC-09），不在 manifest 内重复扫描配置；
- * - 框架只做搬运与形态归一，不解释 category / visualId / tilesetId 等不透明
- *   id，也不落贴图路径/图集坐标/动画帧；
- * - 尚未实现的段（动画/音频/状态效果）输出空数组/空对象，不出现 `undefined`
+ * - 框架只做搬运与形态归一，不解释 category / visualId / tilesetId / sfx /
+ *   vfx 等不透明 id，也不落贴图路径/图集坐标/动画帧/音频文件；
+ * - 音频/VFX 段只登记 id 与「事件 type → id 数组」映射（服务端不持有资源）；
+ * - 尚未实现的段（动画/状态效果）输出空数组/空对象，不出现 `undefined`
  *   （字段可增不可减）。
  *
  * `contentVersion`：对**键序稳定**的规范 JSON 做 FNV-1a 32 位哈希，输出 8 位
- * 小写十六进制。覆盖表现配置 + 物品/配方/任务/成就/相位/技能 + 势力/站点/
- * 伤害类型 + netSync + tickRate/world tile + 地图/实体清单；同一配置跨进程
- * 稳定，任一段变化即变。
+ * 小写十六进制。覆盖表现配置（含 audio/vfx）+ 物品/配方/任务/成就/相位/技能 +
+ * 势力/站点/伤害类型 + netSync + tickRate/world tile + 地图/实体清单；同一配置
+ * 跨进程稳定，任一段变化即变。
  */
 import type { NetSyncField, LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
 import type {
+  AudioPresentation,
   EntityPresentation,
   MapConnectionSpec,
   MapMinimapSpec,
@@ -28,6 +30,7 @@ import type {
   PresentationConfig,
   TileSemanticSpec,
   TileSemanticsTable,
+  VfxPresentation,
 } from "framework/config/schema/PresentationSchema";
 import type {
   AchievementRule,
@@ -174,6 +177,31 @@ export interface ClientManifestItem {
   maxStack: number;
 }
 
+/**
+ * 音频清单（不透明 id；客户端自行绑定真实资源）。
+ *
+ * id 数组按字典序稳定排序（内容哈希输入顺序无关）；`events` 的数组保留配置
+ * 顺序（播放顺序）。
+ */
+export interface ClientManifestAudio {
+  /** 音乐 id 列表。 */
+  music: string[];
+  /** 环境音 id 列表。 */
+  ambient: string[];
+  /** 音效 id 列表。 */
+  sfx: string[];
+  /** 客户端事件 type → 音效 id 数组（无映射时为空对象）。 */
+  events: Record<string, string[]>;
+}
+
+/** VFX 清单（不透明 id；客户端自行绑定粒子/特效资源）。 */
+export interface ClientManifestVfx {
+  /** 特效 id 列表。 */
+  effects: string[];
+  /** 客户端事件 type → 特效 id 数组（无映射时为空对象）。 */
+  events: Record<string, string[]>;
+}
+
 /** `GET /client/manifest` 响应体。 */
 export interface ClientManifest {
   /** 线上协议版本（破坏性 schema 变更时递增）。 */
@@ -198,10 +226,12 @@ export interface ClientManifest {
   items: ClientManifestItem[];
   /** 全局地面语义表（每图覆盖前的默认值）。 */
   tileSemantics: TileSemanticsTable;
-  /** 动画集（CC-11 实现前为空对象）。 */
+  /** 动画集（动画剪辑留给后续切片；当前恒为空对象）。 */
   animations: Record<string, unknown>;
-  /** 音频集（CC-11 实现前为空对象）。 */
-  audio: Record<string, unknown>;
+  /** 音频清单（事件 type → 音效 id；无配置时为空结构）。 */
+  audio: ClientManifestAudio;
+  /** VFX 清单（事件 type → 特效 id；无配置时为空结构）。 */
+  vfx: ClientManifestVfx;
   /** 状态效果（未实现，空数组）。 */
   statusEffects: unknown[];
   /** 伤害类型（来自 `/content` 的 catalog.damageTypes）。 */
@@ -258,14 +288,19 @@ function fnv1a32Hex(text: string): string {
  *
  * 注意：`items` / `recipes` / `quests` / `achievements` / `phases` / `skills`
  * 接收**完整配置对象**（不是 manifest 投影），因此物品效果、配方输入等
- * 客户端可见数据的任何变化都会推进版本。
+ * 客户端可见数据的任何变化都会推进版本。`presentation.audio` / `vfx` 未配置
+ * 时省略（规范 JSON 丢弃 undefined），旧游戏的版本指纹保持不变。
  */
 export interface ContentVersionInput {
-  /** 表现配置（maps / entities / tileSemantics）。 */
+  /** 表现配置（maps / entities / tileSemantics / audio / vfx）。 */
   presentation?: {
     tileSemantics?: TileSemanticsTable;
     maps?: Record<string, MapPresentation>;
     entities?: Record<string, EntityPresentation>;
+    /** 音频表现（音频 id/事件映射变化即推进版本）。 */
+    audio?: AudioPresentation;
+    /** VFX 表现（特效 id/事件映射变化即推进版本）。 */
+    vfx?: VfxPresentation;
   };
   /** 地图 key 清单（新增/删除地图即变）。 */
   mapIds?: readonly string[];
@@ -342,7 +377,7 @@ export interface BuildClientManifestOptions {
    * 注入表现配置（缺省取 `gameDef.resolvedPresentation`）。
    *
    * 用于测试「表现输入变化 → contentVersion 变化」，以及同进程多游戏并存时
-   * 显式指定数据源（避免依赖模块级活动配置）。
+   * 显式指定数据源（避免依赖模块级活动配置）。audio/vfx 段同样来自这里。
    */
   presentation?: PresentationConfig;
 }
@@ -408,6 +443,40 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
  */
 function compareId(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** id 表 → 字典序稳定的 id 数组（只取 key，不解释条目）。 */
+function sortedAssetIds(table: Readonly<Record<string, unknown>> | undefined): string[] {
+  return Object.keys(table ?? {}).sort(compareId);
+}
+
+/** 事件映射 → 键序稳定的普通对象（数组顺序 = 播放顺序，原样保留）。 */
+function sortedEventMap(
+  events: Readonly<Record<string, readonly string[]>> | undefined,
+): Record<string, string[]> {
+  const result: Record<string, string[]> = {};
+  for (const type of Object.keys(events ?? {}).sort(compareId)) {
+    result[type] = [...(events?.[type] ?? [])];
+  }
+  return result;
+}
+
+/** 音频清单投影（无配置时为空结构——字段恒存在，不出现 undefined）。 */
+function buildAudioManifest(audio: AudioPresentation | undefined): ClientManifestAudio {
+  return {
+    music: sortedAssetIds(audio?.music),
+    ambient: sortedAssetIds(audio?.ambient),
+    sfx: sortedAssetIds(audio?.sfx),
+    events: sortedEventMap(audio?.events),
+  };
+}
+
+/** VFX 清单投影（无配置时为空结构）。 */
+function buildVfxManifest(vfx: VfxPresentation | undefined): ClientManifestVfx {
+  return {
+    effects: sortedAssetIds(vfx?.effects),
+    events: sortedEventMap(vfx?.events),
+  };
 }
 
 /** 从 archetype `components.Size` 读取像素尺寸（加载后已归一为 px）。 */
@@ -563,6 +632,8 @@ export function buildClientManifest(
 
   const netSync = buildNetSync(gameDef.netSync?.fields);
   const serverRules = buildServerRules(gameDef.resolvedRules);
+  const audio = buildAudioManifest(presentation?.audio);
+  const vfx = buildVfxManifest(presentation?.vfx);
 
   const maps = gameDef.resolvedMapConfigs.map((config) =>
     toMapManifest(config.key, presentation?.maps[config.key], presentation),
@@ -587,6 +658,9 @@ export function buildClientManifest(
           tileSemantics: presentation.tileSemantics,
           maps: presentation.maps,
           entities: presentation.entities ?? {},
+          // 未配置的音频/VFX 段省略（规范 JSON 丢弃 undefined）——旧游戏指纹不变
+          audio: presentation.audio,
+          vfx: presentation.vfx,
         }
       : {},
     mapIds: gameDef.resolvedMapConfigs.map((config) => config.key),
@@ -634,7 +708,8 @@ export function buildClientManifest(
     items,
     tileSemantics: presentation?.tileSemantics ?? {},
     animations: {},
-    audio: {},
+    audio,
+    vfx,
     statusEffects: [],
     damageTypes: contentCatalog.damageTypes,
     factions: contentCatalog.factions,

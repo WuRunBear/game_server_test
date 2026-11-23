@@ -46,10 +46,14 @@ import { tiledRegionNames } from "map/generate/blocks/tiledSource";
 import { stampTemplateRegionNames } from "map/generate/blocks/stampTemplate";
 import {
   PresentationConfigSchema,
+  type AudioPresentation,
   type EntityPresentation,
   type MapPresentation,
+  type PresentationAssetTable,
   type PresentationConfig,
+  type PresentationEventMap,
   type TileSemanticSpec,
+  type VfxPresentation,
 } from "framework/config/schema/PresentationSchema";
 import { clearPresentation, loadPresentation, validatePresentation } from "framework/content/presentation";
 import type { MapGenerationStep } from "map/generate/types";
@@ -93,13 +97,80 @@ function loadFilesByGlob(baseDir: string, pattern: string): string[] {
 const DEFAULT_PRESENTATION_PATH = "presentation/maps.json";
 /** 实体表现配置的约定路径（与 maps.json 同目录；存在即合并，重复 kind 报错）。 */
 const DEFAULT_ENTITIES_PRESENTATION_PATH = "presentation/entities.json";
+/** 音频表现配置的约定路径（只登记不透明 id 与事件映射，不含资源路径）。 */
+const DEFAULT_AUDIO_PRESENTATION_PATH = "presentation/audio.json";
+/** VFX 表现配置的约定路径（只登记不透明 id 与事件映射，不含资源路径）。 */
+const DEFAULT_VFX_PRESENTATION_PATH = "presentation/vfx.json";
+
+/** 合并音频/VFX id 表：跨文件重复 id 即配置错误（不做静默覆盖）。 */
+function mergeAssetTable(
+  target: PresentationAssetTable,
+  source: PresentationAssetTable,
+  label: string,
+  file: string,
+): void {
+  for (const [id, entry] of Object.entries(source)) {
+    if (Object.hasOwn(target, id)) {
+      throw new Error(`presentation: duplicate ${label} "${id}" in ${file}`);
+    }
+    target[id] = entry;
+  }
+}
+
+/** 合并事件 type → id 映射：跨文件重复 type 即配置错误（避免合并顺序决定播放列表）。 */
+function mergeEventMap(
+  target: PresentationEventMap,
+  source: PresentationEventMap,
+  label: string,
+  file: string,
+): void {
+  for (const [type, ids] of Object.entries(source)) {
+    if (Object.hasOwn(target, type)) {
+      throw new Error(`presentation: duplicate ${label} event "${type}" in ${file}`);
+    }
+    target[type] = [...ids];
+  }
+}
+
+/**
+ * 把约定文件归一为「根表现配置」形状。
+ *
+ * `presentation/audio.json` / `vfx.json` 的文件内容**本身就是段**（例如 audio
+ * 文件顶层是 `music/ambient/sfx/events`），而不是 `{ "audio": {...} }` 包装。
+ * 显式 glob 也可能把这两个文件一起匹配进来，因此按内容识别：含 `effects`
+ * 视为 VFX 段，含 `music`/`ambient`/`sfx` 视为音频段；只有 `events` 时按
+ * 文件名（audio/vfx）决定。已经是根配置形状（含 audio/vfx/tileSemantics/
+ * maps/entities）的文件原样返回。
+ */
+function normalizePresentationDocument(file: string, raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const record = raw as Record<string, unknown>;
+
+  const hasConfigKey = ["audio", "vfx", "tileSemantics", "maps", "entities"].some((key) =>
+    Object.hasOwn(record, key),
+  );
+  if (hasConfigKey) return raw;
+
+  const looksAudio = ["music", "ambient", "sfx"].some((key) => Object.hasOwn(record, key));
+  const looksVfx = Object.hasOwn(record, "effects");
+  if (looksAudio || looksVfx) {
+    return looksVfx ? { vfx: raw } : { audio: raw };
+  }
+
+  const name = basename(file);
+  if (name === "audio.json") return { audio: raw };
+  if (name === "vfx.json") return { vfx: raw };
+  return raw;
+}
 
 /**
  * 读取表现配置文件（一个或多个 glob）：逐文件 zod 校验后按**文件绝对路径排序**
- * 合并——`tileSemantics` / `maps` / `entities` 都按 key 合并，跨文件重复 key
- * 即配置错误（不做静默覆盖，避免加载顺序决定语义）。每份文件都是表现配置的
- * 子集形状（只承担实体表现时可只写 `entities`；`maps` / `tileSemantics`
- * 缺省为空表）。空匹配为显式配置错误。
+ * 合并——`tileSemantics` / `maps` / `entities` / `audio` / `vfx` 都按 key 合并，
+ * 跨文件重复 key 即配置错误（不做静默覆盖，避免加载顺序决定语义）。每份文件
+ * 都是表现配置的子集形状（只承担实体表现时可只写 `entities`；只承担音频时可
+ * 只写 `audio`；`maps` / `tileSemantics` 缺省为空表）。`presentation/audio.json`
+ * 与 `presentation/vfx.json` 允许直接写段内容（自动归一为 `{ audio: ... }` /
+ * `{ vfx: ... }`）。空匹配为显式配置错误。
  */
 function loadPresentationFiles(baseDir: string, patterns: readonly string[]): PresentationConfig {
   const files = new Set<string>();
@@ -115,6 +186,8 @@ function loadPresentationFiles(baseDir: string, patterns: readonly string[]): Pr
   const tileSemantics: Record<string, TileSemanticSpec> = {};
   const maps: Record<string, MapPresentation> = {};
   const entities: Record<string, EntityPresentation> = {};
+  let audio: AudioPresentation | undefined;
+  let vfx: VfxPresentation | undefined;
   for (const file of sortedFiles) {
     let raw: unknown;
     try {
@@ -126,7 +199,7 @@ function loadPresentationFiles(baseDir: string, patterns: readonly string[]): Pr
     }
     let document: PresentationConfig;
     try {
-      document = PresentationConfigSchema.parse(raw);
+      document = PresentationConfigSchema.parse(normalizePresentationDocument(file, raw));
     } catch (err) {
       throw new Error(
         `presentation file "${file}" is invalid: ${err instanceof Error ? err.message : String(err)}`,
@@ -150,17 +223,36 @@ function loadPresentationFiles(baseDir: string, patterns: readonly string[]): Pr
       }
       entities[kind] = entry;
     }
+    if (document.audio) {
+      audio ??= { music: {}, ambient: {}, sfx: {}, events: {} };
+      mergeAssetTable(audio.music, document.audio.music, "audio music", file);
+      mergeAssetTable(audio.ambient, document.audio.ambient, "audio ambient", file);
+      mergeAssetTable(audio.sfx, document.audio.sfx, "audio sfx", file);
+      mergeEventMap(audio.events, document.audio.events, "audio", file);
+    }
+    if (document.vfx) {
+      vfx ??= { effects: {}, events: {} };
+      mergeAssetTable(vfx.effects, document.vfx.effects, "vfx effect", file);
+      mergeEventMap(vfx.events, document.vfx.events, "vfx", file);
+    }
   }
 
-  return loadPresentation({ tileSemantics, maps, entities });
+  return loadPresentation({
+    tileSemantics,
+    maps,
+    entities,
+    ...(audio ? { audio } : {}),
+    ...(vfx ? { vfx } : {}),
+  });
 }
 
 /**
  * 加载游戏的表现语义配置：
  * 1. game.json 显式 `presentation` 路径（单文件或 glob）→ 必须能匹配到文件；
  * 2. 未声明时，若 `<gameDir>/presentation/maps.json` 存在 → 按约定加载；
- * 3. `<gameDir>/presentation/entities.json` 存在 → 始终合并实体表现（重复 kind
- *    报错；显式 glob 已包含时按绝对路径去重，不会重复解析）；
+ * 3. `<gameDir>/presentation/entities.json` / `audio.json` / `vfx.json` 存在 →
+ *    始终合并对应段（重复 key 报错；显式 glob 已包含时按绝对路径去重，不会
+ *    重复解析）；
  * 4. 都不存在 → 清空活动配置并返回 undefined（旧游戏/测试不受影响）。
  */
 function loadPresentationForGame(baseDir: string, configuredPath?: string): PresentationConfig | undefined {
@@ -170,8 +262,12 @@ function loadPresentationForGame(baseDir: string, configuredPath?: string): Pres
   } else if (existsSync(resolve(baseDir, DEFAULT_PRESENTATION_PATH))) {
     patterns.push(DEFAULT_PRESENTATION_PATH);
   }
-  if (existsSync(resolve(baseDir, DEFAULT_ENTITIES_PRESENTATION_PATH))) {
-    patterns.push(DEFAULT_ENTITIES_PRESENTATION_PATH);
+  for (const conventionPath of [
+    DEFAULT_ENTITIES_PRESENTATION_PATH,
+    DEFAULT_AUDIO_PRESENTATION_PATH,
+    DEFAULT_VFX_PRESENTATION_PATH,
+  ]) {
+    if (existsSync(resolve(baseDir, conventionPath))) patterns.push(conventionPath);
   }
   if (patterns.length === 0) {
     clearPresentation();

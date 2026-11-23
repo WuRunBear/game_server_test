@@ -1,13 +1,13 @@
 import { z } from "zod";
 
 /**
- * 表现语义配置 schema（game/presentation/*.json）——地图、地面语义与实体
- * kind 的「表现层命名表」。
+ * 表现语义配置 schema（game/presentation/*.json）——地图、地面语义、实体
+ * kind 与音频/VFX 的「表现层命名表」。
  *
  * 设计边界：
  * - 框架只做**结构校验与搬运**：`category` / `autotileGroup` / `footstepId` /
- *   `visualId` / `minimap.color` / `sceneId` 等全部是不透明字符串，含义由游戏
- *   与客户端约定，框架不解释；
+ *   `visualId` / `minimap.color` / `sceneId` / 音效与特效 id 等全部是不透明
+ *   字符串，含义由游戏与客户端约定，框架不解释；
  * - 数值 `tile id` 是 `MapGeometry.tiles` 的语义 id（Uint8Array），必须是
  *   0..255 的规范整数（record 键为十进制字符串，禁止 "01" / "1.5" / "-1"）；
  * - 支持「全局默认 + 每图覆盖」双层结构：全局 `tileSemantics` 描述同名语义的
@@ -15,7 +15,10 @@ import { z } from "zod";
  *   一张图是水、另一张图是墙时，各自用覆盖条目明确）；
  * - `entities` 按 archetype kind 给实体表现（展示名/分类/尺寸/锚点/不透明资源
  *   id/投影开关）；每份配置文件的 `tileSemantics` / `maps` / `entities` 都可
- *   缺省（缺省为空表），便于按关注点拆文件。
+ *   缺省（缺省为空表），便于按关注点拆文件；
+ * - `audio` / `vfx` 只登记**不透明 id** 与「客户端事件 type → id 数组」的播放
+ *   映射；服务端不持有资源，禁止 `assets` / `files` / 路径等字段（条目形状为
+ *   严格空对象，客户端自行把 id 绑定到真实资源）。
  *
  * 本文件只描述形状；查询/合并/完整性校验见 framework/content/presentation.ts。
  */
@@ -157,7 +160,69 @@ export const MapPresentationSchema = z.object({
   tileSemantics: TileSemanticsSchema.optional(),
 });
 
-/** 表现配置根结构：全局语义表 + 每图条目 + 实体表现表。 */
+/**
+ * 单个音频/VFX 条目：严格空对象占位。
+ *
+ * 资源绑定（文件路径/图集/总线/音量）由客户端按 id 解析；服务端只登记 id。
+ * `.strict()` 让误写的 `assets` / `files` / `path` 在加载期显式报错，避免把
+ * 资源路径带进服务端配置。
+ */
+export const PresentationAssetEntrySchema = z.object({}).strict();
+
+/** id → 条目 表（音乐/环境音/音效/特效共用；id 为非空不透明字符串）。 */
+export const PresentationAssetTableSchema = z.record(
+  z.string().min(1),
+  PresentationAssetEntrySchema,
+);
+
+/**
+ * 事件 type → 播放 id 数组（顺序 = 客户端播放顺序，数组序保留）。
+ *
+ * key 是客户端事件 `type`（CC-04 的字符串，如 `hit` / `gather`）；框架不校验
+ * type 是否是代码里真实存在的事件（事件集合由玩法系统决定，配置可先行）。
+ */
+export const PresentationEventMapSchema = z.record(
+  z.string().min(1),
+  z.array(z.string().min(1)),
+);
+
+/**
+ * 音频表现配置（`game/presentation/audio.json`）。
+ *
+ * `events[type]` 的值必须引用本配置 `sfx` 中已登记的 id（加载期校验，见
+ * content/presentation.ts）。`music` / `ambient` 供地图表现（`musicId` /
+ * `ambientId`）与客户端自行切换使用；weather-change / map-change 事件本身
+ * 不强制携带音乐/环境音 id（客户端按 manifest 的 maps[].musicId/ambientId
+ * 与事件自行决定），框架不解释切换策略。
+ */
+export const AudioPresentationSchema = z
+  .object({
+    /** 音乐 id 表（游戏可声明多首；客户端决定何时播放）。 */
+    music: PresentationAssetTableSchema.default({}),
+    /** 环境音 id 表（如白天/夜晚/洞穴氛围）。 */
+    ambient: PresentationAssetTableSchema.default({}),
+    /** 音效 id 表（事件映射的合法引用集合）。 */
+    sfx: PresentationAssetTableSchema.default({}),
+    /** 客户端事件 type → 音效 id 数组。 */
+    events: PresentationEventMapSchema.default({}),
+  })
+  .strict();
+
+/**
+ * VFX 表现配置（`game/presentation/vfx.json`）。
+ *
+ * `events[type]` 的值必须引用本配置 `effects` 中已登记的 id（加载期校验）。
+ */
+export const VfxPresentationSchema = z
+  .object({
+    /** 粒子/特效 id 表（事件映射的合法引用集合）。 */
+    effects: PresentationAssetTableSchema.default({}),
+    /** 客户端事件 type → 特效 id 数组。 */
+    events: PresentationEventMapSchema.default({}),
+  })
+  .strict();
+
+/** 表现配置根结构：全局语义表 + 每图条目 + 实体表现表 + 音频/VFX。 */
 export const PresentationConfigSchema = z.object({
   /** 全局默认地面语义表（键为规范整数字符串 id）。 */
   tileSemantics: TileSemanticsSchema.default({}),
@@ -165,6 +230,10 @@ export const PresentationConfigSchema = z.object({
   maps: z.record(z.string(), MapPresentationSchema).default({}),
   /** 实体 kind → 表现条目（可选；旧游戏无实体表现层时缺省）。 */
   entities: EntityPresentationTableSchema.optional(),
+  /** 音频表现（可选；无音频配置的游戏缺省）。 */
+  audio: AudioPresentationSchema.optional(),
+  /** VFX 表现（可选；无特效配置的游戏缺省）。 */
+  vfx: VfxPresentationSchema.optional(),
 });
 
 /** 地面语义条目类型。 */
@@ -187,5 +256,15 @@ export type EntityPresentation = z.infer<typeof EntityPresentationSchema>;
 export type EntityPresentationTable = z.infer<typeof EntityPresentationTableSchema>;
 /** 单图表现条目类型。 */
 export type MapPresentation = z.infer<typeof MapPresentationSchema>;
+/** 单个音频/VFX 条目类型（严格空对象）。 */
+export type PresentationAssetEntry = z.infer<typeof PresentationAssetEntrySchema>;
+/** 音频/VFX id → 条目 表类型。 */
+export type PresentationAssetTable = z.infer<typeof PresentationAssetTableSchema>;
+/** 事件 type → id 数组映射类型。 */
+export type PresentationEventMap = z.infer<typeof PresentationEventMapSchema>;
+/** 音频表现配置类型。 */
+export type AudioPresentation = z.infer<typeof AudioPresentationSchema>;
+/** VFX 表现配置类型。 */
+export type VfxPresentation = z.infer<typeof VfxPresentationSchema>;
 /** 表现配置根类型。 */
 export type PresentationConfig = z.infer<typeof PresentationConfigSchema>;

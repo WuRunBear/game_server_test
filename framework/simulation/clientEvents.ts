@@ -29,12 +29,24 @@
  * 本模块只输出 `ClientEvent { seq, tick, type, data }`；`audience`、锚点、
  * 当事人 eid 等过滤信息**不会**进入发给客户端的 JSON。data 里的实体引用
  * 必须是 networkId（调用方负责 eid → networkId 转换）。
+ *
+ * ## 音频/VFX id 挂接
+ *
+ * `emitClientEvent` 在入队前按 `type` 查询当前表现配置的 `audio.events` /
+ * `vfx.events`，把 `sfx` / `vfx`（不透明 id 数组）并入 `data`；无映射时
+ * **不加键**。一条事件仍只发一条消息（不为每个音效/特效拆消息，避免消息膨胀），
+ * 调用方显式放在 data 里的同名键优先（不覆盖）。
+ *
+ * `weather-change` / `map-change` 不强制携带 music/ambient：客户端可从 manifest
+ * 的 `maps[].musicId` / `maps[].ambientId` 与事件自行决定音乐/环境音切换；
+ * 服务端只发 id，不解释资源与切换策略。
  */
 import { hasComponent } from "bitecs";
 
 import { NetworkId } from "components/network";
 import { Transform } from "components/transform";
 import { entityMapOf } from "components/entityMap";
+import { audioIdsForEvent, vfxIdsForEvent } from "framework/content/presentation";
 import type { GameWorld, EntityId } from "framework/world";
 
 /** 客户端事件受众（仅服务端过滤用，不出网）。 */
@@ -48,7 +60,12 @@ export interface ClientEvent {
   tick: number;
   /** 事件类型（如 hit / death / craft-complete）。 */
   type: string;
-  /** 事件载荷：实体引用一律 networkId，无 eid。 */
+  /**
+   * 事件载荷：实体引用一律 networkId，无 eid。
+   *
+   * 可选 `sfx` / `vfx`（string[]）：由 `emitClientEvent` 按 type 挂接的不透明
+   * 播放 id（无映射时键不存在）。
+   */
   data: Record<string, unknown>;
 }
 
@@ -116,6 +133,22 @@ export function networkIdOf(world: GameWorld, eid: EntityId): number | undefined
   return typeof networkId === "number" && networkId > 0 ? networkId : undefined;
 }
 
+/** 按事件 type 把表现配置里的 sfx/vfx id 并入 data（无映射返回原对象）。 */
+function withPresentationIds(
+  type: string,
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  const sfx = audioIdsForEvent(type);
+  const vfx = vfxIdsForEvent(type);
+  if (sfx.length === 0 && vfx.length === 0) return data;
+
+  const enriched: Record<string, unknown> = { ...data };
+  // 调用方显式给的值优先（允许单个事件覆盖配置映射）
+  if (sfx.length > 0 && !Object.hasOwn(enriched, "sfx")) enriched.sfx = sfx;
+  if (vfx.length > 0 && !Object.hasOwn(enriched, "vfx")) enriched.vfx = vfx;
+  return enriched;
+}
+
 /**
  * 入队一条客户端事件。
  *
@@ -144,7 +177,7 @@ export function emitClientEvent(
     seq,
     tick: world.time.tick,
     type,
-    data,
+    data: withPresentationIds(type, data),
     audience,
     ...(typeof options.targetEid === "number" ? { targetEid: options.targetEid } : {}),
     ...anchor,

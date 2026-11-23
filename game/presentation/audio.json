@@ -1,0 +1,35 @@
+{
+  "music": {
+    "island_bgm": {},
+    "cave_bgm": {},
+    "swamp_bgm": {},
+    "ruins_bgm": {},
+    "highlands_bgm": {},
+    "tiled_demo_bgm": {},
+    "building_demo_bgm": {}
+  },
+  "ambient": {
+    "island_day": {},
+    "cave_dark": {},
+    "swamp_damp": {},
+    "ruins_hall": {},
+    "highlands_wind": {},
+    "tiled_demo_day": {},
+    "building_demo_day": {}
+  },
+  "sfx": {
+    "sfx_hit": {},
+    "sfx_chop": {},
+    "sfx_death": {},
+    "sfx_craft": {},
+    "sfx_weather": {}
+  },
+  "events": {
+    "hit": ["sfx_hit"],
+    "gather": ["sfx_chop"],
+    "death": ["sfx_death"],
+    "craft-complete": ["sfx_craft"],
+    "action-start": ["sfx_chop"],
+    "weather-change": ["sfx_weather"]
+  }
+}
