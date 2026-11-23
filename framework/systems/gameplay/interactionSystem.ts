@@ -38,12 +38,29 @@ function effectiveMapOf(world: GameWorld, eid: number): string {
 }
 
 /** 玩家实际攻击距离（组件 range > 0 优先，否则 combat 规则/默认值）。 */
-function attackReachOf(world: GameWorld, playerEid: number): number {
+export function attackReachOf(world: GameWorld, playerEid: number): number {
   const componentRange = Attack.range[playerEid];
   if (typeof componentRange === "number" && componentRange > 0) return componentRange;
   const rules = world.gameDef.resolvedRules["combat"] as { attackRange?: number } | undefined;
   const configured = rules?.attackRange;
   return typeof configured === "number" && configured > 0 ? configured : DEFAULT_ATTACK_RANGE;
+}
+
+/**
+ * interact/attack 意图的交互半径单一来源（game.json 的
+ * `systems[id=interaction].config.range`；缺省 24）。
+ *
+ * 查询面用它给 gather/open 的可用性归因；系统实例构造仍按自己的 config
+ * （两者在生产启动链上同源）。
+ */
+export function interactionRangeOf(world: GameWorld): number {
+  const entry = world.gameDef.systems?.find(
+    (system) => system.id === "interaction" && system.enabled !== false,
+  );
+  const configured = entry?.config?.["range"];
+  return typeof configured === "number" && Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_RANGE;
 }
 
 /**

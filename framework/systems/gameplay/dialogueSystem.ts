@@ -180,6 +180,46 @@ export function applyDialogueEffect(
 }
 
 /**
+ * 商店实价（单价）的**唯一**计算入口（纯读、无副作用）。
+ *
+ * 基础价 = 效果显式 price，缺省 item.value；随后按规则叠乘
+ * 相位/天气 → 供需 → 好感 → 势力声望，再钳制因子并取整（见 pricing.ts
+ * `tradeUnitPrice`）。未定价（无显式价且 item 无 value）返回 undefined。
+ *
+ * 对话购买（tradeAtShop）与 `/query/shop` 都调用本函数，保证 UI 展示价与
+ * 成交扣款完全一致。
+ */
+export function shopUnitPrice(
+  world: GameWorld,
+  playerEid: EntityId,
+  npcEid: EntityId,
+  kind: string,
+  explicitPrice?: number,
+): number | undefined {
+  const basePrice = explicitPrice ?? world.gameDef.itemsByKind?.get(kind)?.value;
+  if (basePrice === undefined || !(basePrice > 0)) return undefined; // 未定价：拒
+
+  const rules = world.gameDef.resolvedRules["dialogue"] as DialogueRule | undefined;
+  const trade = rules?.trade;
+  const npcKind = Kind[npcEid] ?? "";
+  const relation = npcKind ? getRelation(world, playerEid, npcKind) : 0;
+  const faction = factionOfNpcKind(world, npcKind);
+  const factionRep = faction ? getFactionRep(world, playerEid, faction.id) : 0;
+  const environment = environmentAt(world);
+  const supplyDemand = trade?.supplyDemand;
+  const volume = decayedTradeVolume(world, kind, supplyDemand);
+  return tradeUnitPrice({
+    basePrice,
+    relation,
+    factionRep,
+    phaseId: environment.phaseId,
+    weatherId: environment.weatherId,
+    volume,
+    trade,
+  });
+}
+
+/**
  * 商店买卖原子：玩家与商店的一次性等价交换（服务端权威，原子结算）。
  *
  * 库存/资金（F-44，服务端权威）：
@@ -214,27 +254,13 @@ function tradeAtShop(
   npcKind: string,
   npcEid: EntityId,
 ): boolean {
-  const basePrice = price ?? world.gameDef.itemsByKind?.get(kind)?.value;
-  if (basePrice === undefined || !(basePrice > 0)) return false; // 未定价：拒
-
-  const rules = world.gameDef.resolvedRules["dialogue"] as DialogueRule | undefined;
-  const trade = rules?.trade;
-  const relation = npcKind ? getRelation(world, playerEid, npcKind) : 0;
-  const faction = factionOfNpcKind(world, npcKind);
-  const factionRep = faction ? getFactionRep(world, playerEid, faction.id) : 0;
-  const environment = environmentAt(world);
-  const supplyDemand = trade?.supplyDemand;
-  const volume = decayedTradeVolume(world, kind, supplyDemand);
-  const unitPrice = tradeUnitPrice({
-    basePrice,
-    relation,
-    factionRep,
-    phaseId: environment.phaseId,
-    weatherId: environment.weatherId,
-    volume,
-    trade,
-  });
+  const unitPrice = shopUnitPrice(world, playerEid, npcEid, kind, price);
+  if (unitPrice === undefined) return false; // 未定价：拒
   const total = unitPrice * count;
+
+  // 供需账本配置（成交后记账；读取定价已在 shopUnitPrice 内完成）
+  const trade = (world.gameDef.resolvedRules["dialogue"] as DialogueRule | undefined)?.trade;
+  const supplyDemand = trade?.supplyDemand;
 
   // 商贩 Ledger 存在 = 有限库存/资金；无 Ledger = 旧语义（无限货架/钱箱）。
   const merchantFinite = Ledger[npcEid] !== undefined;

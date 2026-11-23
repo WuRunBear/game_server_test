@@ -83,6 +83,53 @@ export function canRemoveConnector(world: GameWorld, connectorEid: EntityId): bo
   return false;
 }
 
+/** 拆除失败原因（与 deconstruct 命令错误码一致）。 */
+export type DeconstructFailureReason = "invalid" | "out_of_range" | "not_owner" | "blocked";
+
+/**
+ * 拆除校验干跑（只读）：目标必须存在且为 Placeable、同图、放置者本人、
+ * placeRange 内、且拆除连接器不会困死高层。
+ *
+ * @returns undefined = 可拆；否则为失败原因
+ */
+export function deconstructBlockReason(
+  world: GameWorld,
+  playerEid: EntityId,
+  targetEid: EntityId,
+): DeconstructFailureReason | undefined {
+  if (!hasComponent(world, targetEid, Placeable)) return "invalid";
+  if (entityMapOf(world, targetEid) !== entityMapOf(world, playerEid)) return "out_of_range";
+
+  // 所有权判定：无主（0）与非放置者不可拆
+  const owner = Placeable.ownerNetworkId[targetEid] ?? 0;
+  if (owner === 0) return "not_owner";
+  if (owner !== NetworkId.value[playerEid]) return "not_owner";
+
+  // 距离范围校验（与 placeEntity 同一规则源）+ 统一距离检查（前置修正 4）：
+  // 同层欧氏距离；异层放置物不可达（不可隔层拆除）
+  const rules = world.gameDef.resolvedRules["place"] as PlaceRule | undefined;
+  const range = rules?.placeRange ?? DEFAULT_PLACE_RANGE;
+  if (
+    !isGameplayReachable(
+      { x: Transform.x[playerEid], y: Transform.y[playerEid], level: entityLevelOf(playerEid) },
+      { x: Transform.x[targetEid], y: Transform.y[targetEid], level: entityLevelOf(targetEid) },
+      range,
+    )
+  ) {
+    return "out_of_range";
+  }
+
+  // stranded 校验（前置修正 8）：连接器拆除前确认上层不会被困死
+  const structureRole = hasComponent(world, targetEid, Structure)
+    ? (Structure.role[targetEid] ?? STRUCTURE_ROLE_NONE)
+    : STRUCTURE_ROLE_NONE;
+  if (structureRole === STRUCTURE_ROLE_CONNECTOR && !canRemoveConnector(world, targetEid)) {
+    return "blocked";
+  }
+
+  return undefined;
+}
+
 /**
  * 拆除原子：拆除玩家放置的建造物（仅放置者可拆）。
  *
@@ -107,35 +154,13 @@ export function deconstructEntity(
     }
   }
   if (targetEid === undefined) return false;
-  if (!hasComponent(world, targetEid, Placeable)) return false;
-  if (entityMapOf(world, targetEid) !== entityMapOf(world, playerEid)) return false;
 
-  // 所有权判定：无主（0）与非放置者不可拆
-  const owner = Placeable.ownerNetworkId[targetEid] ?? 0;
-  if (owner === 0) return false;
-  if (owner !== NetworkId.value[playerEid]) return false;
+  // 全量校验走同一干跑函数（查询面与命令路径不分叉）
+  if (deconstructBlockReason(world, playerEid, targetEid) !== undefined) return false;
 
-  // 距离范围校验（与 placeEntity 同一规则源）+ 统一距离检查（前置修正 4）：
-  // 同层欧氏距离；异层放置物不可达（不可隔层拆除）
-  const rules = world.gameDef.resolvedRules["place"] as PlaceRule | undefined;
-  const range = rules?.placeRange ?? DEFAULT_PLACE_RANGE;
-  if (
-    !isGameplayReachable(
-      { x: Transform.x[playerEid], y: Transform.y[playerEid], level: entityLevelOf(playerEid) },
-      { x: Transform.x[targetEid], y: Transform.y[targetEid], level: entityLevelOf(targetEid) },
-      range,
-    )
-  ) {
-    return false;
-  }
-
-  // stranded 校验（前置修正 8）：连接器拆除前确认上层不会被困死
   const structureRole = hasComponent(world, targetEid, Structure)
     ? (Structure.role[targetEid] ?? STRUCTURE_ROLE_NONE)
     : STRUCTURE_ROLE_NONE;
-  if (structureRole === STRUCTURE_ROLE_CONNECTOR && !canRemoveConnector(world, targetEid)) {
-    return false;
-  }
 
   // 楼板拆除改变按层碰撞静态体 → 递增建造纪元（连接器/墙无静态体影响）
   if (structureRole === STRUCTURE_ROLE_FLOOR) {

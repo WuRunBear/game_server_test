@@ -103,6 +103,27 @@ import type { Repository, WorldRecord } from "framework/repository";
 import type { ServerRule, CraftingRecipe } from "framework/config/schema/RuleSchema";
 import { computeInterest } from "./interest";
 import { createInputGuard, type InputGuard } from "./inputValidation";
+import {
+  queryAchievements,
+  queryAffordances,
+  queryCraft,
+  queryPlace,
+  queryQuests,
+  queryShop,
+  querySkills,
+  type AchievementsResponse,
+  type AffordanceQuery,
+  type AffordancesResponse,
+  type CraftPreview,
+  type CraftQuery,
+  type PlacePreview,
+  type PlaceQuery,
+  type QuestsResponse,
+  type QueryResult,
+  type ShopQuery,
+  type ShopResponse,
+  type SkillsResponse,
+} from "framework/query";
 import { CRAFTING_SYNC_COMPONENT } from "./netSyncDerived";
 import { ACTION_SYNC_COMPONENT } from "framework/simulation/actions/actionState";
 import { openOffer, acceptOffer, cancelOffer, isValidSettleTerms } from "framework/economy/offer";
@@ -1547,6 +1568,50 @@ export class GameSimulation implements SimulationPort {
   /** 地图生成配置清单（配置声明序）——传输层据此描述地图元信息。 */
   getMapConfigs(): MapConfig[] {
     return [...this.mapConfigsByKey.values()];
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* CC-06 只读查询面（HTTP /query/* 数据源）                              */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * 交互候选/动作可用性查询。
+   *
+   * 只读：不写组件、不推进 tick、不发事件；规则由 `framework/query/affordances`
+   * 复用交互/战斗/对话/放置系统导出函数求值。
+   */
+  getQueryAffordances(query: AffordanceQuery): QueryResult<AffordancesResponse> {
+    return queryAffordances(this.world, query);
+  }
+
+  /** 放置干跑（与 place 命令同一 `planPlacement`）。 */
+  getQueryPlace(query: PlaceQuery): QueryResult<PlacePreview> {
+    return queryPlace(this.world, query);
+  }
+
+  /** 合成干跑（与 craft 命令同一 `previewCraft`）。 */
+  getQueryCraft(query: CraftQuery): QueryResult<CraftPreview> {
+    return queryCraft(this.world, query);
+  }
+
+  /** 商店货架/库存/实价（与对话购买同一 `shopUnitPrice`）。 */
+  getQueryShop(query: ShopQuery): QueryResult<ShopResponse> {
+    return queryShop(this.world, query);
+  }
+
+  /** 玩家任务定义 + 进度（catalog 静态 + Quest 组件运行时）。 */
+  getQueryQuests(playerNetworkId: number): QueryResult<QuestsResponse> {
+    return queryQuests(this.world, playerNetworkId);
+  }
+
+  /** 成就定义 + 解锁状态。 */
+  getQueryAchievements(playerNetworkId: number): QueryResult<AchievementsResponse> {
+    return queryAchievements(this.world, playerNetworkId);
+  }
+
+  /** 技能曲线 + 玩家进度。 */
+  getQuerySkills(playerNetworkId: number): QueryResult<SkillsResponse> {
+    return querySkills(this.world, playerNetworkId);
   }
 
   /**

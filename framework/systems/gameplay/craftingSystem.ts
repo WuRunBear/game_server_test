@@ -1,5 +1,5 @@
 import { hasComponent, query } from "bitecs";
-import { CraftingStation, Inventory, LightSource, NetworkId, Transform } from "components";
+import { CraftingStation, Inventory, Kind, LightSource, NetworkId, Transform } from "components";
 import { entityLevelOf } from "framework/components/entityLevel";
 import { sameLevelDistance } from "framework/utils/gameplayDistance";
 import type { GameWorld } from "world";
@@ -246,6 +246,23 @@ export function stationsInRange(world: GameWorld, ownerEid: number, range: numbe
   return found;
 }
 
+/**
+ * 合成者附近 range 内**第一个**指定 stationType 的可用（含燃料门）站点 eid。
+ *
+ * 供命令路径（hasStationNearby）、查询面（站点预览）与 fuelSystem 共用同一
+ * 匹配顺序，避免两处规则分叉。
+ */
+export function matchingStationInRange(
+  world: GameWorld,
+  ownerEid: number,
+  stationType: number,
+  range: number,
+): number | undefined {
+  return stationsInRange(world, ownerEid, range).find(
+    (eid) => CraftingStation.stationType[eid] === stationType && stationUsable(world, eid),
+  );
+}
+
 /** 合成者附近 range 内是否存在指定 stationType 的可用（含燃料门）站点。 */
 function hasStationNearby(
   world: GameWorld,
@@ -253,9 +270,116 @@ function hasStationNearby(
   stationType: number,
   range: number,
 ): boolean {
-  return stationsInRange(world, ownerEid, range).some(
-    (eid) => CraftingStation.stationType[eid] === stationType && stationUsable(world, eid),
-  );
+  return matchingStationInRange(world, ownerEid, stationType, range) !== undefined;
+}
+
+/* ------------------------------------------------------------------ */
+/* 合成预览（只读干跑，与 craftRecipe 同一校验顺序）                      */
+/* ------------------------------------------------------------------ */
+
+/** 缺料条目（kind + 还差多少）。 */
+export interface CraftMissingMaterial {
+  kind: string;
+  count: number;
+}
+
+/** 站点预览：required=0 表示无需站点。 */
+export interface CraftStationPreview {
+  required: number;
+  available: boolean;
+  /** 站点交互半径（crafting 规则 stationRange，缺省 64）。 */
+  range: number;
+  /** 命中的站点 networkId / kind（有匹配站点时输出）。 */
+  networkId?: number;
+  kind?: string;
+}
+
+/** 预览不可用原因（与命令通道错误码对齐：unlock 无命令码时用 locked）。 */
+export type CraftPreviewReason = "invalid" | "locked" | "out_of_range" | "no_item" | "inventory_full";
+
+/** 合成预览响应（`POST /query/craft` 数据体）。 */
+export interface CraftPreview {
+  recipeId: string;
+  unlocked: boolean;
+  station: CraftStationPreview;
+  missing: CraftMissingMaterial[];
+  durationTicks: number;
+  available: boolean;
+  reason?: CraftPreviewReason;
+}
+
+/** 背包内某 kind 的跨槽合计（缺包按 0）。 */
+function inventoryCountOf(
+  inv: NonNullable<(typeof Inventory)[number]> | undefined,
+  kind: string,
+): number {
+  if (!inv) return 0;
+  let total = 0;
+  for (const slot of inv.slots) {
+    if (slot && slot.kind === kind) total += slot.count;
+  }
+  return total;
+}
+
+/**
+ * 合成干跑（只读、无副作用）：按 `craftRecipe` 的**同一顺序**给出
+ * 解锁 / 站点 / 缺料 / 满包结论。
+ *
+ * 配方不存在返回 undefined（HTTP 层据此 404）；其余情况都返回结构化预览。
+ * `unlock.condition` 始终调用 craftingSystem 解析出的服务端裁决函数——不把
+ * 条件串交给客户端自行解释。
+ */
+export function previewCraft(
+  world: GameWorld,
+  ownerEid: number,
+  recipeId: string,
+): CraftPreview | undefined {
+  const rules = resolveCraftingRules(world);
+  const recipe = rules.recipes.get(recipeId);
+  if (!recipe) return undefined;
+
+  const inv = Inventory[ownerEid];
+  const stationType = recipe.stationType ?? 0;
+  const stationRange = rules.stationRange ?? DEFAULT_STATION_RANGE;
+  const matchingStation =
+    stationType === 0
+      ? undefined
+      : matchingStationInRange(world, ownerEid, stationType, stationRange);
+
+  const station: CraftStationPreview = {
+    required: stationType,
+    available: stationType === 0 || matchingStation !== undefined,
+    range: stationRange,
+  };
+  if (matchingStation !== undefined) {
+    station.networkId = NetworkId.value[matchingStation];
+    station.kind = Kind[matchingStation] ?? "";
+  }
+
+  const unlocked = recipe.unlockCondition === undefined || recipe.unlockCondition(world);
+
+  const missing: CraftMissingMaterial[] = [];
+  for (const input of recipe.inputs) {
+    const have = inventoryCountOf(inv, input.kind);
+    if (have < input.count) missing.push({ kind: input.kind, count: input.count - have });
+  }
+
+  let reason: CraftPreviewReason | undefined;
+  if (!inv) reason = "invalid";
+  else if (!unlocked) reason = "locked";
+  else if (!station.available) reason = "out_of_range";
+  else if (missing.length > 0) reason = "no_item";
+  else if (!outputsFit(world, inv, recipe)) reason = "inventory_full";
+
+  return {
+    recipeId,
+    unlocked,
+    station,
+    missing,
+    durationTicks: recipe.durationTicks,
+    available: reason === undefined,
+    ...(reason !== undefined ? { reason } : {}),
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -264,25 +388,15 @@ function hasStationNearby(
 
 /** 合成原子：ownerEid 按 recipeId 合成一次。返回是否成功（失败零副作用）。 */
 export function craftRecipe(world: GameWorld, ownerEid: number, recipeId: string): boolean {
+  // 所有拒绝原因统一由 previewCraft 裁决（同一顺序、同一函数）——查询面与
+  // 命令路径不会分叉。preview 只读，成功路径再执行消耗/产出。
+  const preview = previewCraft(world, ownerEid, recipeId);
+  if (!preview?.available) return false;
+
   const rules = resolveCraftingRules(world);
   const recipe = rules.recipes.get(recipeId);
-  if (!recipe) return false;
-
   const inv = Inventory[ownerEid];
-  if (!inv) return false;
-
-  // 解锁门（科技树/季节条件）：条件不满足即拒（与缺料同语义，零副作用）
-  if (recipe.unlockCondition && !recipe.unlockCondition(world)) return false;
-
-  const stationType = recipe.stationType ?? 0;
-  if (stationType !== 0) {
-    if (!hasStationNearby(world, ownerEid, stationType, rules.stationRange ?? DEFAULT_STATION_RANGE)) {
-      return false;
-    }
-  }
-
-  if (!hasMaterials(inv, recipe)) return false;
-  if (!outputsFit(world, inv, recipe)) return false;
+  if (!recipe || !inv) return false;
 
   consumeMaterials(inv, recipe);
 
@@ -539,20 +653,8 @@ export function craftingProgressOf(world: GameWorld, ownerEid: number): Crafting
 }
 
 /* ------------------------------------------------------------------ */
-/* 背包校验/消耗（原有逻辑不变）                                          */
+/* 背包校验/消耗                                                        */
 /* ------------------------------------------------------------------ */
-
-/** 背包中 recipe 每种 input 的数量是否都 ≥ 需求（跨槽合计）。 */
-function hasMaterials(inv: NonNullable<(typeof Inventory)[number]>, recipe: CraftingRecipe): boolean {
-  for (const input of recipe.inputs) {
-    let total = 0;
-    for (const s of inv.slots) {
-      if (s && s.kind === input.kind) total += s.count;
-    }
-    if (total < input.count) return false;
-  }
-  return true;
-}
 
 /** dry-run：克隆槽位模拟全部 output 入包，任一放不下则拒（防消耗后满包丢产出）。 */
 function outputsFit(world: GameWorld, inv: NonNullable<(typeof Inventory)[number]>, recipe: CraftingRecipe): boolean {

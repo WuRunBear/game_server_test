@@ -52,6 +52,84 @@ function ifNoneMatchHit(header: unknown, etag: string): boolean {
 }
 
 /**
+ * 查询端点统一结果信封（与 framework/query/types 的 QueryResult 对应）。
+ */
+type QueryEnvelope =
+  | { ok: true; data: unknown }
+  | { ok: false; error: string };
+
+/** POST /query/* 的 JSON body 上限（查询参数很小，防滥用）。 */
+const QUERY_BODY_LIMIT_BYTES = 64 * 1024;
+
+/**
+ * 读取 JSON 请求体（Express 5 的 travel 未挂 body parser，这里手工解析，
+ * 不新增依赖）。空体/非 JSON/超限均返回 ok:false（HTTP 400）。
+ */
+async function readJsonBody(
+  req: unknown,
+  limit = QUERY_BODY_LIMIT_BYTES,
+): Promise<{ ok: true; value: unknown } | { ok: false }> {
+  try {
+    const stream = req as AsyncIterable<unknown>;
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of stream) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+      size += buffer.length;
+      if (size > limit) return { ok: false };
+      chunks.push(buffer);
+    }
+    if (size === 0) return { ok: false };
+    return { ok: true, value: JSON.parse(Buffer.concat(chunks).toString("utf8")) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/** 解析必填正整数 query 参数（缺失/非法 → undefined）。 */
+function readPositiveInt(raw: unknown): number | undefined {
+  if (typeof raw !== "string" || raw.trim() === "") return undefined;
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+/** 解析可选有限数 query 参数（缺失 → undefined；非法 → null）。 */
+function readFiniteNumber(raw: unknown): number | undefined | null {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "string" || raw.trim() === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+/** 解析可选整数 query 参数（缺失 → undefined；非法 → null）。 */
+function readInteger(raw: unknown): number | undefined | null {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "string" || raw.trim() === "") return null;
+  const value = Number(raw);
+  return Number.isInteger(value) ? value : null;
+}
+
+/** 普通对象判定（POST body）。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** POST body 必填正整数。 */
+function bodyPositiveInt(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+/** POST body 必填有限数。 */
+function bodyFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/** POST body 必填非负整数（slot 等索引）。 */
+function bodyNonNegativeInt(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
  * Colyseus 服务对象的最小封装。
  *
  * 约定：
@@ -235,6 +313,37 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
     }
   };
 
+  /**
+   * CC-06：调用常驻房间的只读查询入口。
+   *
+   * 房间未就绪（启动 5s 内未创建成功）或远程调用失败 → null（端点 503）。
+   * 查询本身不推进 tick、不写状态；这里只是传输层转发。
+   */
+  const liveQueryOf = async (method: keyof GameRoom, args: unknown[]): Promise<QueryEnvelope | null> => {
+    if (!persistentRoomId) await waitForRoom();
+    if (!persistentRoomId) return null;
+    try {
+      const result = await matchMaker.remoteRoomCall<GameRoom>(persistentRoomId, method, args);
+      return (result as QueryEnvelope | null | undefined) ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  /** 统一发送查询结果（404 仅用于「对象不存在」；业务不可用原因在 data.reason）。 */
+  const sendQueryResult = (res: any, result: QueryEnvelope | null): void => {
+    res.setHeader("Cache-Control", "no-store");
+    if (!result) {
+      res.status(503).json({ error: "room_not_ready" });
+      return;
+    }
+    if (!result.ok) {
+      res.status(404).json({ error: result.error });
+      return;
+    }
+    res.status(200).json(result.data);
+  };
+
   const gameServer = new Server({
     transport,
     // 停机存档接线（F-08）：Colyseus 的 gracefullyShutdown 钩子默认会监听
@@ -295,6 +404,131 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
       // game/ 配置的物品/配方/任务/成就/相位/技能清单——不必硬编码。
       app.get("/content", (_req: any, res: any) => {
         res.status(200).json(buildContentCatalog(gameDef));
+      });
+
+      /* ---------------------------------------------------------------- */
+      /* CC-06 只读查询面（全部经常驻房间的 live ECS 世界求值）              */
+      /* ---------------------------------------------------------------- */
+
+      app.get("/query/affordances", async (req: any, res: any) => {
+        const player = readPositiveInt(req.query?.player);
+        if (player === undefined) {
+          res.status(400).json({ error: "invalid" });
+          return;
+        }
+
+        const x = readFiniteNumber(req.query?.x);
+        const y = readFiniteNumber(req.query?.y);
+        // 坐标必须成对出现；非法数字/只给一边 → 400
+        if (x === null || y === null || (x === undefined) !== (y === undefined)) {
+          res.status(400).json({ error: "invalid" });
+          return;
+        }
+
+        const level = readInteger(req.query?.level);
+        if (level === null) {
+          res.status(400).json({ error: "invalid" });
+          return;
+        }
+
+        const radius = readFiniteNumber(req.query?.radius);
+        if (radius === null || (radius !== undefined && radius < 0)) {
+          res.status(400).json({ error: "invalid" });
+          return;
+        }
+
+        sendQueryResult(
+          res,
+          await liveQueryOf("getQueryAffordances", [
+            {
+              playerNetworkId: player,
+              ...(x !== undefined && y !== undefined ? { x, y } : {}),
+              ...(level !== undefined ? { level } : {}),
+              ...(radius !== undefined ? { radius } : {}),
+            },
+          ]),
+        );
+      });
+
+      app.post("/query/place", async (req: any, res: any) => {
+        const body = await readJsonBody(req);
+        if (!body.ok || !isRecord(body.value)) {
+          res.status(400).json({ error: "invalid" });
+          return;
+        }
+        const player = bodyPositiveInt(body.value.player);
+        const slot = bodyNonNegativeInt(body.value.slot);
+        const x = bodyFiniteNumber(body.value.x);
+        const y = bodyFiniteNumber(body.value.y);
+        if (player === undefined || slot === undefined || x === undefined || y === undefined) {
+          res.status(400).json({ error: "invalid" });
+          return;
+        }
+
+        sendQueryResult(
+          res,
+          await liveQueryOf("getQueryPlace", [{ playerNetworkId: player, slot, x, y }]),
+        );
+      });
+
+      app.post("/query/craft", async (req: any, res: any) => {
+        const body = await readJsonBody(req);
+        if (!body.ok || !isRecord(body.value)) {
+          res.status(400).json({ error: "invalid" });
+          return;
+        }
+        const player = bodyPositiveInt(body.value.player);
+        const recipeId = body.value.recipeId;
+        if (player === undefined || typeof recipeId !== "string" || recipeId.length === 0) {
+          res.status(400).json({ error: "invalid" });
+          return;
+        }
+
+        sendQueryResult(
+          res,
+          await liveQueryOf("getQueryCraft", [{ playerNetworkId: player, recipeId }]),
+        );
+      });
+
+      app.get("/query/shop", async (req: any, res: any) => {
+        const player = readPositiveInt(req.query?.player);
+        const npc = readPositiveInt(req.query?.npc);
+        if (player === undefined || npc === undefined) {
+          res.status(400).json({ error: "invalid" });
+          return;
+        }
+
+        sendQueryResult(
+          res,
+          await liveQueryOf("getQueryShop", [{ playerNetworkId: player, npcNetworkId: npc }]),
+        );
+      });
+
+      app.get("/query/quests", async (req: any, res: any) => {
+        const player = readPositiveInt(req.query?.player);
+        if (player === undefined) {
+          res.status(400).json({ error: "invalid" });
+          return;
+        }
+        sendQueryResult(res, await liveQueryOf("getQueryQuests", [player]));
+      });
+
+      app.get("/query/achievements", async (req: any, res: any) => {
+        const player = readPositiveInt(req.query?.player);
+        if (player === undefined) {
+          res.status(400).json({ error: "invalid" });
+          return;
+        }
+        sendQueryResult(res, await liveQueryOf("getQueryAchievements", [player]));
+      });
+
+      app.get("/query/skills", async (req: any, res: any) => {
+        const player = readPositiveInt(req.query?.player);
+        if (player === undefined) {
+          res.status(400).json({ error: "invalid" });
+          return;
+        }
+        sendQueryResult(res, await liveQueryOf("getQuerySkills", [player]));
       });
 
       app.get("/maps/runtime", async (req: any, res: any) => {

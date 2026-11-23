@@ -28,6 +28,7 @@
  * 放置范围经 rules/place.json 的 placeRange 配置（缺省 64）。
  */
 import { Transform, Inventory, NetworkId, Placeable, GridOccupancy, entityMapOf, footprintOf } from "components";
+import type { ItemStack } from "components";
 import { entityLevelOf } from "framework/components/entityLevel";
 import {
   Structure,
@@ -42,7 +43,8 @@ import { spawnEntity } from "framework/entities/spawn";
 import { bumpBuiltStructuresEpoch } from "framework/map/runtime/builtStructures";
 import { collectBuiltStructures } from "framework/map/runtime/builtStructures";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
-import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
+import type { ArchetypeRegistry, ArchetypeSpec } from "framework/entities/archetypeRegistry";
+import type { ItemKindSpec } from "framework/config/schema/ItemKindSchema";
 import {
   overlapsAnyEntity,
   overlapsMapBlocked,
@@ -65,6 +67,152 @@ interface StructureConfig {
   connectDir?: number;
 }
 
+/** 放置失败原因（与 place 命令错误码同一套语义）。 */
+export type PlaceFailureReason = "no_item" | "invalid" | "out_of_range" | "blocked";
+
+/** 干跑解析出的放置计划（校验通过或失败后可用于预览）。 */
+export interface PlacePlan {
+  stack: ItemStack;
+  item: ItemKindSpec;
+  archetype: ArchetypeSpec;
+  /** 网格对齐后的最终中心坐标（未开启 gridSnap 时 = 请求坐标）。 */
+  targetX: number;
+  targetY: number;
+  footprintW: number;
+  footprintH: number;
+  /** 网格对齐后的格组（未开启 gridSnap / 无图时不提供）。 */
+  cell?: { cellX: number; cellY: number; cellW: number; cellH: number };
+  /** 放置落位层号（楼板角色升一层）。 */
+  placedLevel: number;
+  /** 建造角色（STRUCTURE_ROLE_*）。 */
+  role: number;
+  structure?: StructureConfig;
+  placerMap: string;
+}
+
+/** `planPlacement` 结果：plan 尽量给出（预览用），reason 表示是否可放置。 */
+export interface PlacePlanResult {
+  plan?: PlacePlan;
+  reason?: PlaceFailureReason;
+}
+
+/**
+ * 放置干跑（只读、零副作用）：与 `placeEntity` 共用全部校验顺序。
+ *
+ * 校验项（任一失败即返回 reason，plan 仍尽量带出已解析部分）：
+ * 槽位物品存在/可放置 → 原型存在 → 距离 → 网格对齐/格组占用 → 实体重叠
+ * → 地图阻挡。命令路径与 `POST /query/place` 都经本函数，规则只有一份。
+ */
+export function planPlacement(
+  world: GameWorld,
+  playerEid: EntityId,
+  slot: number,
+  x: number,
+  y: number,
+): PlacePlanResult {
+  const inv = Inventory[playerEid];
+  if (!inv) return { reason: "no_item" };
+  const stack = inv.slots[slot];
+  if (!stack) return { reason: "no_item" };
+
+  const item = world.gameDef.itemsByKind?.get(stack.kind);
+  if (!item?.place) return { reason: "invalid" };
+
+  const archetypeRegistry = world.archetypes as ArchetypeRegistry;
+  if (!archetypeRegistry.has(item.place.archetype)) return { reason: "invalid" };
+  const archetype = archetypeRegistry.get(item.place.archetype);
+  if (!archetype) return { reason: "invalid" };
+
+  const rules = world.gameDef.resolvedRules["place"] as PlaceRule | undefined;
+  const range = placeRangeOf(world);
+
+  const placerMap = entityMapOf(world, playerEid);
+  const placerLevel = entityLevelOf(playerEid);
+
+  // 建造角色与落位层号：楼板升一层（在放置者层之上提供可站面）；
+  // 墙/连接器/普通放置物落放置者层号
+  const structure = archetype.components["Structure"] as StructureConfig | undefined;
+  const role = structure?.role ?? STRUCTURE_ROLE_NONE;
+  const placedLevel =
+    role === STRUCTURE_ROLE_FLOOR ? placerLevel + 1 : placerLevel;
+
+  const { w, h } = footprintOf(archetype);
+  const plan: PlacePlan = {
+    stack,
+    item,
+    archetype,
+    targetX: x,
+    targetY: y,
+    footprintW: w,
+    footprintH: h,
+    placedLevel,
+    role,
+    ...(structure !== undefined ? { structure } : {}),
+    placerMap,
+  };
+
+  // 统一距离检查（前置修正 4）：目标点位取放置者层号（同层平面欧氏距离）
+  if (
+    !isGameplayReachable(
+      { x: Transform.x[playerEid], y: Transform.y[playerEid], level: placerLevel },
+      { x, y, level: placerLevel },
+      range,
+    )
+  ) {
+    return { plan, reason: "out_of_range" };
+  }
+
+  // 网格对齐（gridSnap 开启）：目标坐标取对齐后格组中心，并校验格组占用
+  // （按落位层判定——同格不同层共存，如 L0 家具上方的 L1 楼板）
+  if (rules?.gridSnap) {
+    const snapped = snapToGrid(world, placerMap, x, y, w, h);
+    plan.targetX = snapped.x;
+    plan.targetY = snapped.y;
+    if (snapped.cellW > 0 && snapped.cellH > 0) {
+      plan.cell = snapped;
+      if (
+        overlapsOccupiedGrid(
+          world,
+          placerMap,
+          snapped.cellX,
+          snapped.cellY,
+          snapped.cellW,
+          snapped.cellH,
+          placedLevel,
+        )
+      ) {
+        return { plan, reason: "blocked" };
+      }
+    }
+  }
+
+  // 实体重叠 / 地图阻挡均按落位层判定（异层实体与异层楼板不构成冲突；
+  // 阻挡判定含建造楼板——楼板层视角下其覆盖格可站）
+  const built = collectBuiltStructures(world, placerMap);
+  if (overlapsAnyEntity(world, placerMap, plan.targetX, plan.targetY, w, h, placedLevel)) {
+    return { plan, reason: "blocked" };
+  }
+  if (overlapsMapBlocked(world, placerMap, plan.targetX, plan.targetY, w, h, placedLevel, built)) {
+    return { plan, reason: "blocked" };
+  }
+
+  return { plan };
+}
+
+/** 放置范围（rules/place.json placeRange，缺省 64）。 */
+export function placeRangeOf(world: GameWorld): number {
+  const rules = world.gameDef.resolvedRules["place"] as PlaceRule | undefined;
+  return rules?.placeRange ?? DEFAULT_PLACE_RANGE;
+}
+
+/** 容器取回范围（rules/place.json containerRange，缺省 64）。 */
+export function containerRangeOf(world: GameWorld): number {
+  const rules = world.gameDef.resolvedRules["place"] as
+    | (PlaceRule & { containerRange?: number })
+    | undefined;
+  return rules?.containerRange ?? DEFAULT_PLACE_RANGE;
+}
+
 /**
  * 放置原子：把玩家背包 slot 中的可放置物品放置到 (x, y)。
  *
@@ -81,87 +229,23 @@ export function placeEntity(
   x: number,
   y: number,
 ): boolean {
-  const inv = Inventory[playerEid];
-  if (!inv) return false;
-  const stack = inv.slots[slot];
-  if (!stack) return false;
-
-  const item = world.gameDef.itemsByKind?.get(stack.kind);
-  if (!item?.place) return false;
-
-  const archetypeRegistry = world.archetypes as ArchetypeRegistry;
-  if (!archetypeRegistry.has(item.place.archetype)) return false;
-  const archetype = archetypeRegistry.get(item.place.archetype);
-  if (!archetype) return false;
-
-  const rules = world.gameDef.resolvedRules["place"] as PlaceRule | undefined;
-  const range = rules?.placeRange ?? DEFAULT_PLACE_RANGE;
-
-  const placerMap = entityMapOf(world, playerEid);
-  const placerLevel = entityLevelOf(playerEid);
-
-  // 建造角色与落位层号：楼板升一层（在放置者层之上提供可站面）；
-  // 墙/连接器/普通放置物落放置者层号
-  const structure = archetype.components["Structure"] as StructureConfig | undefined;
-  const role = structure?.role ?? STRUCTURE_ROLE_NONE;
-  const placedLevel =
-    role === STRUCTURE_ROLE_FLOOR ? placerLevel + 1 : placerLevel;
-
-  // 统一距离检查（前置修正 4）：目标点位取放置者层号（同层平面欧氏距离）
-  if (
-    !isGameplayReachable(
-      { x: Transform.x[playerEid], y: Transform.y[playerEid], level: placerLevel },
-      { x, y, level: placerLevel },
-      range,
-    )
-  ) {
-    return false;
-  }
-
-  const { w, h } = footprintOf(archetype);
-
-  // 网格对齐（gridSnap 开启）：目标坐标取对齐后格组中心，并校验格组占用
-  // （按落位层判定——同格不同层共存，如 L0 家具上方的 L1 楼板）
-  let targetX = x;
-  let targetY = y;
-  let cell: { cellX: number; cellY: number; cellW: number; cellH: number } | undefined;
-  if (rules?.gridSnap) {
-    const snapped = snapToGrid(world, placerMap, x, y, w, h);
-    targetX = snapped.x;
-    targetY = snapped.y;
-    if (snapped.cellW > 0 && snapped.cellH > 0) {
-      cell = snapped;
-      if (
-        overlapsOccupiedGrid(
-          world,
-          placerMap,
-          snapped.cellX,
-          snapped.cellY,
-          snapped.cellW,
-          snapped.cellH,
-          placedLevel,
-        )
-      ) {
-        return false;
-      }
-    }
-  }
-
-  // 实体重叠 / 地图阻挡均按落位层判定（异层实体与异层楼板不构成冲突；
-  // 阻挡判定含建造楼板——楼板层视角下其覆盖格可站）
-  const built = collectBuiltStructures(world, placerMap);
-  if (overlapsAnyEntity(world, placerMap, targetX, targetY, w, h, placedLevel)) return false;
-  if (overlapsMapBlocked(world, placerMap, targetX, targetY, w, h, placedLevel, built)) return false;
+  const result = planPlacement(world, playerEid, slot, x, y);
+  if (!result.plan || result.reason !== undefined) return false;
+  const plan = result.plan;
+  const { stack, archetype, cell } = plan;
 
   // 消耗 1 个（kit 未必有 consume 效果，直接扣减堆叠）
   stack.count -= 1;
-  if (stack.count <= 0) inv.slots[slot] = null;
+  if (stack.count <= 0) {
+    const inv = Inventory[playerEid];
+    if (inv) inv.slots[slot] = null;
+  }
 
   const eid = spawnEntity(world, archetype, world.components_registry as ComponentRegistry, {
-    x: targetX,
-    y: targetY,
-    mapId: placerMap,
-    level: placedLevel,
+    x: plan.targetX,
+    y: plan.targetY,
+    mapId: plan.placerMap,
+    level: plan.placedLevel,
   });
 
   // 所有权 + 格组写入（仅目标 archetype 声明了对应组件时写，防序列化污染）
@@ -171,24 +255,24 @@ export function placeEntity(
   if (cell && archetype.components["GridOccupancy"]) {
     GridOccupancy.cellX[eid] = cell.cellX;
     GridOccupancy.cellY[eid] = cell.cellY;
-    GridOccupancy.cellLevel[eid] = placedLevel;
+    GridOccupancy.cellLevel[eid] = plan.placedLevel;
     GridOccupancy.cellW[eid] = cell.cellW;
     GridOccupancy.cellH[eid] = cell.cellH;
   }
 
   // 连接器角色：连接范围按放置层派生（上行 L↔L+1；下行 L-1↔L）——
   // 覆写原型声明的绝对层号（玩家放置时以放置者所在层为准）
-  if (role === STRUCTURE_ROLE_CONNECTOR) {
-    const dir = structure?.connectDir ?? CONNECTOR_DIR_UP;
+  if (plan.role === STRUCTURE_ROLE_CONNECTOR) {
+    const dir = plan.structure?.connectDir ?? CONNECTOR_DIR_UP;
     Structure.role[eid] = STRUCTURE_ROLE_CONNECTOR;
     Structure.connectDir[eid] = dir;
-    Structure.connectLow[eid] = dir === CONNECTOR_DIR_UP ? placerLevel : placerLevel - 1;
-    Structure.connectHigh[eid] = dir === CONNECTOR_DIR_UP ? placerLevel + 1 : placerLevel;
+    Structure.connectLow[eid] = dir === CONNECTOR_DIR_UP ? plan.placedLevel : plan.placedLevel - 1;
+    Structure.connectHigh[eid] = dir === CONNECTOR_DIR_UP ? plan.placedLevel + 1 : plan.placedLevel;
   }
 
   // 楼板改变按层碰撞静态体（地形 OR 建造）→ 递增建造纪元
-  if (role === STRUCTURE_ROLE_FLOOR) {
-    bumpBuiltStructuresEpoch(world, placerMap);
+  if (plan.role === STRUCTURE_ROLE_FLOOR) {
+    bumpBuiltStructuresEpoch(world, plan.placerMap);
   }
 
   return true;

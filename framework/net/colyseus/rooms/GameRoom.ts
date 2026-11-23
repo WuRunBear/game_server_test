@@ -12,6 +12,12 @@ import { StateView } from "@colyseus/schema";
 
 import { createGameSimulation, type SimulationPort } from "simulation";
 import type { PlayerInput, PlayerCommand, TickResult, EntitySnapshot, TickSnapshot, OfferSummary } from "simulation/types";
+import type {
+  AffordanceQuery,
+  CraftQuery,
+  PlaceQuery,
+  ShopQuery,
+} from "framework/query";
 import { loadGameDefinition } from "framework/bootstrap/loadGameDefinition";
 import { createFileRepository } from "framework/persistence/fileRepository";
 import type { ServerRule } from "framework/config/schema/RuleSchema";
@@ -571,6 +577,45 @@ export class GameRoom extends Room<{ state: RoomState }> {
    */
   getMapRuntimeDelta(mapId: string, sinceVersion: string): unknown {
     return this.sim.getMapRuntimeDelta?.(mapId, sinceVersion) ?? null;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* CC-06 只读查询入口（server.ts 经 matchMaker.remoteRoomCall 调用）      */
+  /* ------------------------------------------------------------------ */
+
+  /** 交互候选/动作可用性（`GET /query/affordances`）。 */
+  getQueryAffordances(query: AffordanceQuery): unknown {
+    return this.sim.getQueryAffordances?.(query) ?? null;
+  }
+
+  /** 放置预览（`POST /query/place`）。 */
+  getQueryPlace(query: PlaceQuery): unknown {
+    return this.sim.getQueryPlace?.(query) ?? null;
+  }
+
+  /** 合成预览（`POST /query/craft`）。 */
+  getQueryCraft(query: CraftQuery): unknown {
+    return this.sim.getQueryCraft?.(query) ?? null;
+  }
+
+  /** 商店查询（`GET /query/shop`）。 */
+  getQueryShop(query: ShopQuery): unknown {
+    return this.sim.getQueryShop?.(query) ?? null;
+  }
+
+  /** 任务查询（`GET /query/quests`）。 */
+  getQueryQuests(playerNetworkId: number): unknown {
+    return this.sim.getQueryQuests?.(playerNetworkId) ?? null;
+  }
+
+  /** 成就查询（`GET /query/achievements`）。 */
+  getQueryAchievements(playerNetworkId: number): unknown {
+    return this.sim.getQueryAchievements?.(playerNetworkId) ?? null;
+  }
+
+  /** 技能查询（`GET /query/skills`）。 */
+  getQuerySkills(playerNetworkId: number): unknown {
+    return this.sim.getQuerySkills?.(playerNetworkId) ?? null;
   }
 
   /**

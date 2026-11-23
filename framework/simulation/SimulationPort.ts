@@ -10,6 +10,20 @@ import type { SerializedMapGeometry } from "map/geometry/snapshot";
 import type { MapCollisionView, MapRenderView } from "map/clientView";
 import type { TerrainModificationSet } from "map/runtime/terrainWriteback";
 import type { MapConfig } from "framework/config/schema/MapRegistrySchema";
+import type {
+  AchievementsResponse,
+  AffordanceQuery,
+  AffordancesResponse,
+  CraftPreview,
+  CraftQuery,
+  PlacePreview,
+  PlaceQuery,
+  QuestsResponse,
+  QueryResult,
+  ShopQuery,
+  ShopResponse,
+  SkillsResponse,
+} from "framework/query";
 
 /**
  * 仿真端口——传输层与仿真层之间的双向协议（接口）。
@@ -174,6 +188,31 @@ export interface SimulationPort {
    * @returns 全部配置图（顺序 = 配置声明序）
    */
   getMapConfigs?(): MapConfig[];
+
+  /* ------------------------------------------------------------------ */
+  /* CC-06 只读查询面（可选实现；不推进 tick、不写状态）                    */
+  /* ------------------------------------------------------------------ */
+
+  /** 交互候选 + 动作可用性（`GET /query/affordances`）。 */
+  getQueryAffordances?(query: AffordanceQuery): QueryResult<AffordancesResponse>;
+
+  /** 放置干跑/占用预览（`POST /query/place`）。 */
+  getQueryPlace?(query: PlaceQuery): QueryResult<PlacePreview>;
+
+  /** 合成干跑（`POST /query/craft`）。 */
+  getQueryCraft?(query: CraftQuery): QueryResult<CraftPreview>;
+
+  /** 商店货架/库存/实价（`GET /query/shop`）。 */
+  getQueryShop?(query: ShopQuery): QueryResult<ShopResponse>;
+
+  /** 玩家任务定义 + 进度（`GET /query/quests`）。 */
+  getQueryQuests?(playerNetworkId: number): QueryResult<QuestsResponse>;
+
+  /** 成就定义 + 解锁状态（`GET /query/achievements`）。 */
+  getQueryAchievements?(playerNetworkId: number): QueryResult<AchievementsResponse>;
+
+  /** 技能曲线 + 玩家进度（`GET /query/skills`）。 */
+  getQuerySkills?(playerNetworkId: number): QueryResult<SkillsResponse>;
 
   /**
    * 调试用：写回某图单格地面语义（terrainWriteback 的唯一合法入口）。
