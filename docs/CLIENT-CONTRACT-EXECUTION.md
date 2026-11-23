@@ -890,7 +890,7 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | CC-10 | Player Profile | P1 | 已完成 | R6 | fixer | 2026-11-23 | `6cd5392` / godot `32c4a4f`；profile 入档 + 重连不覆盖 + 装备 kind；12 tests、全量 1411 passed |
 | CC-11 | Audio / VFX | P1 | 已完成 | R5 | fixer | 2026-11-23 | `0076608`；audio/vfx 不透明 id + manifest 段 + 事件挂 sfx/vfx；20 tests；animations 仍空 |
 | CC-12 | Weather / Season View | P1 | 已完成 | R8 | fixer | 2026-11-23 | `b510295` / godot `8ea966d`；dayIndex/seasonId/weatherIntensity + season-change；16 tests、全量 1441 passed；温度未建模 |
-| CC-13 | Map Decoration / World Map | P1 | 待执行 | - | - | 2026-11-23 | 需先定装饰模型 |
+| CC-13 | Map Decoration / World Map | P1 | 进行中 | R9 | fixer | 2026-11-23 | decor 用确定性点集（非实体/不改 MapGeometry）；world map 已有 |
 | CC-14 | Network Feel | P1 | 已完成（第一切片） | R7 | fixer | 2026-11-23 | `c0111f5` / godot `fa04474`；严格 accumulator + serverTimeMs + lastProcessedSeq；14 tests、全量 1425 passed；重连/预测未做 |
 | CC-15 | Session / Auth / Rooms | P2 | 待执行 | - | - | 2026-11-23 | - |
 | CC-16 | Content Distribution / i18n | P2 | 待执行 | - | - | 2026-11-23 | - |
@@ -936,3 +936,4 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | 2026-11-23 | R7 | CC-14 | 已完成（第一切片） | `c0111f5` + godot `fa04474`；严格 accumulator（不足一步不推进）、多步事件合并、ack 仅接受输入推进；schema:gen/check 双绿；14 tests、全量 1425 passed |
 | 2026-11-23 | R8 | CC-12 | 已派发 | `dayIndex`（daynight 24h）+ `seasonId`（environment.seasons 可配）+ `weatherIntensity`（weather intensity 可配）+ `season-change` 事件；温度不建模 |
 | 2026-11-23 | R8 | CC-12 | 已完成 | `b510295` + godot `8ea966d`；dayNightDayIndex 公式、4 季配置、天气 intensity、season-change；16 tests、全量 1441 passed；`/content` 的 seasons/intensity 由 CC-09 收尾补齐 |
+| 2026-11-23 | R9 | CC-13 | 已派发 | `game/presentation/decor.json` + `/maps/decor` 确定性点集 + manifest decor ids；不做 Tiled 装饰层/autotile mask |
