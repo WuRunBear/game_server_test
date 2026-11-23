@@ -880,7 +880,7 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 |---|---|---|---|---|---|---|---|
 | CC-01 | Client Manifest | P0 | 已完成 | R2 | fixer | 2026-11-23 | `7361332`；manifest 24/24 + ETag/304；8 图/40 实体/29 物品；category 与运行时对齐 |
 | CC-02 | 地图/图块语义表 | P0 | 已完成 | R1 | fixer | 2026-11-23 | `2a9eeee`；presentation 18/18 + validate 8 图/13 语义；约定路径 `game/presentation/maps.json` |
-| CC-03 | Action Timeline + ActionState | P0 | 进行中 | R2 | fixer | 2026-11-23 | - |
+| CC-03 | Action Timeline + ActionState | P0 | 已完成（第一切片） | R2 | fixer | 2026-11-23 | `8fdbe37`；attack/gather/throw 阶段化；action 13/13 + 全量 1318 passed；place/deconstruct 等仍瞬时 |
 | CC-04 | Client Event Outbox + Command Result | P0 | 待执行 | - | - | 2026-11-23 | - |
 | CC-05 | Map Client View | P0 | 待执行 | - | - | 2026-11-23 | - |
 | CC-06 | Query / Affordance | P0 | 待执行 | - | - | 2026-11-23 | 与 CC-05 共享 `server.ts`，需分轮 |
@@ -922,3 +922,4 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | 2026-11-23 | R2 | CC-01 / CC-03 / CC-09 | 已派发 | 三个并行 lane：Manifest（server.ts + presentation 扩展）、Action Timeline（sim/systems/game.json）、UI Data（catalog.ts） |
 | 2026-11-23 | R2 | CC-09 | 已完成 | `4536320`；`/content` 只增字段：items 效果/投掷/暴击/抗性、recipes duration/unlock/station、quests goal/rewards、achievements 结构化、skills 曲线、factions/stationTypes/damageTypes；49 tests 绿 |
 | 2026-11-23 | R2 | CC-01 | 已完成 | `7361332`；`/client/manifest` + 强 ETag/304；presentation 扩展 entities；复用 catalog 的 factions/stationTypes/damageTypes；24 tests + `tools validate` 绿 |
+| 2026-11-23 | R2 | CC-03 | 已完成（第一切片） | `8fdbe37`；ActionState/ActionSchema/actionSystem + `game/actions/actions.json`；attack/gather/throw 在 active/swing/release 结算；Action.* 同步；action 13/13、全量 1318 passed |

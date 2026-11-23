@@ -93,7 +93,11 @@ const room = await client.joinOrCreate("game", {
   "moveY": 20,       // 垂直速度分量，像素/秒（必填；幅度示例，上限见下表）
   "interact": false, // 可选：本帧按下"采集"键
   "attack": false,   // 可选：本帧按下"攻击"键
-  "talk": false      // 可选：本帧按下"对话"键
+  "talk": false,     // 可选：本帧按下"对话"键
+  // 可选：动作目标/瞄准。服务端仍做范围/同图/同层校验，失败回退最近目标。
+  "target": 123,     // 目标实体 networkId（attack/gather 优先使用）
+  "aimX": 480,       // 瞄准点世界坐标 x（throw / 朝向回退）
+  "aimY": 320        // 瞄准点世界坐标 y
 }
 ```
 
@@ -104,6 +108,7 @@ const room = await client.joinOrCreate("game", {
 | `seq` | 严格递增正整数；被拒输入不推进 seq、无需重发（下一条更高 seq 输入照常放行） |
 | 速度上限 | `\|(moveX, moveY)\|` 受 server 规则速度上限限定（像素/秒），超出整条输入被拒。配置源 `game/rules/server.json` 以格/秒表达（`maxMoveSpeedTiles`，加载期按 `game.json` `world.tile` 换算为像素/秒；当前 2 格/s = 32 px/s） |
 | 意图信号 | `interact` / `attack` / `talk` 为边沿触发（按下那帧置 true 即可，服务端消费后清除） |
+| 目标/瞄准 | `target` 是 **networkId**（不是 eid）；`aimX/aimY` 是世界坐标（像素）。三者可选，缺省时服务端按最近目标/移动朝向回退；目标在动作前摇内死亡或离开则本次动作落空（不转移目标） |
 | 权威模型 | 服务端权威：客户端**不要**自行预测位移，以状态同步为准 |
 
 ### 2.2 离散命令 — 消息名 `"command"`
@@ -330,6 +335,7 @@ export class RoomState extends Schema {
 | Achievements | `Achievements.{achievementId}` | 已解锁成就（数值 **1 = 已解锁**；id 由 achievements 规则配置约定） |
 | Crafting | `Crafting.{i}.recipeId`（stringValues）、`Crafting.{i}.remainingTicks/progress/suspended`（values） | **进行中的制作**：`recipeId`=配方 id、`remainingTicks`=距完成剩余 tick（0=到点）、`progress`=时间进度 0–1（挂起时恒 1）、`suspended`=1 表示到点但产出条件未满足（背包满/站点失效）；任务完成/取消后整条消失 |
 | Cooldown | `Cooldown.remainingMs` | 攻击/投掷冷却剩余毫秒（**所有带 Cooldown 的实体**，含玩家与敌怪；服务端权威、每帧递减）。供客户端显示冷却提示——但**冷却是否结束仍以服务端裁决为准**（命令失败无回执） |
+| Action | `Action.actionId`（stringValues）；`Action.startedTick/durationTicks/phaseIndex/target/dirX/dirY`（values）；`Action.phase`（stringValues） | 当前动作时间轴（**仅玩家**）：`actionId`=配置动作 id，`startedTick`/`durationTicks`=动画进度基准（`(RoomState.tick - startedTick) / durationTicks`），`phase/phaseIndex`=当前阶段，`target`=目标 **networkId**（0=无目标），`dirX/dirY`=朝向单位向量。无动作时整组 key 消失；阶段/事件帧详见 §3.7 |
 | Ledger | `Ledger.{kind}` | 账本/商店库存：按物品 kind 展平的计数（数值） |
 | StateMachine | `StateMachine.state`（stringValues）、`StateMachine.stateTick`（values） | 通用状态机当前状态 id（配置字符串，如 `alive`/`burning`/`burnt`）与进入该状态的**绝对 tick**；动画进度 = `(RoomState.tick - stateTick) / 配置时长` |
 | Modifiers | `Modifiers.{stat}.mul/add/count/bool/expiresTick`、`Modifiers.{stat}.source.{source}` | 生效中的属性修饰符投影（与 `computeStat` 同过期语义）：乘法/加法合计、条目数、bool 状态、最早失效绝对 tick、按来源计数。用于中毒/减速/狂暴等状态表现；整组失效时键消失 |
@@ -355,6 +361,19 @@ export class RoomState extends Schema {
 
 > 容器（可搜刮实体，如尸体）的判定：`Kind.value === "corpse"`，或该实体带 `Inventory.0.kind`（且不是玩家实体）。容器的物品清单经 `Inventory.{i}.kind/count/durability` 同步（§3.5），客户端据此渲染搜刮面板并用 `transfer{target,slot}` 取回（§2.2）。
 
+### 3.7 动作时间轴（Action.*）
+
+`attack` / `gather`（采集）/ `throw` 不再当帧瞬时结算，而是**服务端权威的动作过程**（place/deconstruct/consume/dialogue 仍为瞬时）。
+
+- 动作开始时同步 `Action.startedTick/durationTicks/phase/phaseIndex/target/dirX/dirY`；
+- 阶段区间为 `[上一阶段 endTick, 本阶段 endTick)`，事件（伤害/采集/生成投射物）在**进入**事件阶段时由服务端结算一次；
+- 客户端动画进度用 `(RoomState.tick - Action.startedTick) / Action.durationTicks`，阶段边界从 `Action.phaseIndex/phase` 变化或 `durationTicks` 与配置的 `phases[].endTick` 推导（动作配置由部署方提供，客户端不应硬编码时长）；
+- 动作期间移动可能被锁（服务端 `Velocity=0`）；动作结束/死亡/换图/打断时整组 `Action.*` key 消失；
+- `Action.target` 是 networkId；目标在前摇内死亡/离开则本次动作落空（recovery 仍走完），客户端不要自行把伤害/采集结果提前到本地；
+- 冷却仍以 `Cooldown.remainingMs` 为准（动作开始时起算，事件结算后按原子规则刷新）。
+
+当前部署配置示例（仅说明形状，客户端不得硬编码）：attack 12 tick（windup 4 / active 7 / recovery 12）、gather 10 tick（windup 3 / swing 6 / recovery 10）、throw 8 tick（windup 4 / release 5 / recovery 8）。
+
 ---
 
 ## 4. 玩法机制（协议映射）
@@ -364,8 +383,8 @@ export class RoomState extends Schema {
 | 玩法 | 操作 | 服务端反应 | 当前配置来源 |
 |------|------|-----------|-------------|
 | 移动 | `input` moveX/moveY | 速度积分 + 碰撞分离 → `Transform.x/y` 同步 | 速度上限 = server 规则（`game/rules/server.json` 的 `maxMoveSpeedTiles`，格/秒，加载期换算为像素/秒） |
-| 采集 | `input` interact | 半径内最近资源实体 → `ResourceNode.remaining` 减少 → 物品入包/落地 | 交互半径 = `game.json` `systems[].config`（interaction 的 `range`） |
-| 近战攻击 | `input` attack | 半径内最近敌对实体 → 目标 `Health.current` 减少；击杀按 LootTable 落地掉落物 | 攻击射程取实体 `Attack` 组件值，缺省回退 combat 规则（**组件值优先**）；冷却/无友伤/伤害公式见 `game/rules/combat.json` |
+| 采集 | `input` interact（可带 `target` networkId） | 启动 gather 动作 → swing 阶段对半径内资源实体结算 → `ResourceNode.remaining` 减少 → 物品入包/落地 | 交互半径 = `game.json` `systems[].config`（interaction 的 `range`）；动作时长/阶段见 §3.7 |
+| 近战攻击 | `input` attack（可带 `target` networkId） | 启动 attack 动作 → active 阶段结算目标 `Health.current`；击杀按 LootTable 落地掉落物 | 攻击射程取实体 `Attack` 组件值，缺省回退 combat 规则（**组件值优先**）；冷却/无友伤/伤害公式见 `game/rules/combat.json`；动作时长/阶段见 §3.7 |
 | 拾取 | 无操作（走近自动） | 地面物品消失 → `Inventory` 计数增加 | 自动拾取 + 防瞬回保护（落地后短暂不可拾，框架行为） |
 | 对话 | `input` talk → `command dialogue` | 见 §4.6 | 对话半径 = dialogue 规则 `talkRange`（未配置用框架缺省）；talk 路由半径同 interaction 配置 |
 | 合成 | `command craft` | 消耗材料 → 产出入包（缺料/满包/站点不符零副作用） | 配方集由 `game/rules/crafting.json` 定义（§4.4）；站点判定半径 = crafting 规则 `stationRange` |
