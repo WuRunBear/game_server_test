@@ -593,6 +593,13 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 | `GET /maps/render?mapId=<key>` | **有效地面**：`{key,baseVersion,renderVersion,phaseId,phaseProgress,tiles}`；`tiles` 是当前相位/天气派生后的逐格语义（不写回底板），`renderVersion` 是缓存键 |
 | `GET /maps/collision?mapId=<key>&level=<n>` | **正式静态碰撞/占用**：`{key,version,level,grid,walkable,occupants}`；`walkable` = 该层地形+楼板通行位，`occupants` 用 networkId（不是 eid）。用于放置预览/客户端碰撞镜像/遮挡 |
 | `GET /world/map-graph` | 世界图：`{maps:[{id,displayName,connections:[{to,kind,x?,y?}]}]}`（数据来自 presentation，缺省回退 registry） |
+| `GET /query/affordances?player=<networkId>&x&y&level&radius` | 交互候选：附近实体的可执行动作与不可用原因（gather/attack/talk/open/loot/place/deconstruct） |
+| `POST /query/place` `{player,slot,x,y}` | 放置预览：`valid/reason/footprint/cells/occupiedBy/ownerNetworkId`（与 place 命令同一校验） |
+| `POST /query/craft` `{player,recipeId}` | 合成预览：`unlocked/station/missing/durationTicks/available/reason`（与 craft 命令同一校验） |
+| `GET /query/shop?npc=<networkId>&player=<networkId>` | 商店：货币、库存、**实价**（关系/势力/相位/供需后的价格） |
+| `GET /query/quests?player=<networkId>` | 任务静态定义 + 运行时 `state/count` |
+| `GET /query/achievements?player=<networkId>` | 成就定义/条件/奖励 + `unlocked` |
+| `GET /query/skills?player=<networkId>` | 技能曲线/加成 + 运行时 `xp/level` |
 | `GET /debug/colliders` | 房间碰撞体调试快照（房间未就绪时 404；调试用，不是正式碰撞源） |
 
 > **地图几何来源（live 优先）**：`/maps/runtime` 与 `/maps/meta` 优先返回**活动房间的实时几何**（含运行期写回的结果，如野火焦土——`tiles`/`walkable`/`level` 已变，`version` 指纹随之变化）；房间未就绪（服务刚启动、或房间创建失败）时回退为「按配置重建」的视图。两种视图在**没有任何写回**时内容一致，因此客户端按 `{key, version}` 缓存仍然安全；若运行期发生地形改写，`version` 会变，客户端据此重新拉取。
@@ -602,6 +609,8 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 > **地图版本订阅（CC-05）**：`PlayerState.mapVersion` 每 tick 同步玩家当前地图的 `version`。客户端检测到它变化时，用上次的 `version` 作为 `sinceVersion` 请求 `/maps/runtime` 增量（`modifications` 为稀疏终态，直接覆盖对应格即可，不要按事件流重放）。增量只覆盖 `tiles/walkable/level`；`regions/regionOfTile` 与 grid 变化只能靠全量（当前运行期写回不改区域/grid）。未知/过旧 `sinceVersion` 会自动回退全量，客户端按响应里有没有 `modifications` 分支处理即可。
 
 > **有效地面 vs 底板**：`/maps/runtime` 的 `tiles` 是**底板**（写回后的持久值）；`/maps/render` 的 `tiles` 是**当前 tick 的有效地面**（相位/天气覆盖派生，如季节雪地/湿润地面，不写回）。渲染季节/天气时应叠加 `/maps/render`，不要把派生结果写回本地底板缓存。`Space.exposure`（`indoor/outdoor`）是玩家所在格的服务端派生值（§3.5），用于室内外音效/天气表现。
+
+> **查询面（CC-06）**：`/query/*` 全部**只读**（不推进 tick、不改背包/任务、不发事件），实体参数一律 **networkId**。玩家不存在 → 404，房间未就绪 → 503，参数非法 → 400。`reason` 与命令错误码同义（`out_of_range`/`no_item`/`blocked`/`inventory_full`/`locked` 等）；`available` 与真实命令成败一致，`reason` 仅用于提示（例如 `craft` 未解锁时命令回执可能是 `unknown`，以查询的 `available:false` 为准）。商店 `count=-1,unlimited=true` 表示无账本库存的无限货架，`price=null` 表示未定价。查询面当前无鉴权，部署方应限制访问；客户端不要用它替代 `command-result` 的最终裁决。
 
 
 `/maps/runtime` 返回示例（**以当前 game/ 配置「荒岛求生」为例**——地图清单/尺寸/区域名均为配置产物，随配置漂移）：
