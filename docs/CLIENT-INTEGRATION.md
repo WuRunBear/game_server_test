@@ -107,7 +107,7 @@ const room = await client.joinOrCreate("game", {
 
 | 项 | 值 |
 |----|----|
-| `seq` | 严格递增正整数；被拒输入不推进 seq、无需重发（下一条更高 seq 输入照常放行） |
+| `seq` | 严格递增正整数；被拒输入不推进 seq、无需重发（下一条更高 seq 输入照常放行）。服务端在 `PlayerState.lastProcessedSeq` 回传**已接受**的最大 seq（CC-14），客户端据此丢弃过期预测/确认输入是否生效 |
 | 速度上限 | `\|(moveX, moveY)\|` 受 server 规则速度上限限定（像素/秒），超出整条输入被拒。配置源 `game/rules/server.json` 以格/秒表达（`maxMoveSpeedTiles`，加载期按 `game.json` `world.tile` 换算为像素/秒；当前 2 格/s = 32 px/s） |
 | 意图信号 | `interact` / `attack` / `talk` 为边沿触发（按下那帧置 true 即可，服务端消费后清除） |
 | 目标/瞄准 | `target` 是 **networkId**（不是 eid）；`aimX/aimY` 是世界坐标（像素）。三者可选，缺省时服务端按最近目标/移动朝向回退；目标在动作前摇内死亡或离开则本次动作落空（不转移目标） |
@@ -249,12 +249,15 @@ Colyseus Schema 增量同步（补丁 + 全量握手）。**客户端必须声�
 | `phaseId` | string | 当前**相位 id**（配置字符串，如 `mild`/`dry`/`wet`/`storm`；无环境规则时为空串） |
 | `phaseProgress` | number | 当前相位内进度 **0..1**（float64；无环境规则时为 0） |
 | `offers` | map\<string, string\> | 进行中的**报价摘要表**：key = 报价会话 id（字符串），value = 摘要 JSON 字符串（见下「报价摘要」） |
+| `serverTimeMs` | float64 | **逻辑服务器时间**（毫秒）= `tick × fixedDtMs`（当前 20tps → 50ms/帧）。用于客户端插值/对账，不是墙钟；不要与 `Date.now()` 混用 |
 
-> **字段顺序即线协议**：上表顺序 = 服务端 Schema 声明顺序 = 客户端必须声明的顺序。新增字段一律**追加在末尾**（`players` 之后依次是 `weatherId`/`phaseId`/`phaseProgress`/`offers`），既有四项（`tick`/`hour`/`phase`/`players`）的字段索引不变。
+> **字段顺序即线协议**：上表顺序 = 服务端 Schema 声明顺序 = 客户端必须声明的顺序。新增字段一律**追加在末尾**（`players` 之后依次是 `weatherId`/`phaseId`/`phaseProgress`/`offers`/`serverTimeMs`），既有四项（`tick`/`hour`/`phase`/`players`）的字段索引不变。
 
 > **昼夜语义**：`hour` 按 daynight 规则（`game/rules/daynight.json`）推进——每 `cycleLengthSec` 真实秒走完 24 世界小时（当前配置 600s ⇒ 1 世界小时 = 25 真实秒 ≈ 500 tick@20tps）；`phase` 在 `nightStartHour`/`nightEndHour` 边界切换（当前 19/5，支持跨午夜）。**天数不在协议中**：客户端如需显示「第 X 天」，自行累计 `hour` 回绕（23.x→0.x）次数，属本地近似。
 
 > **环境（相位/天气）语义**：`phaseId`/`weatherId`/`phaseProgress` 三者同源于**当前 tick 的纯函数派生**（相位程序按绝对槽对齐；天气按「本槽所属相位」的候选+权重确定性抽样），配置源是 `game/rules/environment.json`。id 是**配置字符串**，服务端只透传、不解释其含义（含义随配置漂移，客户端不要硬编码具体取值集）。三者每帧随快照刷新。
+
+> **固定时间步（CC-14）**：服务端用 accumulator 以 `fixedDtMs` 固定步长推进仿真（20tps → 50ms/帧），不会被单次回调的实际 delta 拉长/缩短；积压超过上限时丢弃余量（逻辑时间变慢），不会“补帧加速”。客户端插值用 `serverTimeMs` 或 `tick × 50ms`，不要用本地帧时间累加。
 
 > **房间级状态**：`RoomState` 不再携带 `mapId` / `entities`。玩家的当前地图是 **per-player** 的，经 `PlayerState.mapId` 同步（见 §3.2），**不是**房间级字段；实体同步恒走 per-client 的 `PlayerState.visibleEntities`（见 §3.2），`RoomState` 内没有实体表。
 
@@ -293,6 +296,7 @@ Colyseus Schema 增量同步（补丁 + 全量握手）。**客户端必须声�
 | `displayName` | string | 玩家展示名（join options 自报，≤32 字符；空串=未设置，客户端回退「玩家」/networkId）。服务端不校验真实性 |
 | `characterId` | string | 角色/外观预设 id（不透明字符串，≤64；空串=未设置） |
 | `appearance` | string | 不透明外观 JSON 字符串（≤2048；客户端自行解析，非法 JSON 自行回退默认外观） |
+| `lastProcessedSeq` | uint32 | 该玩家**已接受**的最大 input seq（通过去重+速度校验才推进）；超速/乱序/重复不推进。客户端用它丢弃过期预测、判断输入是否生效 |
 
 **兴趣裁剪（重要）**：实体同步**恒**走每个玩家自己的 `visibleEntities`——自 per-player 协议起，`RoomState` 的 `entities` 已移除，**不存在**房间级实体表或兼容通道：
 - 自己（`entityId` 对应实体）恒在表中；其他实体进入半径（由 server 规则配置，见 `game/rules/server.json` 的 `viewRadiusTiles`——格，加载期换算为像素；未配置时同图全量）才出现，离开即被删除。
@@ -341,6 +345,7 @@ export class PlayerState extends Schema {
   @type("string") displayName: string = "";  // 末尾追加（CC-10）
   @type("string") characterId: string = "";
   @type("string") appearance: string = "";   // 不透明 JSON 字符串
+  @type("uint32") lastProcessedSeq: number = 0; // 末尾追加（CC-14）：已接受输入 seq
 }
 
 export class RoomState extends Schema {
@@ -353,6 +358,7 @@ export class RoomState extends Schema {
   @type("string") phaseId: string = "";          // 当前相位 id（配置字符串）
   @type("number") phaseProgress: number = 0;     // 当前相位进度 0..1
   @type({ map: "string" }) offers = new MapSchema<string>(); // 报价摘要：offerId → JSON 字符串
+  @type("float64") serverTimeMs: number = 0;     // 末尾追加（CC-14）：逻辑时间 = tick × fixedDtMs
 }
 ```
 
@@ -360,7 +366,7 @@ export class RoomState extends Schema {
 >
 > **兼容性说明（`EntityState.level`）**：`level` 是**末尾追加**字段，既有 `id` / `values` / `stringValues` 三项的**字段索引不变**——旧客户端在结构上仍能解码新流（只是读不到层号）；新客户端连旧服务端则缺 `level`（按 0 处理即可）。
 >
-> **兼容性说明（`RoomState` 末尾四字段）**：`weatherId`/`phaseId`/`phaseProgress`/`offers` 均为**末尾追加**，既有四项（`tick`/`hour`/`phase`/`players`）索引不变；旧客户端在结构上仍能解码新流（只是读不到这四项）。
+> **兼容性说明（`RoomState` 末尾字段）**：`weatherId`/`phaseId`/`phaseProgress`/`offers`/`serverTimeMs` 均为**末尾追加**，既有四项（`tick`/`hour`/`phase`/`players`）索引不变；旧客户端在结构上仍能解码新流（只是读不到这些字段）。`PlayerState` 的 `mapVersion`/`displayName`/`characterId`/`appearance`/`lastProcessedSeq` 同样只在末尾追加。
 
 
 （非 TS/JS 客户端：以本表字段名/类型/顺序为准，用各自语言的 @colyseus/schema 绑定声明。）
