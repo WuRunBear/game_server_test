@@ -891,7 +891,7 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | CC-11 | Audio / VFX | P1 | 已完成 | R5 | fixer | 2026-11-23 | `0076608`；audio/vfx 不透明 id + manifest 段 + 事件挂 sfx/vfx；20 tests；animations 仍空 |
 | CC-12 | Weather / Season View | P1 | 待执行 | - | - | 2026-11-23 | - |
 | CC-13 | Map Decoration / World Map | P1 | 待执行 | - | - | 2026-11-23 | 需先定装饰模型 |
-| CC-14 | Network Feel | P1 | 待执行 | - | - | 2026-11-23 | - |
+| CC-14 | Network Feel | P1 | 进行中 | R7 | fixer | 2026-11-23 | 固定步长 + serverTimeMs + lastProcessedSeq；重连仍走 networkId |
 | CC-15 | Session / Auth / Rooms | P2 | 待执行 | - | - | 2026-11-23 | - |
 | CC-16 | Content Distribution / i18n | P2 | 待执行 | - | - | 2026-11-23 | - |
 | CC-17 | Telemetry / Replay / Debug | P2 | 待执行 | - | - | 2026-11-23 | - |
@@ -932,3 +932,4 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | 2026-11-23 | R5 | CC-06 | 已完成 | `b9cfe18`；`/query/{affordances,place,craft,shop,quests,achievements,skills}`；复用 place/craft/定价干跑，无副作用；23 tests、全量 1399 passed |
 | 2026-11-23 | R6 | CC-10 | 已派发 | PlayerState 末尾追加 displayName/characterId/appearance；join options 写入 AoS Profile 并入档；他人装备 kind 派生 |
 | 2026-11-23 | R6 | CC-10 | 已完成 | `6cd5392` + godot `32c4a4f`；`PlayerProfile` AoS 入档/重连非空优先；`Equipment.*Kind` 派生；schema:gen/check 双绿；12 tests、全量 1411 passed |
+| 2026-11-23 | R7 | CC-14 | 已派发 | GameRoom 固定步长 accumulator + `RoomState.serverTimeMs` + `PlayerState.lastProcessedSeq`；不改重连/鉴权（CC-15） |
