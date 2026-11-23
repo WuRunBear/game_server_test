@@ -879,7 +879,7 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | CC | 模块 | 优先级 | 状态 | 轮次 | 执行者 | 更新日期 | 证据 / 备注 |
 |---|---|---|---|---|---|---|---|
 | CC-01 | Client Manifest | P0 | 待执行 | - | - | 2026-11-23 | 依赖 CC-02/CC-08 |
-| CC-02 | 地图/图块语义表 | P0 | 进行中 | R1 | fixer | 2026-11-23 | - |
+| CC-02 | 地图/图块语义表 | P0 | 已完成 | R1 | fixer | 2026-11-23 | `2a9eeee`；presentation 18/18 + validate 8 图/13 语义；约定路径 `game/presentation/maps.json` |
 | CC-03 | Action Timeline + ActionState | P0 | 待执行 | - | - | 2026-11-23 | - |
 | CC-04 | Client Event Outbox + Command Result | P0 | 待执行 | - | - | 2026-11-23 | - |
 | CC-05 | Map Client View | P0 | 待执行 | - | - | 2026-11-23 | - |
@@ -918,3 +918,4 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | 2026-11-23 | R1 | CC-02 / CC-07 / CC-08 | 已派发 | 三个并行 lane，文件所有权见派发说明 |
 | 2026-11-23 | R1 | CC-08 | 已完成 | server `5bdfa9d`（protocol 握手/GDScript codegen/文档基线），godot `903f659`（generated schema/端口/插件版本）；13 tests + `schema:check` 绿 |
 | 2026-11-23 | R1 | CC-07 | 已完成 | `7f10d8d`（netSync + 适配器 + 文档 §3.5/K13）；补 `spawn` 的 `Transform.scale=1`；netsync 13/13、全量仅基线 2 fails |
+| 2026-11-23 | R1 | CC-02 | 已完成 | `2a9eeee`（PresentationSchema + 查询/校验 + 8 图配置）；presentation 18/18、`tools validate` 通过；接口见报告，供 CC-01 消费 |
