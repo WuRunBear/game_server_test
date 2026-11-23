@@ -887,7 +887,7 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | CC-07 | State Sync Completion | P0 | 已完成 | R1 | fixer | 2026-11-23 | `7f10d8d`；netsync-completeness 13/13 + 全量 1266 passed（仅基线 2 fails）；另修 `spawn` 的 `Transform.scale` 初始化 |
 | CC-08 | Protocol / Schema 工具链 | P0 | 已完成 | R1 | fixer | 2026-11-23 | server `5bdfa9d` / godot `903f659`；protocol-version + schema-gdscript + schema:check 全绿 |
 | CC-09 | UI Data Projection | P1 | 已完成 | R2 | fixer | 2026-11-23 | `4536320`；content-projection 15/15 + 旧 `/content` 3/3；新增 factions/stationTypes/damageTypes 与任务/成就/技能字段 |
-| CC-10 | Player Profile | P1 | 进行中 | R6 | fixer | 2026-11-23 | 独占 PlayerState/GameRoom/GameSimulation；profile 入档 |
+| CC-10 | Player Profile | P1 | 已完成 | R6 | fixer | 2026-11-23 | `6cd5392` / godot `32c4a4f`；profile 入档 + 重连不覆盖 + 装备 kind；12 tests、全量 1411 passed |
 | CC-11 | Audio / VFX | P1 | 已完成 | R5 | fixer | 2026-11-23 | `0076608`；audio/vfx 不透明 id + manifest 段 + 事件挂 sfx/vfx；20 tests；animations 仍空 |
 | CC-12 | Weather / Season View | P1 | 待执行 | - | - | 2026-11-23 | - |
 | CC-13 | Map Decoration / World Map | P1 | 待执行 | - | - | 2026-11-23 | 需先定装饰模型 |
@@ -931,3 +931,4 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | 2026-11-23 | R5 | CC-11 | 已完成 | `0076608`；`game/presentation/{audio,vfx}.json` 不透明 id；manifest `audio/vfx` 段 + 事件 `sfx/vfx`；20 tests、全量 1375 passed |
 | 2026-11-23 | R5 | CC-06 | 已完成 | `b9cfe18`；`/query/{affordances,place,craft,shop,quests,achievements,skills}`；复用 place/craft/定价干跑，无副作用；23 tests、全量 1399 passed |
 | 2026-11-23 | R6 | CC-10 | 已派发 | PlayerState 末尾追加 displayName/characterId/appearance；join options 写入 AoS Profile 并入档；他人装备 kind 派生 |
+| 2026-11-23 | R6 | CC-10 | 已完成 | `6cd5392` + godot `32c4a4f`；`PlayerProfile` AoS 入档/重连非空优先；`Equipment.*Kind` 派生；schema:gen/check 双绿；12 tests、全量 1411 passed |

@@ -299,3 +299,4 @@
 | v2.8 | 2026-11-23 | CC-05 地图客户端视图：`PlayerState.mapVersion`（末尾追加）驱动 `/maps/runtime?sinceVersion` 增量（`modifications` 稀疏终态，未知版本回退全量）；新增 `/maps/render`（有效地面/季节天气派生，`renderVersion` 缓存键）、`/maps/collision`（正式静态碰撞，networkId）、`/world/map-graph`；`Space.exposure` 同步室内/露天。客户端不要再把 `visibleEntities` 当完整地图/碰撞源 |
 | v2.9 | 2026-11-23 | CC-11 音频/VFX：manifest 新增 `audio {music,ambient,sfx,events}` 与 `vfx {effects,events}`（全部不透明 id，服务端不持有资源）；部分客户端事件 `data` 带可选 `sfx[]/vfx[]`；`animations` 仍为空，动画剪辑留后续 |
 | v3.0 | 2026-11-23 | CC-06 查询面：新增 `GET /query/affordances`、`POST /query/place`、`POST /query/craft`、`GET /query/shop|quests|achievements|skills`。全部只读、不推进 tick、实体参数用 networkId；`reason` 与命令错误码同义，`available` 与真实命令成败一致；查询无鉴权，部署方需限制访问 |
+| v3.1 | 2026-11-23 | CC-10 玩家身份：join options 可带 `displayName/characterId/appearance`（规范化后入档，重连不覆盖非空值）；`PlayerState` 末尾追加三字段；`Equipment.weaponKind/toolKind/armorKind` 派生同步（只曝三个装备槽，不露背包）。服务端不校验资料真实性（账号体系属 CC-15） |

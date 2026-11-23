@@ -45,6 +45,8 @@ const room = await client.joinOrCreate<RoomState>("game");
   ```
 
   服务端**严格按该 networkId 匹配**「未到期的保留实体」：命中 → **复用同一实体**（同一 NetworkId、背包/进度不丢，返回的 `PlayerState.entityId` 与断线前一致）；未命中（未提供 / 已到期 / 不存在）→ 按出生规则**新建**实体。**绝不**按 FIFO 把他人或已过期的旧实体绑给新客户端。客户端据此判定「已恢复角色」还是「新角色」。
+
+- **展示资料（可选）**：join options 还可带 `displayName`（≤32）、`characterId`（≤64）、`appearance`（不透明 JSON 字符串，≤2048）。服务端只做长度/类型规范化并随实体入档，**不校验真实性**；断线保留重连时已有非空字段不会被覆盖（防冒领改名）。见 `PlayerState.displayName/characterId/appearance`（§3.2）。
 - 保留期内的实体对**所有**在线玩家**不可见**（不进状态快照），因此保留中的角色不会出现在别人的视野里；到期由服务端清扫销毁。
 - 保留标记**随存档入档**：服务端重启后仍在保留期内的玩家实体依然保留（读档时恢复标记与到期 tick），重连窗口跨重启有效。
 
@@ -288,6 +290,9 @@ Colyseus Schema 增量同步（补丁 + 全量握手）。**客户端必须声�
 | `mapId` | string | 该玩家**当前所在地图 id**（per-player）：仅当**该玩家自己**走进传送门触发换图时变化，其他玩家不受影响 |
 | `visibleEntities` | map\<string, EntityState\> | 本玩家可见实体表（**唯一的实体来源**）：key = NetworkId 字符串，只含本玩家可见实体 |
 | `mapVersion` | string | 玩家当前地图的几何内容指纹（`MapGeometry.version`），每 tick 同步；变化时用旧值作 `sinceVersion` 拉 `/maps/runtime` 增量（§5） |
+| `displayName` | string | 玩家展示名（join options 自报，≤32 字符；空串=未设置，客户端回退「玩家」/networkId）。服务端不校验真实性 |
+| `characterId` | string | 角色/外观预设 id（不透明字符串，≤64；空串=未设置） |
+| `appearance` | string | 不透明外观 JSON 字符串（≤2048；客户端自行解析，非法 JSON 自行回退默认外观） |
 
 **兴趣裁剪（重要）**：实体同步**恒**走每个玩家自己的 `visibleEntities`——自 per-player 协议起，`RoomState` 的 `entities` 已移除，**不存在**房间级实体表或兼容通道：
 - 自己（`entityId` 对应实体）恒在表中；其他实体进入半径（由 server 规则配置，见 `game/rules/server.json` 的 `viewRadiusTiles`——格，加载期换算为像素；未配置时同图全量）才出现，离开即被删除。
@@ -333,6 +338,9 @@ export class PlayerState extends Schema {
   @type("string") mapId: string = "";
   @type({ map: EntityState }) visibleEntities = new MapSchema<EntityState>();
   @type("string") mapVersion: string = "";   // 末尾追加：当前地图 version（旧字段索引不变）
+  @type("string") displayName: string = "";  // 末尾追加（CC-10）
+  @type("string") characterId: string = "";
+  @type("string") appearance: string = "";   // 不透明 JSON 字符串
 }
 
 export class RoomState extends Schema {
@@ -384,6 +392,7 @@ export class RoomState extends Schema {
 | ItemMeta | `ItemMeta.spoilAt` | 地面掉落物腐烂到期绝对 tick（语义同 `Inventory.{i}.spoilAt`） |
 | ResourceNode | `ResourceNode.remaining/max/infinite` | 资源点剩余量 / 上限 / 无限标记（0=有限，1=无限）；`remaining=0` = 已枯竭（**实体不消失**；`regenMs=0` 永不自动恢复，>0 按毫秒回满） |
 | Equipment | `Equipment.weaponSlot/toolSlot/armorSlot` | 装备槽引用的**背包槽索引**（-1=空） |
+| Equipment | `Equipment.weaponKind/toolKind/armorKind` | 装备槽当前物品 kind（派生字符串；空槽不写键）。仅这三个装备槽，不暴露背包其他内容；用于渲染他人手持/护甲 |
 | CraftingStation | `CraftingStation.stationType` | 合成站类型 id（类型语义由 crafting 配置定义；当前示例：0=通用，1=光源站点） |
 | LightSource | `LightSource.radius/fuelRemainingMs/fuelInfinite` | 光源半径、剩余燃料（≤0 熄灭）、无限燃料标记（1=永不耗尽，不要显示倒计时） |
 | Placeable | `Placeable.footprintW/footprintH/canCollide/ownerNetworkId` | 放置物占用/阻挡信息、放置者 networkId（0=无主/地图静态布置；拆除权限判断用） |
