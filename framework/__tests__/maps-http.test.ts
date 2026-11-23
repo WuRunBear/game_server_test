@@ -37,8 +37,12 @@ import type { ColyseusServer } from "framework/net/colyseus/server";
 import type { Logger } from "utils/logger";
 
 // 必须在任何 config 模块求值之前生效（serverConfig 于导入时固化端口）。
+// SAVE_DIR 指向一次性的空目录：本测试断言「端点几何 == 按配置重建几何」，
+// 若读到 data/saves/main.json 里已有的地形写回（焦土等），两者必然不同。
+// 每次运行独立目录，既不影响开发存档，也避免复用上次测试的残留。
 vi.hoisted(() => {
   process.env.PORT = "0";
+  process.env.SAVE_DIR = `/tmp/opencode/maps-http-saves-${process.pid}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 });
 
 /** /maps/meta 单图条目形状（服务端契约，字段自本切片起定死）。 */
