@@ -8,7 +8,7 @@
  *   实体只暴露 networkId（绝无 eid）；
  * - `Space.exposure` netSync 派生键：玩家进入围合+有顶房间 → indoor，离开 → outdoor；
  * - `PlayerState.mapVersion`：applySnapshot 写入当前图版本，换图后立即变化；
- * - schema 字段顺序：mapVersion 追加在 PlayerState 末尾；
+ * - schema 字段顺序：mapVersion 及其后的 CC-10 资料字段追加在末尾；
  * - `/world/map-graph`：presentation 展示名/连接 + registry 兜底。
  */
 import { readFileSync } from "node:fs";
@@ -452,15 +452,24 @@ describe("③ Space.exposure 与 PlayerState.mapVersion", () => {
     expect(playerState.mapVersion).not.toBe(geometry.version);
   });
 
-  it("schema 字段顺序：mapVersion 追加在 PlayerState 末尾（旧字段索引不变）", () => {
+  it("schema 字段顺序：mapVersion 之后追加 CC-10 资料字段（旧字段索引不变）", () => {
     const source = readFileSync(
       new URL("../net/colyseus/state/PlayerState.ts", import.meta.url),
       "utf8",
     );
     const block = source.slice(source.indexOf("export class PlayerState"));
     const fields = [...block.matchAll(/^\s{2}(\w+)[!?]?:/gm)].map((m) => m[1]);
-    expect(fields).toEqual(["sessionId", "entityId", "mapId", "visibleEntities", "mapVersion"]);
-    expect(fields[fields.length - 1]).toBe("mapVersion");
+    const expectedFields = [
+      "sessionId",
+      "entityId",
+      "mapId",
+      "visibleEntities",
+      "mapVersion",
+      "displayName",
+      "characterId",
+      "appearance",
+    ];
+    expect(fields).toEqual(expectedFields);
 
     const generated = readFileSync(
       new URL("../../src/network/colyseus/client-schema/schema.ts", import.meta.url),
@@ -472,9 +481,11 @@ describe("③ Space.exposure 与 PlayerState.mapVersion", () => {
       generated.indexOf("export class RoomState", generatedStart),
     );
     const generatedFields = [...generatedBlock.matchAll(/public\s+(\w+)\s*[!?:]/g)].map((m) => m[1]);
-    expect(generatedFields).toEqual(["sessionId", "entityId", "mapId", "visibleEntities", "mapVersion"]);
+    expect(generatedFields).toEqual(expectedFields);
 
-    expect(new PlayerState().mapVersion).toBe("");
+    const state = new PlayerState();
+    expect(state.mapVersion).toBe("");
+    expect([state.displayName, state.characterId, state.appearance]).toEqual(["", "", ""]);
   });
 });
 

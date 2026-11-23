@@ -164,15 +164,40 @@ export interface PlayerJoinResult {
 }
 
 /**
- * 玩家加入的可选参数（重连复用保留实体的匹配键）。
+ * 玩家展示资料（只读 DTO，传输层写入 PlayerState 的三个末尾字段）。
+ *
+ * 来源是客户端 join options 自报值经 `components/playerProfile` 规范化后写入
+ * 的 AoS 组件；服务端**不校验真实性**（账号/角色创建见 CC-15）。缺省字段
+ * 恒为空串，客户端据此回退「玩家」/networkId 与默认外观。
+ */
+export interface PlayerProfileView {
+  /** 展示名；空串 = 未设置。 */
+  displayName: string;
+  /** 角色/外观预设 id；空串 = 未设置。 */
+  characterId: string;
+  /** 不透明 JSON 字符串；空串 = 未设置。 */
+  appearance: string;
+}
+
+/**
+ * 玩家加入的可选参数（重连复用保留实体的匹配键 + 自报展示资料）。
  *
  * 断线保留期内重连：客户端在加入参数里自报断线前的 networkId，仿真层命中
  * 保留中的离线实体则复用（清标记、恢复会话映射，进度不丢）；未提供或未命中
  * 时走读档 orphan / 新生成路径。可选字段——老客户端不传，行为与历史一致。
+ *
+ * 展示资料（displayName/characterId/appearance）由客户端自报，服务端只做
+ * 结构规范化（非字符串/超长回退空串）；重连复用时已有非空字段优先，只补空。
  */
 export interface PlayerJoinOptions {
   /** 客户端自报的既有 networkId（断线保留实体的匹配键）。 */
   networkId?: number;
+  /** 展示名（去首尾空白；≤32 字符，超长回退空串）。 */
+  displayName?: string;
+  /** 角色/外观预设 id（≤64 字符，超长回退空串）。 */
+  characterId?: string;
+  /** 不透明 JSON 字符串（≤2048 字符，原样保存；超长回退空串）。 */
+  appearance?: string;
 }
 
 /**

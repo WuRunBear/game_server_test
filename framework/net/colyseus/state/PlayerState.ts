@@ -90,4 +90,31 @@ export class PlayerState extends Schema {
    */
   @type("string")
   mapVersion: string = "";
+
+  /**
+   * 玩家展示名（CC-10；客户端自报，服务端不校验真实性）。
+   *
+   * 每 tick 由 GameRoom.applySnapshot 从仿真层 `getPlayerProfile(entityId)`
+   * 写入；断线保留玩家不在 clients 中，本字段随其 PlayerState 删除，重连后
+   * 由新 PlayerState 取回。空串 = 未设置，客户端回退「玩家」/networkId。
+   * 追加在 mapVersion 之后，已有字段索引不变。
+   */
+  @type("string")
+  displayName: string = "";
+
+  /**
+   * 角色/外观预设 id（CC-10；不透明字符串，框架不解释）。
+   *
+   * 空串 = 未设置。追加在 displayName 之后，已有字段索引不变。
+   */
+  @type("string")
+  characterId: string = "";
+
+  /**
+   * 不透明外观 JSON 字符串（CC-10；框架原样保存/下发，客户端自行解析）。
+   *
+   * 空串 = 未设置。追加在 characterId 之后，已有字段索引不变。
+   */
+  @type("string")
+  appearance: string = "";
 }

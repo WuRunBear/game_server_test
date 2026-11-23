@@ -35,6 +35,12 @@ import {
 } from "components";
 import { entityLevelOf } from "framework/components/entityLevel";
 import { Offline, isOfflineRetained } from "components/offline";
+import {
+  fillEmptyPlayerProfile,
+  normalizePlayerProfile,
+  playerProfileOf,
+  setPlayerProfile,
+} from "components/playerProfile";
 import { spawnEntity } from "framework/entities/spawn";
 import { destroyEntity } from "framework/entities/destroyEntity";
 import { createGameInstance, type GameInstance } from "framework/bootstrap/GameInstance";
@@ -192,7 +198,7 @@ function normalizeAimCoordinate(value: unknown): number | undefined {
 
 import type { SimulationPort } from "./SimulationPort";
 import type {
-  PlayerInput, PlayerJoinResult, PlayerJoinOptions, TickSnapshot, TickResult, DebugSnapshotOptions, PlayerCommand, EntitySnapshot,
+  PlayerInput, PlayerJoinResult, PlayerJoinOptions, PlayerProfileView, TickSnapshot, TickResult, DebugSnapshotOptions, PlayerCommand, EntitySnapshot,
   SimulationOptions, OfferSummary, CommandResult, CommandResultCode,
 } from "./types";
 
@@ -851,12 +857,18 @@ export class GameSimulation implements SimulationPort {
    * 实体，绝不按 FIFO 把他人（或已过期）的旧实体绑给新客户端；读档/保留的
    * 未认领实体由保留期到期清扫负责清理。
    *
+   * 展示资料（CC-10）：join options 的 displayName/characterId/appearance 经
+   * 结构规范化后写入 PlayerProfile（随实体入档）；复用保留实体时已有非空
+   * 字段优先，仅补空字段。
+   *
    * @param sessionId Colyseus 连接标识
-   * @param options 可选加入参数（重连复用保留实体的匹配键）
+   * @param options 可选加入参数（重连匹配键 + 自报展示资料）
    * @returns { networkId } 玩家实体的网络标识
    */
   addPlayer(sessionId: string, options?: PlayerJoinOptions): PlayerJoinResult {
     let eid: number | undefined;
+    /** 是否复用断线保留实体（决定资料写入策略：已有非空值优先）。 */
+    let reusedRetainedEntity = false;
 
     // 断线保留实体：按客户端自报 networkId 匹配（Player + Offline 限定，
     // 且只复用未到期的保留实体——到期实体的复用等同篡改保留语义）。
@@ -869,6 +881,7 @@ export class GameSimulation implements SimulationPort {
       );
       if (retained !== undefined) {
         eid = retained;
+        reusedRetainedEntity = true;
         removeComponent(this.world, eid, Offline);
         this.world.logger.info("重连复用断线保留实体", {
           sessionId,
@@ -889,6 +902,16 @@ export class GameSimulation implements SimulationPort {
       eid = this.spawnNewPlayer();
     }
 
+    // 展示资料（CC-10）：客户端自报值先做结构规范化（非字符串/超长回退空串，
+    // 永不抛错）。新实体直接覆盖；重连复用保留实体时逐字段保留既有非空值，
+    // 只补空字段——客户端无法凭 networkId 冒领改名/换外观。
+    const joinProfile = normalizePlayerProfile(options);
+    if (reusedRetainedEntity) {
+      fillEmptyPlayerProfile(eid, joinProfile);
+    } else {
+      setPlayerProfile(eid, joinProfile);
+    }
+
     // 建立 sessionId → eid 映射，后续输入可以通过 sessionId 找到玩家实体
     // 动作状态是瞬态：重连复用/新生成都从干净状态开始（eid 复用防串台）。
     // 若有残留动作（重连复用保留实体），先向附近发 action-cancel 再清空。
@@ -897,6 +920,27 @@ export class GameSimulation implements SimulationPort {
     this.playerEidBySessionId.set(sessionId, eid);
 
     return { networkId: NetworkId.value[eid] };
+  }
+
+  /**
+   * 取玩家展示资料（只读访问器；GameRoom 每 tick 写入 PlayerState）。
+   *
+   * 解析顺序：先查当前在线会话绑定（O(players)），再回退 networkId 全表扫描
+   * （断线保留/读档恢复的实体仍可查询）。实体不存在返回 undefined；资料缺失
+   * 或畸形字段按空串返回，不抛错。
+   */
+  getPlayerProfile(networkId: number): PlayerProfileView | undefined {
+    if (typeof networkId !== "number" || !Number.isInteger(networkId)) return undefined;
+    let eid: number | undefined;
+    for (const boundEid of this.playerEidBySessionId.values()) {
+      if (NetworkId.value[boundEid] === networkId) {
+        eid = boundEid;
+        break;
+      }
+    }
+    if (eid === undefined) eid = this.eidByNetworkId(networkId);
+    if (eid === undefined) return undefined;
+    return playerProfileOf(eid);
   }
 
   /** 新生成玩家实体（出生点选择 + SpawnPoint 落盘 + archetype 生成）。 */

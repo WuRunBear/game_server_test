@@ -21,7 +21,9 @@
  * - `Projectile.ownerNetworkId`（number）—— 投射物主人的 networkId（0=无主），
  *   **绝不输出 owner eid**；
  * - `Lifetime.remainingTicks`（number）—— 持久寿命剩余 tick（绝对到期 tick
- *   − 当前 tick，≥0），不直接暴露 expiresTick。
+ *   − 当前 tick，≥0），不直接暴露 expiresTick；
+ * - `Equipment.weaponKind/toolKind/armorKind`（string）—— 玩家三个装备槽当前
+ *   物品 kind（CC-10）；只给 kind，不暴露槽位索引或其他背包内容。
  * 其余派生键（StateMachine/Modifiers/ExpiresAt）各有独立 AoS 条目。
  */
 import { hasComponent } from "bitecs";
@@ -29,7 +31,7 @@ import type { GameWorld } from "world";
 import {
   Kind, Needs, Inventory, ItemMeta, ResourceNode, Portal,
   Dialogue, DialogueSource, Quest, Relation, Progression,
-  NetworkId, Projectile, Lifetime, Placeable, Structure,
+  NetworkId, Projectile, Lifetime, Placeable, Structure, Equipment,
   Player, Enemy, NPC, Item, Resource, Container,
 } from "components";
 import { Achievements } from "components/achievements";
@@ -216,6 +218,36 @@ registerAosSyncAdapter("ItemMeta", (_world, eid, fields) => {
 });
 
 /**
+ * 装备槽派生投影（CC-10）：只输出三个装备槽当前物品的 **kind**。
+ *
+ * 隐私边界：读取 `Equipment.weaponSlot/toolSlot/armorSlot` 引用的背包槽，只写
+ * `Equipment.weaponKind` / `toolKind` / `armorKind` 三个字符串键；**不输出**槽位
+ * 索引、数量、耐久、腐烂或其他背包槽内容。空槽/过期引用/空 kind 不写键
+ * （GameRoom 的 key diff 会清掉上一帧残留）。
+ *
+ * 由 netSync 的 `{ component: "Kind", tags: ["Player"], fields: ["equipment"] }`
+ * 条目触发——沿用 Kind 适配器这一覆盖全部实体的扩展点，不新增 EntityState
+ * schema 字段。
+ */
+function writeEquippedKinds(world: GameWorld, eid: number, out: AosSyncOutput): void {
+  if (!hasComponent(world, eid, Equipment)) return;
+  const inv = Inventory[eid];
+  if (!inv) return;
+
+  const slots: ReadonlyArray<readonly [suffix: string, slotRef: number]> = [
+    ["weaponKind", Equipment.weaponSlot[eid]],
+    ["toolKind", Equipment.toolSlot[eid]],
+    ["armorKind", Equipment.armorSlot[eid]],
+  ];
+  for (const [suffix, slotRef] of slots) {
+    if (typeof slotRef !== "number" || slotRef < 0 || slotRef >= inv.slots.length) continue;
+    const stack = inv.slots[slotRef];
+    if (!stack || typeof stack.kind !== "string" || stack.kind.length === 0) continue;
+    out.strings[`Equipment.${suffix}`] = stack.kind;
+  }
+}
+
+/**
  * 内建适配器：Kind（原型种类字符串；客户端据此区分树/矿/狼/建筑等）。
  *
  * 同时输出跨组件派生投影（Category / Projectile.ownerNetworkId /
@@ -224,6 +256,8 @@ registerAosSyncAdapter("ItemMeta", (_world, eid, fields) => {
 registerAosSyncAdapter("Kind", (world, eid, fields) => {
   const out = empty();
   writeDerivedEntityProjections(world, eid, out);
+  // CC-10：装备槽 kind 派生（fields 含 "equipment" 时启用；隐私规则见函数注释）
+  if (fields.includes("equipment")) writeEquippedKinds(world, eid, out);
   const kind = Kind[eid];
   if (kind && fields.includes("value")) out.strings["Kind.value"] = kind;
   return out;

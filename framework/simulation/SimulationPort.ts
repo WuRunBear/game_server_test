@@ -3,7 +3,7 @@
  * 具体实现见 GameSimulation.ts；传输层只依赖本接口，不依赖任何 ECS 符号。
  */
 import type {
-  PlayerInput, PlayerJoinResult, PlayerJoinOptions, TickResult, DebugSnapshotOptions, PlayerCommand,
+  PlayerInput, PlayerJoinResult, PlayerJoinOptions, PlayerProfileView, TickResult, DebugSnapshotOptions, PlayerCommand,
   CommandResult,
 } from "./types";
 import type { SerializedMapGeometry } from "map/geometry/snapshot";
@@ -85,6 +85,17 @@ export interface SimulationPort {
    * @param sessionId Colyseus 连接标识
    */
   removePlayer(sessionId: string): void;
+
+  /**
+   * 取玩家展示资料（只读；CC-10）。
+   *
+   * GameRoom 每 tick 写入该玩家自己的 `PlayerState.displayName/characterId/
+   * appearance`。实体不存在时返回 undefined；资料缺失（旧档）时返回空串填充
+   * 的 DTO，绝不让传输层判空崩溃。
+   *
+   * @param networkId 玩家实体的稳定网络标识（协议层 id，不是 eid）
+   */
+  getPlayerProfile?(networkId: number): PlayerProfileView | undefined;
 
   /**
    * 提交一条客户端输入。

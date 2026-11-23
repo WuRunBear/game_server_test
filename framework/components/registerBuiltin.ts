@@ -67,6 +67,7 @@ import { Player, Enemy, NPC, Item, Resource, Container } from "framework/compone
 import { Kind } from "framework/components/kind";
 import { Progression, initProgression } from "framework/components/progression";
 import { Achievements, initAchievements } from "framework/components/achievements";
+import { PlayerProfile, initPlayerProfile } from "framework/components/playerProfile";
 
 /**
  * 注册全部内置组件及其 AoS 初始化钩子。
@@ -496,6 +497,18 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.register("Achievements", Achievements, {
     description: "成就解锁集合：实体已解锁的成就 id 视图，由成就系统写入、随存档恢复，供客户端展示。",
   });
+  // 玩家展示资料（AoS，持久化——客户端自报，服务端不校验真实性；随实体入档）
+  registry.register("PlayerProfile", PlayerProfile, {
+    description: "玩家展示资料：展示名、角色/外观预设 id 与不透明外观 JSON；客户端自报，服务端只做结构规范化。",
+    configSchema: z.object({
+      /** 展示名（去首尾空白；超长回退空串）。 */
+      displayName: z.string().optional(),
+      /** 角色/外观预设 id（超长回退空串）。 */
+      characterId: z.string().optional(),
+      /** 不透明 JSON 字符串（原样保存，超长回退空串）。 */
+      appearance: z.string().optional(),
+    }),
+  });
   // 种类标签（AoS）
   registry.register("Kind", Kind, {
     description: "种类标签：实体原型 kind 字符串，由生成链路在运行时写入。",
@@ -515,4 +528,5 @@ export function registerBuiltinComponents(registry: ComponentRegistry): void {
   registry.registerAosInitializer("Population", initPopulation);
   registry.registerAosInitializer("Progression", initProgression);
   registry.registerAosInitializer("Achievements", initAchievements);
+  registry.registerAosInitializer("PlayerProfile", initPlayerProfile);
 }

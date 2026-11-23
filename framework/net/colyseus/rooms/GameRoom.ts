@@ -180,6 +180,30 @@ function readCommandType(message: unknown): string | undefined {
 }
 
 /**
+ * 从 join options 读取玩家自报展示资料（CC-10）。
+ *
+ * 只透传字符串形态（畸形类型在传输边界即丢弃，仿真层仍会做长度/空白规范化）；
+ * 缺省字段不写入返回对象，保持 PlayerJoinOptions 的可选语义。
+ */
+function readJoinProfile(options?: Record<string, unknown>): {
+  displayName?: string;
+  characterId?: string;
+  appearance?: string;
+} {
+  const profile: {
+    displayName?: string;
+    characterId?: string;
+    appearance?: string;
+  } = {};
+  if (!options) return profile;
+  for (const key of ["displayName", "characterId", "appearance"] as const) {
+    const value = options[key];
+    if (typeof value === "string") profile[key] = value;
+  }
+  return profile;
+}
+
+/**
  * 单房间游戏房间——负责连接管理、输入接收、tick 驱动，并将仿真快照写回 RoomState。
  *
  * ## 设计定位
@@ -414,16 +438,29 @@ export class GameRoom extends Room<{ state: RoomState }> {
     }
 
     // 让仿真层创建/复用玩家实体，拿到稳定网络 ID
-    // （options.networkId 为客户端自报的断线前标识，仅结构校验，匹配在仿真层）
+    // （options.networkId 为客户端自报的断线前标识，仅结构校验，匹配在仿真层；
+    //  displayName/characterId/appearance 为客户端自报展示资料，仿真层规范化后
+    //  写入持久 PlayerProfile——服务端不校验真实性，见 CC-10/CC-15 边界）
     const hintedNetworkId =
       typeof options?.networkId === "number" ? options.networkId : undefined;
-    const { networkId } = this.sim.addPlayer(client.sessionId, { networkId: hintedNetworkId });
+    const { networkId } = this.sim.addPlayer(client.sessionId, {
+      networkId: hintedNetworkId,
+      ...readJoinProfile(options),
+    });
 
     // 写入 Colyseus PlayerState——客户端通过它知道"自己控制哪个实体"
     const playerState = new PlayerState();
     playerState.sessionId = client.sessionId;
     playerState.entityId = networkId;
     playerState.visibleEntities.ownerSessionId = client.sessionId;
+    // 展示资料：join 当帧即写入（不必等下一 tick 的 applySnapshot），此后每 tick
+    // 由 applySnapshot 从仿真层只读访问器刷新。
+    const profile = this.sim.getPlayerProfile?.(networkId);
+    if (profile) {
+      playerState.displayName = profile.displayName;
+      playerState.characterId = profile.characterId;
+      playerState.appearance = profile.appearance;
+    }
     this.state.players.set(client.sessionId, playerState);
 
     // per-client 编码视图：$filter 依据 view.sessionId 与 visibleEntities.ownerSessionId 匹配
@@ -697,6 +734,14 @@ export class GameRoom extends Room<{ state: RoomState }> {
       // CC-05：每 tick 写入玩家当前地图的几何内容指纹；换图后立即反映新图
       // 版本（客户端据 mapVersion 变化拉 /maps/runtime?sinceVersion=）。
       playerState.mapVersion = this.sim.getMapVersion?.(playerState.mapId) ?? "";
+      // CC-10：展示资料从仿真层只读访问器刷新（断线保留玩家不在 clients 中，
+      // 不会写；其资料仍在实体上，重连后由新 PlayerState 取回）。
+      const profile = this.sim.getPlayerProfile?.(playerState.entityId);
+      if (profile) {
+        playerState.displayName = profile.displayName;
+        playerState.characterId = profile.characterId;
+        playerState.appearance = profile.appearance;
+      }
     }
     // 报价摘要表：逐条按参与方过滤（非相关玩家看不到该条）。
     this.applyOffers(snapshot);
