@@ -207,6 +207,7 @@ const room = await client.joinOrCreate("game", {
 - `seq` 是服务端全局单调序号；按客户端过滤后**会有空洞**，只保证严格递增。客户端按 `seq` 去重/判新旧，不要假设连续。
 - 事件是**通知**，不是权威状态；缺失/重复都不应改变客户端以 `RoomState` 为准的最终状态。重连不补发历史事件。
 - 服务端按受众过滤：`self`（仅当事人）、`nearby`（同图+半径）、`map`（同图）、`world`（全房间）。实体引用一律 **networkId**，不出现 eid。
+- 部分事件的 `data` 会带可选 `sfx: string[]` / `vfx: string[]`（不透明播放 id，清单见 `/client/manifest` 的 `audio`/`vfx` 段）；无映射时键不存在。事件本身不携带音频/粒子资源路径。
 - 首批事件类型：
 
 | type | 典型受众 | data（实体均为 networkId） |
@@ -595,6 +596,8 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 | `GET /debug/colliders` | 房间碰撞体调试快照（房间未就绪时 404；调试用，不是正式碰撞源） |
 
 > **地图几何来源（live 优先）**：`/maps/runtime` 与 `/maps/meta` 优先返回**活动房间的实时几何**（含运行期写回的结果，如野火焦土——`tiles`/`walkable`/`level` 已变，`version` 指纹随之变化）；房间未就绪（服务刚启动、或房间创建失败）时回退为「按配置重建」的视图。两种视图在**没有任何写回**时内容一致，因此客户端按 `{key, version}` 缓存仍然安全；若运行期发生地形改写，`version` 会变，客户端据此重新拉取。
+
+> **manifest 的音频/VFX 段（CC-11）**：`audio = { music: string[], ambient: string[], sfx: string[], events: { [eventType]: string[] } }`，`vfx = { effects: string[], events: { [eventType]: string[] } }`。客户端按 id 绑定本地资源；`maps[].musicId/ambientId` 用于换图后的音乐/环境音切换。`animations` 当前仍为空对象。
 
 > **地图版本订阅（CC-05）**：`PlayerState.mapVersion` 每 tick 同步玩家当前地图的 `version`。客户端检测到它变化时，用上次的 `version` 作为 `sinceVersion` 请求 `/maps/runtime` 增量（`modifications` 为稀疏终态，直接覆盖对应格即可，不要按事件流重放）。增量只覆盖 `tiles/walkable/level`；`regions/regionOfTile` 与 grid 变化只能靠全量（当前运行期写回不改区域/grid）。未知/过旧 `sinceVersion` 会自动回退全量，客户端按响应里有没有 `modifications` 分支处理即可。
 
