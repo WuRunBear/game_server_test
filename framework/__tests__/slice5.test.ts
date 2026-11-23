@@ -132,7 +132,8 @@ describe("Slice 5：世界快照序列化/恢复", () => {
 
     const ws = record.entities.find((e) => e.kind === "w1")!;
     expect(ws.networkId).toBe(NetworkId.value[w]);
-    expect(ws.components["Transform"]).toEqual({ x: 12, y: 34, rot: 0, scale: 0 });
+    // scale 语义中性值为 1（spawn 初始化；0 会让客户端缩放成不可见）
+    expect(ws.components["Transform"]).toEqual({ x: 12, y: 34, rot: 0, scale: 1 });
     expect(ws.components["Health"]).toEqual({ current: 42, max: 100 });
     expect(ws.components["Inventory"]).toEqual({ capacity: 3, slots: [{ kind: "k1", count: 5 }, null, null] });
     expect(ws.components["Needs"]).toEqual([{ name: "n1", current: 33, max: 100, decayPerSec: 1, depletionDmg: 1 }]);
