@@ -9,14 +9,33 @@
  * 与组件注册表的 AoS 初始化钩子（registerAosInitializer）互补：
  * 初始化钩子负责**写入**（spawn 实体时按原型配置写数据），
  * 这里的同步适配器负责**读出**（每帧同步时展平推送）。扩展 AoS 组件时需两者都注册。
+ *
+ * ## 派生投影（无独立 AoS 组件的同步键）
+ *
+ * buildSnapshot 的派生分支当前只硬编码了 `Crafting`（见 netSyncDerived），
+ * 无法在 GameSimulation 之外注册新的派生伪组件。为不修改传输层/仿真层，
+ * 少数跨组件的派生键挂在 **Kind 适配器**上输出（Kind 条目无 tags、遍历全体
+ * 带 NetworkId 的实体，是唯一覆盖所有实体的适配器扩展点）：
+ * - `Category.value`（string）—— 框架通用实体分类，见 categoryOf；
+ * - `Projectile.ownerNetworkId`（number）—— 投射物主人的 networkId（0=无主），
+ *   **绝不输出 owner eid**；
+ * - `Lifetime.remainingTicks`（number）—— 持久寿命剩余 tick（绝对到期 tick
+ *   − 当前 tick，≥0），不直接暴露 expiresTick。
+ * 其余派生键（StateMachine/Modifiers/ExpiresAt）各有独立 AoS 条目。
  */
+import { hasComponent } from "bitecs";
 import type { GameWorld } from "world";
 import {
   Kind, Needs, Inventory, ItemMeta, ResourceNode, Portal,
   Dialogue, DialogueSource, Quest, Relation, Progression,
+  NetworkId, Projectile, Lifetime, Placeable, Structure,
+  Player, Enemy, NPC, Item, Resource, Container,
 } from "components";
 import { Achievements } from "components/achievements";
 import { Ledger } from "components/ledger";
+import { ExpiresAt } from "framework/simulation/timer/timer";
+import { StateMachine } from "framework/simulation/stateMachine/stateMachine";
+import { Modifiers } from "framework/simulation/modifiers/modifiers";
 
 /**
  * AoS 适配器的展平输出——纯数据，无 ECS 引用。
@@ -57,6 +76,60 @@ function empty(): AosSyncOutput {
   return { numbers: {}, strings: {} };
 }
 
+/**
+ * 框架通用实体分类（客户端按此选渲染/交互路径，而不是用 Health+Needs 猜）。
+ *
+ * 只使用框架机制词与标签，不解释 game/ 的 kind 字符串：
+ * - `player`：Player 标签；
+ * - `enemy`：Enemy 标签（同时有 Enemy+NPC 时敌人优先）；
+ * - `npc`：NPC 标签；
+ * - `projectile`：Projectile 组件（投射物无原型）；
+ * - `structure`：Structure 或 Placeable 组件（建造物/可放置设施）；
+ * - `resource`：Resource 标签（可采集节点）；
+ * - `container`：Container 标签（尸体/容器）；
+ * - `item`：Item 标签（地面掉落物）；
+ * - `other`：其余带 NetworkId 的实体（兜底，客户端可只画 Transform）。
+ */
+function categoryOf(world: GameWorld, eid: number): string {
+  if (hasComponent(world, eid, Player)) return "player";
+  if (hasComponent(world, eid, Enemy)) return "enemy";
+  if (hasComponent(world, eid, NPC)) return "npc";
+  if (hasComponent(world, eid, Projectile)) return "projectile";
+  if (hasComponent(world, eid, Structure) || hasComponent(world, eid, Placeable)) return "structure";
+  if (hasComponent(world, eid, Resource)) return "resource";
+  if (hasComponent(world, eid, Container)) return "container";
+  if (hasComponent(world, eid, Item)) return "item";
+  return "other";
+}
+
+/**
+ * 跨组件派生投影（挂在 Kind 适配器上输出，理由见文件头）。
+ *
+ * 键与语义：
+ * - `Category.value`（strings）：categoryOf 的框架通用分类；
+ * - `Projectile.ownerNetworkId`（values）：Projectile.owner eid → NetworkId
+ *   （主人实体已销毁/无 NetworkId 时为 0），不输出 eid；
+ * - `Lifetime.remainingTicks`（values）：`max(0, Lifetime.expiresTick - tick)`，
+ *   客户端无需再读绝对到期 tick。
+ */
+function writeDerivedEntityProjections(world: GameWorld, eid: number, out: AosSyncOutput): void {
+  out.strings["Category.value"] = categoryOf(world, eid);
+
+  if (hasComponent(world, eid, Projectile)) {
+    const ownerEid = Projectile.owner[eid];
+    const ownerNetworkId =
+      typeof ownerEid === "number" && ownerEid >= 0 && hasComponent(world, ownerEid, NetworkId)
+        ? NetworkId.value[ownerEid]
+        : 0;
+    out.numbers["Projectile.ownerNetworkId"] = ownerNetworkId;
+  }
+
+  if (hasComponent(world, eid, Lifetime)) {
+    const remaining = Lifetime.expiresTick[eid] - world.time.tick;
+    out.numbers["Lifetime.remainingTicks"] = Math.max(0, remaining);
+  }
+}
+
 /** 内建适配器：Needs（按索引展开 name/current/max）。 */
 registerAosSyncAdapter("Needs", (_world, eid, fields) => {
   const out = empty();
@@ -74,7 +147,13 @@ registerAosSyncAdapter("Needs", (_world, eid, fields) => {
   return out;
 });
 
-/** 内建适配器：Inventory（按槽索引展开 kind/count，空槽占位；耐久按需）。 */
+/**
+ * 内建适配器：Inventory（按槽索引展开 kind/count，空槽占位；耐久/腐烂按需）。
+ *
+ * `spoilAt` 输出**绝对世界 tick**（`Inventory.<i>.spoilAt`），与 `RoomState.tick`
+ * 同一时间基；客户端用 `spoilAt - RoomState.tick` 换算剩余 tick。只在该槽
+ * 存在绝对到期 tick 时写键（不腐烂/空槽不写 → key diff 清掉旧残留）。
+ */
 registerAosSyncAdapter("Inventory", (_world, eid, fields) => {
   const out = empty();
   const inv = Inventory[eid];
@@ -91,13 +170,23 @@ registerAosSyncAdapter("Inventory", (_world, eid, fields) => {
         if (slot && typeof slot.durability === "number") {
           out.numbers[`Inventory.${i}.durability`] = slot.durability;
         }
+      } else if (f === "spoilAt") {
+        // 绝对腐烂到期 tick（世界逻辑 tick；见上方注释）
+        if (slot && typeof slot.spoilAt === "number") {
+          out.numbers[`Inventory.${i}.spoilAt`] = slot.spoilAt;
+        }
       }
     }
   }
   return out;
 });
 
-/** 内建适配器：ItemMeta（地面 item 实体的 kind/count/耐久）。 */
+/**
+ * 内建适配器：ItemMeta（地面 item 实体的 kind/count/耐久/腐烂）。
+ *
+ * `spoilAt` 语义与 Inventory 一致：**绝对世界 tick**，与 `RoomState.tick`
+ * 同基；客户端自行换算 `spoilAt - RoomState.tick`。仅腐烂物品写键。
+ */
 registerAosSyncAdapter("ItemMeta", (_world, eid, fields) => {
   const out = empty();
   const meta = ItemMeta[eid];
@@ -110,14 +199,25 @@ registerAosSyncAdapter("ItemMeta", (_world, eid, fields) => {
       if (typeof meta.durability === "number") {
         out.numbers["ItemMeta.durability"] = meta.durability;
       }
+    } else if (f === "spoilAt") {
+      // 绝对腐烂到期 tick（世界逻辑 tick；见上方注释）
+      if (typeof meta.spoilAt === "number") {
+        out.numbers["ItemMeta.spoilAt"] = meta.spoilAt;
+      }
     }
   }
   return out;
 });
 
-/** 内建适配器：Kind（原型种类字符串；客户端据此区分树/矿/狼/建筑等）。 */
-registerAosSyncAdapter("Kind", (_world, eid, fields) => {
+/**
+ * 内建适配器：Kind（原型种类字符串；客户端据此区分树/矿/狼/建筑等）。
+ *
+ * 同时输出跨组件派生投影（Category / Projectile.ownerNetworkId /
+ * Lifetime.remainingTicks），理由与键语义见文件头与 writeDerivedEntityProjections。
+ */
+registerAosSyncAdapter("Kind", (world, eid, fields) => {
   const out = empty();
+  writeDerivedEntityProjections(world, eid, out);
   const kind = Kind[eid];
   if (kind && fields.includes("value")) out.strings["Kind.value"] = kind;
   return out;
@@ -283,5 +383,105 @@ registerAosSyncAdapter("Ledger", (_world, eid, fields) => {
       if (f === "entries") out.numbers[`Ledger.${kind}`] = count;
     }
   }
+  return out;
+});
+
+/**
+ * 内建适配器：StateMachine（通用状态机当前状态，fields 需含 "state"/"stateTick"）。
+ *
+ * 键与语义：
+ * - `StateMachine.state`（strings）：当前状态 id（配置字符串，如 alive/burning/
+ *   burnt），由 stateMachineSystem 迁移；
+ * - `StateMachine.stateTick`（values）：进入当前状态的**绝对 tick**
+ *   （`enteredTick`，与 `RoomState.tick` 同基）——客户端用
+ *   `(RoomState.tick - stateTick) / durationTicks` 算动画进度。
+ *
+ * 状态机是 AoS 持久组件（见 framework/simulation/stateMachine）；无数据实体不写键。
+ */
+registerAosSyncAdapter("StateMachine", (_world, eid, fields) => {
+  const out = empty();
+  const state = StateMachine[eid];
+  if (!state) return out;
+  for (const f of fields) {
+    if (f === "state") out.strings["StateMachine.state"] = state.state;
+    else if (f === "stateTick") out.numbers["StateMachine.stateTick"] = state.enteredTick;
+  }
+  return out;
+});
+
+/**
+ * 内建适配器：Modifiers（属性修饰符的稳定投影，fields 需含 "stats"）。
+ *
+ * 只统计**当前生效**的条目（`expiresTick` 缺省永久；`tick >= expiresTick` 视为
+ * 失效，与 computeStat 同语义），按 statKey 展开：
+ * - `Modifiers.<stat>.mul`（values）—— 生效乘法修正之和（参与 `base × (1+Σmul)`）；
+ * - `Modifiers.<stat>.add`（values）—— 生效加法修正之和（参与 `+ Σadd`）；
+ * - `Modifiers.<stat>.count`（values）—— 生效条目数；
+ * - `Modifiers.<stat>.bool`（values）—— 存在生效 bool 条目时写 1/0（bool 优先于
+ *   数值，与 computeStat 一致）；
+ * - `Modifiers.<stat>.expiresTick`（values）—— 生效条目中最早的绝对失效 tick
+ *   （全部永久时不写）；
+ * - `Modifiers.<stat>.source.<source>`（values）—— 按来源字符串计数的生效条目数
+ *   （source 为配置/效果声明的字符串，框架不解释；客户端据此区分中毒/狂暴等）。
+ *
+ * statKey/source 是配置字符串，原样进入动态 key（不扩大 schema）。整组条目
+ * 全部失效时该 stat 不写任何键（GameRoom key diff 清理旧值）。
+ */
+registerAosSyncAdapter("Modifiers", (world, eid, fields) => {
+  const out = empty();
+  if (!fields.includes("stats")) return out;
+  const set = Modifiers[eid];
+  if (!set) return out;
+  const tick = world.time.tick;
+  for (const [stat, entries] of Object.entries(set)) {
+    let mul = 0;
+    let add = 0;
+    let count = 0;
+    let hasBool = false;
+    let boolOr = false;
+    let earliestExpiry = Infinity;
+    const sourceCounts: Record<string, number> = {};
+    for (const entry of entries) {
+      if (entry.expiresTick !== undefined && tick >= entry.expiresTick) continue;
+      count += 1;
+      if (entry.bool !== undefined) {
+        hasBool = true;
+        boolOr = boolOr || entry.bool;
+      } else {
+        mul += entry.mul ?? 0;
+        add += entry.add ?? 0;
+      }
+      if (entry.expiresTick !== undefined) {
+        earliestExpiry = Math.min(earliestExpiry, entry.expiresTick);
+      }
+      if (entry.source) {
+        sourceCounts[entry.source] = (sourceCounts[entry.source] ?? 0) + 1;
+      }
+    }
+    if (count === 0) continue;
+    out.numbers[`Modifiers.${stat}.mul`] = mul;
+    out.numbers[`Modifiers.${stat}.add`] = add;
+    out.numbers[`Modifiers.${stat}.count`] = count;
+    if (hasBool) out.numbers[`Modifiers.${stat}.bool`] = boolOr ? 1 : 0;
+    if (earliestExpiry !== Infinity) out.numbers[`Modifiers.${stat}.expiresTick`] = earliestExpiry;
+    for (const [source, n] of Object.entries(sourceCounts)) {
+      out.numbers[`Modifiers.${stat}.source.${source}`] = n;
+    }
+  }
+  return out;
+});
+
+/**
+ * 内建适配器：ExpiresAt（一次性定时器剩余时间，fields 需含 "remainingTicks"）。
+ *
+ * `ExpiresAt.remainingTicks` = `max(0, expiresTick - world.time.tick)`。条目本身
+ * 含 EffectSpec（可能引用 eid），只输出剩余 tick，**不输出效果参数**。
+ */
+registerAosSyncAdapter("ExpiresAt", (world, eid, fields) => {
+  const out = empty();
+  if (!fields.includes("remainingTicks")) return out;
+  const entry = ExpiresAt[eid];
+  if (!entry) return out;
+  out.numbers["ExpiresAt.remainingTicks"] = Math.max(0, entry.expiresTick - world.time.tick);
   return out;
 });

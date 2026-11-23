@@ -292,24 +292,34 @@ export class RoomState extends Schema {
 
 | 组件 | key 形态 | 语义 |
 |------|----------|------|
-| Transform | `Transform.x`, `Transform.y` | 世界坐标（像素） |
+| Transform | `Transform.x/y/rot/scale` | 世界坐标（像素，中心点）、旋转、缩放。`scale` 语义中性值为 1；若读到 0（旧存档/旧服务端未初始化），客户端按 1 处理 |
 | Kind | `Kind.value` | 实体种类（原型 kind 字符串，如 `corpse` / `tree` / `boss_alpha`）——**客户端辨识实体的首选依据**（见 §3.6） |
-| Health | `Health.current` | 当前血量（生物） |
+| Category | `Category.value` | 框架通用分类（`player/enemy/npc/projectile/structure/resource/container/item/other`），服务端按标签/组件派生；客户端选渲染与交互路径时优先用它，无需用 `Health+Needs` 猜 |
+| Health | `Health.current/max` | 当前/最大血量（血条比例 = current / max） |
+| Attack | `Attack.value/range` | 攻击力与射程（像素） |
+| Defense | `Defense.value` | 防御力 |
+| Team | `Team.id` | 阵营/队伍 id（友伤、仇恨分组依据） |
+| Perception | `Perception.visionRadius` | 感知半径（像素） |
+| Velocity | `Velocity.vx/vy` | 速度（像素/秒）；无输入时服务端清零，可用于走/停判定与插值 |
 | Collider | `Collider.shape`, `Collider.radius` | 碰撞形状：0=圆形 1=矩形 |
 | Size | `Size.w`, `Size.h` | 尺寸 |
 | Needs | `Needs.{i}.name/current/max` | 生存需求（条目集与 name 由 needs 规则定义，见 `game/rules/needs.json`；任一为 0 持续扣血） |
 | Inventory | `Inventory.{i}.kind/count` | 背包槽（容量由玩家原型配置定义；空槽 kind=`""` 占位） |
 | Inventory | `Inventory.{i}.durability` | 槽位**当前耐久**（**仅逐实例有耐久的物品写键**；耐久上限不在协议内，由物品配置 `maxDurability` 定义） |
+| Inventory | `Inventory.{i}.spoilAt` | 槽位**腐烂到期绝对 tick**（与 `RoomState.tick` 同一时间基；仅会腐烂且未腐烂的物品写键）。剩余 = `spoilAt - RoomState.tick` |
 | ItemMeta | `ItemMeta.kind/count` | 地面掉落物 |
 | ItemMeta | `ItemMeta.durability` | 地面掉落物当前耐久（同上，仅有耐久的物品写键） |
-| ResourceNode | `ResourceNode.remaining` | 资源点剩余量；0 = 已枯竭（**实体不消失**；`regenMs=0` 永不自动恢复，>0 按毫秒回满） |
+| ItemMeta | `ItemMeta.spoilAt` | 地面掉落物腐烂到期绝对 tick（语义同 `Inventory.{i}.spoilAt`） |
+| ResourceNode | `ResourceNode.remaining/max/infinite` | 资源点剩余量 / 上限 / 无限标记（0=有限，1=无限）；`remaining=0` = 已枯竭（**实体不消失**；`regenMs=0` 永不自动恢复，>0 按毫秒回满） |
 | Equipment | `Equipment.weaponSlot/toolSlot/armorSlot` | 装备槽引用的**背包槽索引**（-1=空） |
 | CraftingStation | `CraftingStation.stationType` | 合成站类型 id（类型语义由 crafting 配置定义；当前示例：0=通用，1=光源站点） |
-| LightSource | `LightSource.radius/fuelRemainingMs` | 光源半径与剩余燃料（≤0 熄灭） |
-| Placeable | `Placeable.footprintW/footprintH/canCollide` | 放置物占用/阻挡信息 |
+| LightSource | `LightSource.radius/fuelRemainingMs/fuelInfinite` | 光源半径、剩余燃料（≤0 熄灭）、无限燃料标记（1=永不耗尽，不要显示倒计时） |
+| Placeable | `Placeable.footprintW/footprintH/canCollide/ownerNetworkId` | 放置物占用/阻挡信息、放置者 networkId（0=无主/地图静态布置；拆除权限判断用） |
+| Projectile | `Projectile.vx/vy/lifeMs/radius/damage` | 投射物速度（像素/秒）、剩余寿命（ms）、接触半径、伤害 |
+| Projectile | `Projectile.ownerNetworkId` | 投射物主人的 networkId（0=无主/已销毁）；**服务端不下发 eid** |
 | Structure | `Structure.role/connectLow/connectHigh/connectDir` | 建造角色（1=楼板 / 2=墙 / 3=连接器）与连接器连接区间、方向 |
 | Passage | `Passage.open` | 可开合屏障（门）状态：1=放行 / 0=阻挡 |
-| GridOccupancy | `GridOccupancy.cellX/cellY/cellW/cellH` | 建筑占用的网格 |
+| GridOccupancy | `GridOccupancy.cellX/cellY/cellW/cellH/cellLevel` | 建筑占用的网格与层号（多层建造判定） |
 | Portal | `Portal.targetMap/x/y` | 传送门：目标地图与落点 |
 | Dialogue | `Dialogue.npcId/treeId/nodeId/text`、`Dialogue.option.{i}.text`、`Dialogue.{i}.option` | 玩家对话会话（仅对话中出现的 key，见 §4.6） |
 | DialogueSource | `DialogueSource.treeId` | NPC 挂载的对话树 id |
@@ -319,15 +329,21 @@ export class RoomState extends Schema {
 | Progression | `Progression.skill.{skillId}.xp/level` | 按技能 id 展开的技能经验/等级（skillId 由 progression 规则配置约定） |
 | Achievements | `Achievements.{achievementId}` | 已解锁成就（数值 **1 = 已解锁**；id 由 achievements 规则配置约定） |
 | Crafting | `Crafting.{i}.recipeId`（stringValues）、`Crafting.{i}.remainingTicks/progress/suspended`（values） | **进行中的制作**：`recipeId`=配方 id、`remainingTicks`=距完成剩余 tick（0=到点）、`progress`=时间进度 0–1（挂起时恒 1）、`suspended`=1 表示到点但产出条件未满足（背包满/站点失效）；任务完成/取消后整条消失 |
-| Cooldown | `Cooldown.remainingMs` | **玩家**装备/攻击冷却剩余毫秒（仅带 `Player` 标签的实体同步；服务端权威、每帧递减）。供客户端显示冷却提示——但**冷却是否结束仍以服务端裁决为准**（命令失败无回执） |
+| Cooldown | `Cooldown.remainingMs` | 攻击/投掷冷却剩余毫秒（**所有带 Cooldown 的实体**，含玩家与敌怪；服务端权威、每帧递减）。供客户端显示冷却提示——但**冷却是否结束仍以服务端裁决为准**（命令失败无回执） |
+| Ledger | `Ledger.{kind}` | 账本/商店库存：按物品 kind 展平的计数（数值） |
+| StateMachine | `StateMachine.state`（stringValues）、`StateMachine.stateTick`（values） | 通用状态机当前状态 id（配置字符串，如 `alive`/`burning`/`burnt`）与进入该状态的**绝对 tick**；动画进度 = `(RoomState.tick - stateTick) / 配置时长` |
+| Modifiers | `Modifiers.{stat}.mul/add/count/bool/expiresTick`、`Modifiers.{stat}.source.{source}` | 生效中的属性修饰符投影（与 `computeStat` 同过期语义）：乘法/加法合计、条目数、bool 状态、最早失效绝对 tick、按来源计数。用于中毒/减速/狂暴等状态表现；整组失效时键消失 |
+| ExpiresAt | `ExpiresAt.remainingTicks` | 一次性定时器剩余 tick（`max(0, expiresTick - tick)`）；不暴露效果参数 |
+| Lifetime | `Lifetime.remainingTicks` | 持久寿命剩余 tick（尸体/掉落物 TTL 等，`max(0, expiresTick - tick)`）；到期由服务端清理 |
 
 ### 3.6 实体辨识（客户端如何知道"这是什么"）
 
-服务端**会下发实体种类字段** `Kind.value`（原型 kind 字符串，见 §3.5）。客户端应**优先按 `Kind.value` 分类**；只有拿不到 `Kind.value`（旧服务端 / 某些无 kind 原型）时，才回退到「同步字段组合」启发式。
+服务端下发两级分类：`Category.value`（框架通用大类，见 §3.5）与 `Kind.value`（游戏原型 kind）。客户端应**先用 `Category.value` 选渲染/交互大类，再用 `Kind.value` 选具体贴图/动画/名称**；只有拿不到这两个字段（旧服务端）时，才回退到「同步字段组合」启发式。
 
 | 特征 | 判定 |
 |------|------|
-| `Kind.value` | **首选**：直接给出种类（资源点/敌怪/NPC/尸体/建造物/首领/传送门…） |
+| `Category.value` | **首选大类**：`player` / `enemy` / `npc` / `projectile` / `structure` / `resource` / `container` / `item` / `other` |
+| `Kind.value` | **具体种类**：原型 kind 字符串（资源点/敌怪/尸体/建造物/首领/传送门…） |
 | `ResourceNode.remaining` | 资源点（可采集）——无 kind 时的兜底 |
 | `ItemMeta.kind` | 地面物品（可拾取） |
 | `DialogueSource.treeId` | NPC（可对话） |
@@ -357,7 +373,7 @@ export class RoomState extends Schema {
 | 取消制作 | `command craft-cancel` | 取消进行中的制作并退料（退料放不下则整条拒绝） | 制作时长/条件同 crafting 配置 |
 | 容器取回 | `command transfer{target,slot}` | 容器槽物品 → 本人背包 | 取回距离 = place 规则 `containerRange`（缺省 64px）；同图/同层校验 |
 | 加燃料 | `command refuel` | 消耗背包燃料物品 → 站点 `LightSource.fuelRemainingMs` 增长 | 射程 = crafting 规则 `stationRange`；燃料物品表 = crafting 规则 `fuel.items` |
-| 投掷 | `command throw{x,y}` | 武器槽投掷档案物品 → 投射物实体（直线飞行、命中/寿命结束销毁） | 投掷参数（速度/寿命/半径/伤害/冷却）由物品配置 `throw` 段定义；冷却剩余毫秒经 `Cooldown.remainingMs` 同步（玩家实体），**是否放行仍由服务端裁决** |
+| 投掷 | `command throw{x,y}` | 武器槽投掷档案物品 → 投射物实体（直线飞行、命中/寿命结束销毁） | 投掷参数（速度/寿命/半径/伤害/冷却）由物品配置 `throw` 段定义；冷却剩余毫秒经 `Cooldown.remainingMs` 同步（所有带冷却的实体），**是否放行仍由服务端裁决** |
 | 装备 | `command equip` | `Equipment` 三槽更新，攻击/采集加成即时生效 | 槽位 weapon/tool/armor 是协议形状；加成数值由物品配置（`game/items/`）定义 |
 | 食用/丢弃 | `command consume/drop` | 需求恢复 / 地面掉物 | 食用恢复量由物品配置（`game/items/`）定义 |
 | 放置 | `command place` | 校验后消耗 1 个 kit → 生成建筑实体 | 放置距离/网格吸附由 place 规则（`game/rules/place.json`）配置 |

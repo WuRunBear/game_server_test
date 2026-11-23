@@ -373,9 +373,9 @@ describe("ResourceNode 新字段持久化 / 真实配置接线", () => {
       ],
     });
 
-    // netSync 字段未扩展：配置只同步 remaining（新字段属服务端权威配置）
+    // CC-07：netSync 补 max/infinite（客户端画资源 pips/无限采集），remaining 保持
     const resourceSync = def.netSync?.fields?.find((f) => f.component === "ResourceNode");
-    expect(resourceSync?.fields).toEqual(["remaining"]);
+    expect(resourceSync?.fields).toEqual(["remaining", "max", "infinite"]);
   });
 
   it("真实内容：tree 需 axe + 多产物表，gold_rock 需 pickaxe，berry_bush 无门槛", () => {

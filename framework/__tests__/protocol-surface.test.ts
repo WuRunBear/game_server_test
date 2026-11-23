@@ -351,8 +351,8 @@ describe("offer 的 networkId 语义", () => {
   });
 });
 
-describe("Cooldown 同步（Cooldown.remainingMs，仅玩家）", () => {
-  it("玩家实体的冷却剩余毫秒进快照；非玩家实体不同步", async () => {
+describe("Cooldown 同步（Cooldown.remainingMs，全体带组件实体）", () => {
+  it("玩家与敌怪的冷却剩余毫秒都进快照（CC-07 去掉 Player 标签限定）", async () => {
     const gameDef = loadGameDefinition({ gameJsonPath: "game/game.json" });
     const sim = await createGameSimulation(gameDef);
     const world = simWorld(sim);
@@ -368,7 +368,8 @@ describe("Cooldown 同步（Cooldown.remainingMs，仅玩家）", () => {
     expect(remaining).toBeGreaterThan(0);
     expect(remaining).toBeLessThanOrEqual(750);
 
-    // 标签限定：非玩家实体（带 Cooldown 的敌怪）不进快照
+    // CC-07：去掉 tags 限定后，带 Cooldown 的敌怪冷却同样同步
+    //（客户端画敌人攻击冷却；实体分类见 Category.value）。
     const { spawnEntity } = await import("framework/entities/spawn");
     const boarEid = spawnEntity(
       world,
@@ -379,7 +380,9 @@ describe("Cooldown 同步（Cooldown.remainingMs，仅玩家）", () => {
     Cooldown.remainingMs[boarEid] = 500;
     const boarNetworkId = NetworkId.value[boarEid]!;
     const snapshot2 = sim.tick(50).snapshot;
-    expect(snapshot2.entities.get(boarNetworkId)?.values["Cooldown.remainingMs"]).toBeUndefined();
+    const boarRemaining = snapshot2.entities.get(boarNetworkId)?.values["Cooldown.remainingMs"];
+    expect(boarRemaining).toBeGreaterThan(0);
+    expect(boarRemaining).toBeLessThanOrEqual(500);
   });
 });
 

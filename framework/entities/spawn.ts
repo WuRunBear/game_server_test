@@ -92,6 +92,9 @@ export function spawnEntity(
 
   Transform.x[eid] = overrides?.x ?? 0;
   Transform.y[eid] = overrides?.y ?? 0;
+  // scale 的语义中性值是 1（bitecs 数组默认 0）。CC-07 起 scale 进入 netSync，
+  // 不初始化会让客户端把新实体缩放成 0（不可见）；rot 的默认 0 即正确朝向。
+  Transform.scale[eid] = 1;
 
   // 挂标签组件（如 Player/Item），供 query 与同步适配器按标签筛选
   if (archetype.tags) {
