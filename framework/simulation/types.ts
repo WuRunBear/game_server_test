@@ -9,6 +9,7 @@
  */
 
 import type { Repository, WorldRecord } from "framework/repository";
+import type { ClientEvent } from "./clientEvents";
 
 /**
  * 客户端发给服务端的输入命令。
@@ -96,6 +97,11 @@ export interface TradeParty {
  */
 export interface PlayerCommand {
   type: "consume" | "drop" | "transfer" | "craft" | "craft-cancel" | "refuel" | "equip" | "place" | "deconstruct" | "throw" | "dialogue" | "offer" | "offer-accept" | "offer-cancel";
+  /**
+   * 客户端请求标识（可选）：命令回执原样带回，供 UI 把异步结果对回操作。
+   * 缺失时回执照发（requestId 为 undefined），客户端可忽略。
+   */
+  requestId?: string;
   /** 目标槽索引（consume/drop/equip/place 用）；transfer 的源槽。 */
   slot?: number;
   /** transfer 目标槽。 */
@@ -116,6 +122,34 @@ export interface PlayerCommand {
   offerId?: number | string;
   /** 报价有效期（offer 用，tick 数；缺省不过期）。 */
   ttlTicks?: number;
+}
+
+/** 命令失败错误码（CC-04 统一错误码；成功时不带 code）。 */
+export type CommandResultCode =
+  | "invalid"
+  | "no_item"
+  | "inventory_full"
+  | "out_of_range"
+  | "cooldown"
+  | "rate_limited"
+  | "dead"
+  | "not_owner"
+  | "blocked"
+  | "unknown";
+
+/**
+ * 命令回执（submitCommand 返回值；GameRoom 转成 `command-result` 消息）。
+ *
+ * 成功也回执（`{ ok: true }`）；失败带统一错误码。`data` 预留给需要附加
+ * 信息的命令（当前批次未使用）。
+ */
+export interface CommandResult {
+  /** 是否成功执行。 */
+  ok: boolean;
+  /** 失败原因（ok=false 时存在；无法归类时为 "unknown"）。 */
+  code?: CommandResultCode;
+  /** 可选附加数据（保持 JSON 可序列化）。 */
+  data?: Record<string, unknown>;
 }
 
 /**
@@ -262,6 +296,18 @@ export interface TickResult {
    * 未配置视野半径时缺省——传输层回退全量广播（兼容旧协议）。
    */
   interest?: Map<string, number[]>;
+  /**
+   * 本帧客户端表现事件（sessionId → 已按受众过滤的事件列表）。
+   *
+   * 只包含有事件的会话；传输层按 sessionId 批量发送 `events` 消息。
+   * seq 在事件产生时分配（per-world 全局单调），过滤不会重排。
+   */
+  clientEvents?: Map<string, ClientEvent[]>;
+  /**
+   * `clientEvents` 的兼容别名（CC-04 文档写作 `TickResult.events`）。
+   * 两者引用同一 Map，消费方任选其一，不要重复发送。
+   */
+  events?: Map<string, ClientEvent[]>;
 }
 
 /**

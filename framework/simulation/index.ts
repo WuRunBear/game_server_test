@@ -10,7 +10,19 @@
  */
 export type {
   PlayerInput, PlayerJoinResult, PlayerJoinOptions, TickSnapshot, TickResult, DebugSnapshotOptions,
+  PlayerCommand, CommandResult, CommandResultCode,
 } from "./types";
+export {
+  emitClientEvent,
+  collectEventsForClient,
+  drainClientEventOutbox,
+  networkIdOf,
+  DEFAULT_CLIENT_EVENT_VIEW_RADIUS,
+  type ClientEvent,
+  type ClientEventAudience,
+  type ClientEventViewer,
+  type PendingClientEvent,
+} from "./clientEvents";
 
 export type { SimulationPort } from "./SimulationPort";
 

@@ -2,6 +2,7 @@ import { hasComponent, query } from "bitecs";
 import { Health, Player, Transform, Needs, SpawnPoint, entityMapOf } from "components";
 import { getRespawnMarkers } from "framework/systems/gameplay/deathSystem";
 import { movePlayerToMap } from "framework/map/switchMap";
+import { emitClientEvent, networkIdOf } from "framework/simulation/clientEvents";
 import type { GameWorld } from "world";
 
 /**
@@ -62,6 +63,18 @@ export function respawnSystem(world: GameWorld): GameWorld {
       if (needs) {
         for (const need of needs) need.current = need.max;
       }
+    }
+
+    // CC-04 重生回执（self）：坐标/地图随后由 RoomState 同步。
+    const player = networkIdOf(world, eid);
+    if (player !== undefined) {
+      emitClientEvent(
+        world,
+        "respawn",
+        { player, mapId: entityMapOf(world, eid) },
+        "self",
+        { targetEid: eid },
+      );
     }
 
     markers.delete(eid);

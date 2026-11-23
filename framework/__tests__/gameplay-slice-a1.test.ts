@@ -264,7 +264,7 @@ describe("Slice A1：timer/trigger 配置驱动闭环（持续伤害）", () => 
 
     const inv = Inventory[playerEid]!;
     inv.slots[0] = { kind: "raw_meat", count: 1 };
-    expect(sim.submitCommand("s1", { type: "consume", slot: 0 })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "consume", slot: 0 }).ok).toBe(true);
 
     expect(Modifiers[playerEid]!["moveSpeed"]?.length).toBe(1); // 减速状态施加
     expect(Interval[playerEid]!.periodTicks).toBe(10); // 周期定时器落位

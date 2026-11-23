@@ -85,6 +85,35 @@ export function createEventBus(): EventBus {
 }
 
 /**
+ * 非破坏性 tap：在事件**入队时**旁路观察（不影响 drain 语义/顺序/归属）。
+ *
+ * 用途：CC-04 客户端事件 outbox 需要读取 on-hit/on-death 等帧内事件，但
+ * eventBus 的唯一消费方是 triggerSystem（drain 后队列即空）。tap 只是观察者，
+ * 不取走事件、不改变 QueuedEvent 结构。
+ */
+export type EventQueueTap = (name: string, payload: unknown) => void;
+
+/** world → tap 集合（模块级 WeakMap，不给 EventBus 公共结构加字段）。 */
+const tapsByWorld = new WeakMap<GameWorld, Set<EventQueueTap>>();
+
+/**
+ * 注册事件入队 tap。
+ *
+ * @returns 取消注册函数（world 生命周期内通常无需调用）
+ */
+export function tapEvents(world: GameWorld, tap: EventQueueTap): () => void {
+  let taps = tapsByWorld.get(world);
+  if (!taps) {
+    taps = new Set();
+    tapsByWorld.set(world, taps);
+  }
+  taps.add(tap);
+  return () => {
+    tapsByWorld.get(world)?.delete(tap);
+  };
+}
+
+/**
  * 入队一个类型化事件（追加到本 tick 队列尾部）。
  * 载荷结构由 TypedEventPayloads 按事件名静态约束。
  */
@@ -98,6 +127,21 @@ export function queueEvent<N extends TypedEventName>(
   const eid = (payload as { eid?: unknown }).eid;
   const triggers = typeof eid === "number" ? Triggers[eid] : undefined;
   world.eventBus.queue.push({ name, payload, ...(triggers ? { triggers } : {}) });
+
+  // 非破坏性旁路观察（tap 抛错不得影响事件生产/消费链）。
+  const taps = tapsByWorld.get(world);
+  if (taps) {
+    for (const tap of taps) {
+      try {
+        tap(name, payload);
+      } catch (err) {
+        world.logger.warn("eventBus tap 执行失败（已忽略）", {
+          name,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
 }
 
 /**

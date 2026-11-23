@@ -19,9 +19,53 @@ export interface GameEvent {
   data: Record<string, unknown>;
 }
 
+/**
+ * 非破坏性 tap：在事件**发射时**旁路观察（不改变 runtimeEvents 的消费语义）。
+ *
+ * CC-04 用它在 `killed` 上生成客户端 `death` 事件；questSystem/progressionSystem
+ * 仍是原有的 consume/peek 消费方，互不影响。
+ */
+export type GameEventTap = (event: GameEvent) => void;
+
+/** world → tap 集合（模块级 WeakMap，不给 GameWorld 加公共字段）。 */
+const tapsByWorld = new WeakMap<GameWorld, Set<GameEventTap>>();
+
+/**
+ * 注册帧内事件发射 tap。
+ *
+ * @returns 取消注册函数（world 生命周期内通常无需调用）
+ */
+export function tapGameEvents(world: GameWorld, tap: GameEventTap): () => void {
+  let taps = tapsByWorld.get(world);
+  if (!taps) {
+    taps = new Set();
+    tapsByWorld.set(world, taps);
+  }
+  taps.add(tap);
+  return () => {
+    tapsByWorld.get(world)?.delete(tap);
+  };
+}
+
 /** 发射事件（追加到本帧事件队列）。 */
 export function emitEvent(world: GameWorld, type: string, data: Record<string, unknown>): void {
-  world.runtimeEvents.push({ type, data });
+  const event: GameEvent = { type, data };
+  world.runtimeEvents.push(event);
+
+  // 非破坏性旁路观察（tap 抛错不得影响事件生产/消费链）。
+  const taps = tapsByWorld.get(world);
+  if (taps) {
+    for (const tap of taps) {
+      try {
+        tap(event);
+      } catch (err) {
+        world.logger.warn("gameEvents tap 执行失败（已忽略）", {
+          type,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
 }
 
 /** 取出本帧指定类型的事件并清空（消费一次；事件不跨帧）。 */

@@ -208,7 +208,7 @@ describe("offer 的 networkId 语义", () => {
         { party: net2, give: [{ container: "ledger", kind: "shell", count: 5 }], take: [{ container: "inventory", kind: "wood", count: 2 }] },
       ],
     });
-    expect(offered).toBe(true);
+    expect(offered.ok).toBe(true);
 
     const sessions = [...world.offerSessions.values()];
     expect(sessions.length).toBe(1);
@@ -219,7 +219,7 @@ describe("offer 的 networkId 语义", () => {
     expect(session.terms.map((t) => t.party)).toContain(session.initiator);
 
     // 对方确认 → 成交
-    expect(sim.submitCommand("s2", { type: "offer-accept", offerId: session.id })).toBe(true);
+    expect(sim.submitCommand("s2", { type: "offer-accept", offerId: session.id }).ok).toBe(true);
     expect(session.status).toBe("settled");
   });
 
@@ -234,7 +234,7 @@ describe("offer 的 networkId 语义", () => {
         { party: 999999, take: [{ container: "inventory", kind: "wood", count: 2 }] },
       ],
     });
-    expect(forged).toBe(false);
+    expect(forged.ok).toBe(false);
     expect(world.offerSessions.size).toBe(0);
 
     // 发起方不在条款中：条款两方都是**他人**（发起者必须在条款中）→ 拒绝
@@ -246,7 +246,7 @@ describe("offer 的 networkId 语义", () => {
         { party: third.networkId, take: [{ container: "inventory", kind: "wood", count: 2 }] },
       ],
     });
-    expect(notSelf).toBe(false);
+    expect(notSelf.ok).toBe(false);
     expect(world.offerSessions.size).toBe(0);
   });
 
@@ -315,13 +315,13 @@ describe("offer 的 networkId 语义", () => {
         { party: net2, give: [{ kind: "shell", count: 5 }], take: [{ kind: "wood", count: 2 }] },
       ],
     });
-    expect(offered).toBe(true);
+    expect(offered.ok).toBe(true);
     const session = [...world.offerSessions.values()][0]!;
     // 缺省容器归一为 inventory
     expect(session.terms[0]!.give![0]!.container).toBe("inventory");
 
     // offerId 为数字字符串（客户端直接回传报价表 map 键的字符串形态）
-    expect(sim.submitCommand("s2", { type: "offer-accept", offerId: String(session.id) })).toBe(true);
+    expect(sim.submitCommand("s2", { type: "offer-accept", offerId: String(session.id) }).ok).toBe(true);
     expect(session.status).toBe("settled");
     // 结算走背包容器：木头换到 5 个贝壳
     expect(queryContainer(world, { type: "inventory", eid: playerEidOf(sim, "s1") }, "shell")).toBe(5);
@@ -343,7 +343,7 @@ describe("offer 的 networkId 语义", () => {
     expect(room.state.offers.size).toBe(1);
 
     // 取消 → 会话作废 → 摘要消失
-    expect(sim.submitCommand("s1", { type: "offer-cancel", offerId: session.id })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "offer-cancel", offerId: session.id }).ok).toBe(true);
     reach(room).applySnapshot(sim.tick(50));
     expect(sim.tick(50).snapshot.offers).toHaveLength(0);
     expect(room.state.offers.size).toBe(0);

@@ -436,9 +436,9 @@ describe("Slice 7：真实 game 配置集成（对话任务线全链路）", () 
     expect(dlg.nodeId).toBe("start");
 
     // 选"你好，我想帮忙" → tasks 节点；再接任务（选项 0）
-    expect(sim.submitCommand("s1", { type: "dialogue", option: 0 })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "dialogue", option: 0 }).ok).toBe(true);
     expect(Dialogue[playerEid]!.nodeId).toBe("tasks");
-    expect(sim.submitCommand("s1", { type: "dialogue", option: 0 })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "dialogue", option: 0 }).ok).toBe(true);
     expect(Quest[playerEid]).toEqual([{ questId: "collect_axe", state: QUEST_ACTIVE, count: 0 }]);
 
     // 接任务后快照同步 Quest 展平字段
@@ -453,7 +453,7 @@ describe("Slice 7：真实 game 配置集成（对话任务线全链路）", () 
     expect(Quest[playerEid]![0].state).toBe(QUEST_READY);
 
     // 提交任务（tasks 节点选项 1）→ 消耗斧头、奖励矛、好感 +10
-    expect(sim.submitCommand("s1", { type: "dialogue", option: 1 })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "dialogue", option: 1 }).ok).toBe(true);
     expect(Quest[playerEid]![0].state).toBe(QUEST_DONE);
     // 任务物品已消耗，奖励入包
     expect(Inventory[playerEid]!.slots.every((s) => s?.kind !== "axe")).toBe(true);

@@ -133,15 +133,13 @@ describe("F-01 offer 命令：严格双人条款 + 在线玩家身份", () => {
     Inventory[npc] = emptyInventory();
     Inventory[npc].slots[0] = { kind: "loot", count: 1 };
 
-    expect(
-      sim.submitCommand("s1", {
-        type: "offer",
-        offer: [
-          { party: p1, give: [{ container: "inventory", kind: "k1", count: 2 }] },
-          { party: npc, take: [{ container: "inventory", kind: "k1", count: 2 }] },
-        ],
-      }),
-    ).toBe(false);
+    expect(sim.submitCommand("s1", {
+      type: "offer",
+      offer: [
+        { party: p1, give: [{ container: "inventory", kind: "k1", count: 2 }] },
+        { party: npc, take: [{ container: "inventory", kind: "k1", count: 2 }] },
+      ],
+    }).ok).toBe(false);
     expect(world.offerSessions.size).toBe(0);
   });
 
@@ -149,43 +147,37 @@ describe("F-01 offer 命令：严格双人条款 + 在线玩家身份", () => {
     const { sim, p1, p2 } = await setupOfferSim();
     sim.removePlayer("s2"); // p2 进入 Offline 保留期
 
-    expect(sim.submitCommand("s1", { type: "offer", offer: offerTerms(p1, p2) })).toBe(false);
+    expect(sim.submitCommand("s1", { type: "offer", offer: offerTerms(p1, p2) }).ok).toBe(false);
   });
 
   it("发起者不在条款中 / 重复 party / 非两方被拒", async () => {
     const { sim, world, p1, p2 } = await setupOfferSim();
     const npc = spawnManualEntity(world, "npc");
 
-    expect(
-      sim.submitCommand("s1", {
-        type: "offer",
-        offer: [
-          { party: p2, give: [{ container: "ledger", kind: "c1", count: 6 }] },
-          { party: npc, take: [{ container: "ledger", kind: "c1", count: 6 }] },
-        ],
-      }),
-    ).toBe(false);
+    expect(sim.submitCommand("s1", {
+      type: "offer",
+      offer: [
+        { party: p2, give: [{ container: "ledger", kind: "c1", count: 6 }] },
+        { party: npc, take: [{ container: "ledger", kind: "c1", count: 6 }] },
+      ],
+    }).ok).toBe(false);
 
-    expect(
-      sim.submitCommand("s1", {
-        type: "offer",
-        offer: [
-          { party: p1, give: [{ container: "inventory", kind: "k1", count: 2 }] },
-          { party: p1, take: [{ container: "inventory", kind: "k1", count: 2 }] },
-        ],
-      }),
-    ).toBe(false);
+    expect(sim.submitCommand("s1", {
+      type: "offer",
+      offer: [
+        { party: p1, give: [{ container: "inventory", kind: "k1", count: 2 }] },
+        { party: p1, take: [{ container: "inventory", kind: "k1", count: 2 }] },
+      ],
+    }).ok).toBe(false);
 
-    expect(
-      sim.submitCommand("s1", {
-        type: "offer",
-        offer: [
-          { party: p1, give: [{ container: "inventory", kind: "k1", count: 2 }] },
-          { party: p2, take: [{ container: "inventory", kind: "k1", count: 2 }] },
-          { party: npc, take: [{ container: "inventory", kind: "k1", count: 1 }] },
-        ],
-      }),
-    ).toBe(false);
+    expect(sim.submitCommand("s1", {
+      type: "offer",
+      offer: [
+        { party: p1, give: [{ container: "inventory", kind: "k1", count: 2 }] },
+        { party: p2, take: [{ container: "inventory", kind: "k1", count: 2 }] },
+        { party: npc, take: [{ container: "inventory", kind: "k1", count: 1 }] },
+      ],
+    }).ok).toBe(false);
     expect(world.offerSessions.size).toBe(0);
   });
 
@@ -201,9 +193,7 @@ describe("F-01 offer 命令：严格双人条款 + 在线玩家身份", () => {
       null,
     ];
     for (const terms of malformed) {
-      expect(
-        sim.submitCommand("s1", { type: "offer", offer: terms as TradeParty[] }),
-      ).toBe(false);
+      expect(sim.submitCommand("s1", { type: "offer", offer: terms as TradeParty[] }).ok).toBe(false);
     }
     expect(world.offerSessions.size).toBe(0);
   });
@@ -211,7 +201,7 @@ describe("F-01 offer 命令：严格双人条款 + 在线玩家身份", () => {
   it("双在线玩家：发起者自动确认、另一方必须显式 offer-accept 后才结算", async () => {
     const { sim, world, p1, p2 } = await setupOfferSim();
 
-    expect(sim.submitCommand("s1", { type: "offer", offer: offerTerms(p1, p2) })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "offer", offer: offerTerms(p1, p2) }).ok).toBe(true);
     const [session] = [...world.offerSessions.values()];
     expect(session.status).toBe("pending");
     expect(session.confirmed.has(p1)).toBe(true);
@@ -220,7 +210,7 @@ describe("F-01 offer 命令：严格双人条款 + 在线玩家身份", () => {
     // 未确认前资产不动
     expect(Ledger[p2]).toEqual({ c1: 6 });
 
-    expect(sim.submitCommand("s2", { type: "offer-accept", offerId: session.id })).toBe(true);
+    expect(sim.submitCommand("s2", { type: "offer-accept", offerId: session.id }).ok).toBe(true);
     expect(getOffer(world, session.id)!.status).toBe("settled");
     expect(Ledger[p1]).toEqual({ c1: 6 });
     expect(Inventory[p2]!.slots.map((s) => s?.kind)).toContain("k1");
@@ -251,11 +241,11 @@ describe("F-02 容器取回：同图 + 同层 + containerRange", () => {
     const { sim, player, container, networkId } = await setupLootSim();
 
     Transform.x[container] = Transform.x[player] + 500;
-    expect(sim.submitCommand("s1", { type: "transfer", target: networkId, slot: 0 })).toBe(false);
+    expect(sim.submitCommand("s1", { type: "transfer", target: networkId, slot: 0 }).ok).toBe(false);
     expect(Inventory[container]!.slots[0]?.count).toBe(1);
 
     Transform.x[container] = Transform.x[player] + 10;
-    expect(sim.submitCommand("s1", { type: "transfer", target: networkId, slot: 0 })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "transfer", target: networkId, slot: 0 }).ok).toBe(true);
     expect(Inventory[container]!.slots[0]).toBeNull();
   });
 
@@ -264,7 +254,7 @@ describe("F-02 容器取回：同图 + 同层 + containerRange", () => {
 
     Transform.x[container] = Transform.x[player] + 5;
     EntityLevel[container] = 1;
-    expect(sim.submitCommand("s1", { type: "transfer", target: networkId, slot: 0 })).toBe(false);
+    expect(sim.submitCommand("s1", { type: "transfer", target: networkId, slot: 0 }).ok).toBe(false);
     expect(Inventory[container]!.slots[0]?.count).toBe(1);
   });
 });

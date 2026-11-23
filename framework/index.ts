@@ -36,16 +36,27 @@ export { createGameSimulation, GameSimulation } from "framework/simulation/GameS
 export type { SimulationPort } from "framework/simulation/SimulationPort";
 export type {
   PlayerInput, PlayerJoinResult, TickSnapshot, TickResult, DebugSnapshotOptions, PlayerCommand, EntitySnapshot,
-  SimulationOptions, OfferSummary,
+  SimulationOptions, OfferSummary, CommandResult, CommandResultCode,
 } from "framework/simulation/types";
+export {
+  emitClientEvent,
+  collectEventsForClient,
+  drainClientEventOutbox,
+  networkIdOf,
+  DEFAULT_CLIENT_EVENT_VIEW_RADIUS,
+  type ClientEvent,
+  type ClientEventAudience,
+  type ClientEventViewer,
+  type PendingClientEvent,
+} from "framework/simulation/clientEvents";
 export { registerAosSyncAdapter, getAosSyncAdapter, type AosSyncAdapter, type AosSyncOutput } from "framework/simulation/aosSyncAdapters";
 export { computeInterest } from "framework/simulation/interest";
 export { createInputGuard, type InputGuard } from "framework/simulation/inputValidation";
 
 // 类型化事件总线（tick 内排队、固定阶段 drain 消费）
 export {
-  queueEvent, drainEvents,
-  type QueuedEvent, type TypedEventPayloads, type TypedEventName,
+  queueEvent, drainEvents, tapEvents,
+  type QueuedEvent, type TypedEventPayloads, type TypedEventName, type EventQueueTap,
 } from "framework/simulation/events/eventBus";
 
 // 效果系统（注册表 + 内置效果）
@@ -139,7 +150,13 @@ export { deconstructEntity } from "framework/systems/gameplay/deconstructSystem"
 export { startDialogue, advanceDialogue, applyDialogueEffect, END_DIALOGUE } from "framework/systems/gameplay/dialogueSystem";
 export { acceptQuest, submitQuest, createQuestSystem, questSystem } from "framework/systems/gameplay/questSystem";
 export { addRelation, getRelation } from "framework/systems/gameplay/relation";
-export { emitEvent, consumeEvents, type GameEvent } from "framework/events/gameEvents";
+export {
+  emitEvent,
+  consumeEvents,
+  tapGameEvents,
+  type GameEvent,
+  type GameEventTap,
+} from "framework/events/gameEvents";
 export { overlapsAnyEntity, overlapsMapBlocked, overlapsOccupiedGrid, snapToGrid } from "framework/utils/placement";
 
 export { GameDefinitionSchema, WorldTileSchema, WorldSchema, type GameDefinition, type WorldTile, type WorldConfig, type LoadedGameDefinition, type BehaviorDefinition, type SystemEnableEntry, type NetSyncField } from "framework/config/schema/GameDefinitionSchema";

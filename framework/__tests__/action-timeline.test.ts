@@ -516,7 +516,7 @@ describe("动作时间轴：GameSimulation 集成与 netSync", () => {
         type: "throw",
         x: Transform.x[playerEid] + 64,
         y: Transform.y[playerEid],
-      }),
+      }).ok,
     ).toBe(true);
     // 命令只启动动作，不立刻生成投射物
     expect(query(world, [Projectile]).length).toBe(0);

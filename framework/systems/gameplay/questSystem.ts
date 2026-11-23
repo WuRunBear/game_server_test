@@ -21,6 +21,7 @@ import { addToInventory } from "framework/systems/gameplay/inventoryOps";
 import { addRelation } from "framework/systems/gameplay/relation";
 import { creditFactionForNpcKind } from "framework/systems/gameplay/factions";
 import type { QuestDefinitionJson } from "framework/config/schema/QuestSchema";
+import { emitClientEvent } from "framework/simulation/clientEvents";
 
 /** 背包中 kind 物品总数。 */
 function inventoryCount(world: GameWorld, playerEid: EntityId, kind: string): number {
@@ -62,6 +63,13 @@ export function acceptQuest(world: GameWorld, playerEid: EntityId, questId: stri
   if (quests.some((q) => q.questId === questId)) return false;
 
   quests.push({ questId, state: QUEST_ACTIVE, count: 0 });
+  emitClientEvent(
+    world,
+    "quest-update",
+    { questId, state: "active", count: 0 },
+    "self",
+    { targetEid: playerEid },
+  );
   return true;
 }
 
@@ -108,6 +116,13 @@ export function submitQuest(world: GameWorld, playerEid: EntityId, questId: stri
     creditFactionForNpcKind(world, playerEid, npcKind, def.submit.relationDelta);
   }
   quest.state = QUEST_DONE;
+  emitClientEvent(
+    world,
+    "quest-complete",
+    { questId, state: "done", count: quest.count },
+    "self",
+    { targetEid: playerEid },
+  );
   return true;
 }
 
@@ -126,19 +141,37 @@ export function createQuestSystem() {
         const def: QuestDefinitionJson | undefined = world.gameDef.questsByKind?.get(quest.questId);
         if (!def) continue;
 
+        let changed = false;
         if (def.type === "collect") {
           if (inventoryCount(world, playerEid, def.itemKind ?? "") >= def.goal) {
             quest.state = QUEST_READY;
+            changed = true;
           }
         } else if (def.type === "kill") {
           for (const evt of killed) {
             if (evt.data.kind === def.victimKind && evt.data.killer === playerEid) {
               quest.count += 1;
+              changed = true;
             }
           }
           if (quest.count >= def.goal) {
             quest.state = QUEST_READY;
+            changed = true;
           }
+        }
+
+        if (changed) {
+          emitClientEvent(
+            world,
+            "quest-update",
+            {
+              questId: quest.questId,
+              state: quest.state === QUEST_READY ? "ready" : "active",
+              count: quest.count,
+            },
+            "self",
+            { targetEid: playerEid },
+          );
         }
       }
     }

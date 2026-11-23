@@ -11,6 +11,7 @@ import {
 } from "framework/systems/gameplay/spawnConditions";
 import type { SerializedCraftingJob } from "framework/repository";
 import type { CraftingRecipe, EnvironmentRule } from "framework/config/schema/RuleSchema";
+import { emitClientEvent, networkIdOf } from "framework/simulation/clientEvents";
 
 /**
  * craftingSystem：合成原子模块（无 tick 体，命令通道驱动）。
@@ -287,10 +288,16 @@ export function craftRecipe(world: GameWorld, ownerEid: number, recipeId: string
 
   if (recipe.durationTicks > 0) {
     // 延时制作：材料已扣，产出挂起至 finishTick（stepCraftingJobs 推进）
+    const finishTick = world.time.tick + recipe.durationTicks;
     enqueueCraft(world, ownerEid, {
       recipeId,
-      finishTick: world.time.tick + recipe.durationTicks,
+      finishTick,
       durationTicks: recipe.durationTicks,
+    });
+    emitCraftEvent(world, ownerEid, "craft-start", {
+      recipeId,
+      durationTicks: recipe.durationTicks,
+      finishTick,
     });
     return true;
   }
@@ -300,7 +307,23 @@ export function craftRecipe(world: GameWorld, ownerEid: number, recipeId: string
       nowTick: world.time.tick,
     });
   }
+  emitCraftEvent(world, ownerEid, "craft-complete", {
+    recipeId,
+    outputs: recipe.outputs.map((out) => [out.kind, out.count]),
+  });
   return true;
+}
+
+/** 合成事件统一出口（self；outputs 为 [kind,count][]，不含 eid）。 */
+function emitCraftEvent(
+  world: GameWorld,
+  ownerEid: number,
+  type: "craft-start" | "craft-complete" | "craft-cancel",
+  data: Record<string, unknown>,
+): void {
+  const player = networkIdOf(world, ownerEid);
+  if (player === undefined) return;
+  emitClientEvent(world, type, { player, ...data }, "self", { targetEid: ownerEid });
 }
 
 /* ------------------------------------------------------------------ */
@@ -444,6 +467,10 @@ export function stepCraftingJobs(world: GameWorld): void {
           nowTick: tick,
         });
       }
+      emitCraftEvent(world, ownerEid, "craft-complete", {
+        recipeId: job.recipeId,
+        outputs: recipe.outputs.map((out) => [out.kind, out.count]),
+      });
     }
     if (remaining.length > 0) world.craftingJobs.set(ownerEid, remaining);
     else world.craftingJobs.delete(ownerEid);
@@ -481,6 +508,7 @@ export function cancelCrafting(world: GameWorld, ownerEid: number, recipeId: str
   const remaining = jobs.filter((_, i) => i !== index);
   if (remaining.length > 0) world.craftingJobs.set(ownerEid, remaining);
   else world.craftingJobs.delete(ownerEid);
+  emitCraftEvent(world, ownerEid, "craft-cancel", { recipeId });
   return true;
 }
 

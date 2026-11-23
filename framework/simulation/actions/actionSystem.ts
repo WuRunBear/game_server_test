@@ -28,6 +28,7 @@ import {
   type ActionRuntime,
   type ActionStateEntry,
 } from "framework/simulation/actions/actionState";
+import { emitClientEvent, networkIdOf } from "framework/simulation/clientEvents";
 
 /**
  * actionSystem：服务端权威的动作时间轴推进器。
@@ -108,6 +109,85 @@ export function installActionRuntime(
   return runtime;
 }
 
+/**
+ * 动作开始时的锚点快照（state 对象身份 → 坐标/地图）。
+ *
+ * 动作可能因换图取消；取消事件应发给**动作开始时所在图**的附近玩家，
+ * 而不是角色刚传送到的目标图。用 WeakMap 避免改 ActionStateEntry 公共结构。
+ */
+const actionStartAnchors = new WeakMap<
+  ActionStateEntry,
+  { mapId: string; x: number; y: number }
+>();
+
+/**
+ * 发一条动作表现事件（nearby）。
+ *
+ * 载荷里的实体引用全部是 networkId；eid 只用于服务端锚点/当事人解析。
+ * 动作事件是**通知**，权威状态仍在 `Action.*` 同步字段与 RoomState。
+ */
+function emitActionEvent(
+  world: GameWorld,
+  eid: EntityId,
+  state: ActionStateEntry,
+  type: "action-start" | "action-phase" | "action-hit" | "action-end" | "action-cancel",
+  extra: Record<string, unknown> = {},
+): void {
+  const actor = networkIdOf(world, eid);
+  if (actor === undefined) return;
+  const target =
+    state.targetNetworkId !== undefined
+      ? state.targetNetworkId
+      : state.targetEid >= 0
+        ? networkIdOf(world, state.targetEid)
+        : undefined;
+  const startAnchor = actionStartAnchors.get(state);
+  const anchor = startAnchor
+    ? { mapId: startAnchor.mapId, x: startAnchor.x, y: startAnchor.y }
+    : hasComponent(world, eid, Transform)
+      ? { anchorEid: eid }
+      : {};
+  emitClientEvent(
+    world,
+    type,
+    {
+      actionId: state.actionId,
+      actor,
+      ...(target !== undefined ? { target } : {}),
+      tick: world.time.tick,
+      ...extra,
+    },
+    "nearby",
+    anchor,
+  );
+}
+
+/** 结束/取消动作并补发对应事件，然后清空 ActionState。 */
+function finishActionState(
+  world: GameWorld,
+  eid: EntityId,
+  state: ActionStateEntry,
+  type: "action-end" | "action-cancel",
+  reason?: string,
+): void {
+  emitActionEvent(world, eid, state, type, {
+    phase: state.phase,
+    ...(reason !== undefined ? { reason } : {}),
+  });
+  clearActionState(eid);
+}
+
+/**
+ * 外部（断线/重连/会话清理）取消动作：补发 action-cancel 后清空。
+ *
+ * 无动作状态时 no-op。
+ */
+export function cancelAction(world: GameWorld, eid: EntityId, reason: string): void {
+  const state = ActionState[eid];
+  if (!state) return;
+  finishActionState(world, eid, state, "action-cancel", reason);
+}
+
 /** 动作启动选项（目标/朝向/瞄准/复核距离；eid 均为服务端内部标识）。 */
 export interface StartActionOptions {
   /** 已解析的目标实体 eid（-1/缺省 = 无目标）。 */
@@ -146,7 +226,7 @@ export function startConfiguredAction(
   let interrupted = false;
   if (existing) {
     if (!existing.interruptible) return false;
-    clearActionState(eid);
+    finishActionState(world, eid, existing, "action-cancel", "interrupted");
     // 被可打断动作替换：新动作是权威起点，允许重新起冷却（不继承旧冷却）
     interrupted = true;
   }
@@ -211,6 +291,13 @@ export function startConfiguredAction(
       : {}),
   };
   ActionState[eid] = state;
+  if (hasComponent(world, eid, Transform)) {
+    actionStartAnchors.set(state, {
+      mapId: entityMapOf(world, eid),
+      x: Transform.x[eid],
+      y: Transform.y[eid],
+    });
+  }
 
   // 锁移动立即生效（本 tick 位移已在 movement 中结算；这里清速度让快照/下一
   // tick 都从静止开始，applyInputs 在锁定期也会持续清零）。
@@ -218,6 +305,14 @@ export function startConfiguredAction(
     Velocity.vx[eid] = 0;
     Velocity.vy[eid] = 0;
   }
+
+  emitActionEvent(world, eid, state, "action-start", {
+    phase: state.phase,
+    startedTick: state.startedTick,
+    durationTicks: state.durationTicks,
+    dirX: state.dirX,
+    dirY: state.dirY,
+  });
   return true;
 }
 
@@ -309,17 +404,16 @@ function runActionEvent(
   eid: EntityId,
   state: ActionStateEntry,
   type: string,
-): void {
+): boolean {
   switch (type) {
     case "hit": {
-      if (!isResolvedTargetCurrent(world, state)) return;
-      runWithCooldownBypass(world, eid, state, () =>
+      if (!isResolvedTargetCurrent(world, state)) return false;
+      return runWithCooldownBypass(world, eid, state, () =>
         attackTarget(world, eid, state.targetEid),
       );
-      return;
     }
     case "harvest": {
-      if (!isResolvedTargetCurrent(world, state)) return;
+      if (!isResolvedTargetCurrent(world, state)) return false;
       if (state.maxRange !== undefined) {
         const distance = sameLevelDistance(
           Transform.x[eid],
@@ -329,18 +423,18 @@ function runActionEvent(
           Transform.y[state.targetEid],
           entityLevelOf(state.targetEid),
         );
-        if (distance === undefined || distance > state.maxRange) return;
+        if (distance === undefined || distance > state.maxRange) return false;
       }
-      if (harvest(world, eid, state.targetEid)) {
+      const harvested = harvest(world, eid, state.targetEid);
+      if (harvested) {
         awardHarvestXp(world, eid, state.targetEid);
       }
-      return;
+      return harvested;
     }
     case "spawn-projectile": {
-      runWithCooldownBypass(world, eid, state, () =>
+      return runWithCooldownBypass(world, eid, state, () =>
         throwWeapon(world, eid, state.aimX, state.aimY),
       );
-      return;
     }
     default:
       throw new Error(`unknown action event type "${type}" (action "${state.actionId}")`);
@@ -408,17 +502,17 @@ export function tickActionStates(world: GameWorld): GameWorld {
       continue;
     }
     if (isOfflineRetained(world, eid)) {
-      clearActionState(eid);
+      finishActionState(world, eid, state, "action-cancel", "offline");
       continue;
     }
     if (hasComponent(world, eid, Health) && (Health.current[eid] ?? 0) <= 0) {
-      clearActionState(eid);
+      finishActionState(world, eid, state, "action-cancel", "dead");
       continue;
     }
 
     // 换图取消：动作开始时的地图与当前归属不一致 → 清空（客户端键随之消失）
     if (entityMapOf(world, eid) !== state.mapId) {
-      clearActionState(eid);
+      finishActionState(world, eid, state, "action-cancel", "map-change");
       continue;
     }
 
@@ -428,26 +522,36 @@ export function tickActionStates(world: GameWorld): GameWorld {
       hasComponent(world, eid, Health) &&
       (Health.current[eid] ?? 0) < state.startHealth
     ) {
-      clearActionState(eid);
+      finishActionState(world, eid, state, "action-cancel", "damage");
       continue;
     }
 
     const elapsed = world.time.tick - state.startedTick;
     if (elapsed < 0 || elapsed >= state.durationTicks) {
-      clearActionState(eid);
+      finishActionState(world, eid, state, "action-end");
       continue;
     }
 
     const definition = getActionDefinition(world, state.actionId);
     if (!definition) {
       // 运行时配置被替换/动作已删除：无法安全推进 → 清空
-      clearActionState(eid);
+      finishActionState(world, eid, state, "action-cancel", "missing-definition");
       continue;
     }
 
+    const previousPhaseIndex = state.phaseIndex;
     const targetPhase = phaseIndexAt(definition, elapsed);
     state.phaseIndex = targetPhase;
     state.phase = phaseIdAt(definition, targetPhase);
+    if (targetPhase !== previousPhaseIndex) {
+      // 卡顿/低 tickRate 导致一次跨多个阶段时，按顺序补齐每个阶段的进入通知。
+      for (let phaseIndex = previousPhaseIndex + 1; phaseIndex <= targetPhase; phaseIndex++) {
+        emitActionEvent(world, eid, state, "action-phase", {
+          phase: phaseIdAt(definition, phaseIndex),
+          phaseIndex,
+        });
+      }
+    }
     // 事件游标独立于当前阶段：动作开始时已在首阶段，但首阶段事件在 actionSystem
     // 首次推进（同 tick 或下一 tick）只触发一次；跨多个阶段时按顺序补齐。
     while (state.eventsThroughPhase < targetPhase) {
@@ -455,7 +559,13 @@ export function tickActionStates(world: GameWorld): GameWorld {
       const eventPhase = phaseIdAt(definition, state.eventsThroughPhase);
       for (const event of definition.events) {
         if (event.phase !== eventPhase) continue;
-        runActionEvent(world, eid, state, event.type);
+        const resolved = runActionEvent(world, eid, state, event.type);
+        if (resolved) {
+          emitActionEvent(world, eid, state, "action-hit", {
+            phase: eventPhase,
+            kind: event.type,
+          });
+        }
         // 事件可能间接触发清空/替换（防御：不要继续用失效状态推进）
         if (ActionState[eid] !== state) break;
       }

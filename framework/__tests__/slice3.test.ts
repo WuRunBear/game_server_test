@@ -486,22 +486,22 @@ describe("Slice 3：GameSimulation 命令路由", () => {
     const inv = Inventory[playerEid]!;
     fillInventory(inv, [{ kind: "m1", count: 2 }]);
 
-    expect(sim.submitCommand("s1", { type: "craft", recipe: "r1" })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "r1" }).ok).toBe(true);
     expect(inv.slots[0]).toEqual({ kind: "m2", count: 1 }); // m1 消耗后空出的槽被产出占用
 
-    expect(sim.submitCommand("s1", { type: "equip", slot: 1 })).toBe(false); // m2 材料不可穿戴
+    expect(sim.submitCommand("s1", { type: "equip", slot: 1 }).ok).toBe(false); // m2 材料不可穿戴
     expect(Equipment.weaponSlot[playerEid]).toBe(-1);
     inv.slots[1] = { kind: "w1", count: 1 };
-    expect(sim.submitCommand("s1", { type: "equip", slot: 1 })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "equip", slot: 1 }).ok).toBe(true);
     expect(Equipment.weaponSlot[playerEid]).toBe(1);
 
-    expect(sim.submitCommand("s1", { type: "craft", recipe: "missing" })).toBe(false);
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "missing" }).ok).toBe(false);
 
     // 死亡/重生窗口内命令被拒（与 applyInputs 守卫语义一致）
     Health.current[playerEid] = 0;
-    expect(sim.submitCommand("s1", { type: "craft", recipe: "r1" })).toBe(false);
-    expect(sim.submitCommand("s1", { type: "equip", slot: 1 })).toBe(false);
-    expect(sim.submitCommand("s1", { type: "consume", slot: 0 })).toBe(false);
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "r1" }).ok).toBe(false);
+    expect(sim.submitCommand("s1", { type: "equip", slot: 1 }).ok).toBe(false);
+    expect(sim.submitCommand("s1", { type: "consume", slot: 0 }).ok).toBe(false);
   });
 });
 
@@ -614,19 +614,19 @@ describe("Slice 3 集成：合成→装备→采集翻倍 / 合成矛→攻击�
     inv.slots[1] = { kind: "m2", count: 1 };
 
     // 命令通道合成 + 装备
-    expect(sim.submitCommand("s1", { type: "craft", recipe: "r1" })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "r1" }).ok).toBe(true);
     const toolSlot = inv.slots.findIndex((s) => s?.kind === "m3");
     expect(toolSlot).toBeGreaterThanOrEqual(0);
-    expect(sim.submitCommand("s1", { type: "equip", slot: toolSlot })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "equip", slot: toolSlot }).ok).toBe(true);
     expect(getEquipModifiers(world, playerEid).gatherMult).toBe(2);
 
     // 站点合成：无站点拒 → 在玩家处放置真实 campfire 原型 → 成功
-    expect(sim.submitCommand("s1", { type: "craft", recipe: "r2" })).toBe(false);
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "r2" }).ok).toBe(false);
     spawnEntity(world, archetypeRegistry.get("campfire"), componentRegistry, {
       x: Transform.x[playerEid],
       y: Transform.y[playerEid],
     });
-    expect(sim.submitCommand("s1", { type: "craft", recipe: "r2" })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "r2" }).ok).toBe(true);
     expect(inv.slots.some((s) => s?.kind === "m4")).toBe(true);
   });
 });

@@ -26,6 +26,7 @@ import {
 } from "framework/simulation/stateMachine/stateMachine";
 import { signalStateMachine } from "framework/simulation/stateMachine/stateMachineSystem";
 import type { ConsumeEffect } from "framework/config/schema/ItemKindSchema";
+import { emitClientEvent, networkIdOf } from "framework/simulation/clientEvents";
 
 /**
  * gatheringSystem：资源节点再生扫描 + harvest 采集原子。
@@ -227,6 +228,8 @@ export function harvest(world: GameWorld, actorEid: number, nodeEid: number): bo
   if (!hasTable && products.length === 0) return false;
 
   let applied = 0;
+  // 实际入包/直接生效的产物（客户端表现事件用；不改变任何判定）。
+  const gathered: Array<[string, number]> = [];
   for (const product of products) {
     const item = itemKinds?.get(product.kind);
     if (!item) {
@@ -246,6 +249,7 @@ export function harvest(world: GameWorld, actorEid: number, nodeEid: number): bo
         applyEffectSpecs(world, actorEid, [actorEid], item.effects);
       }
       applied += 1;
+      gathered.push([product.kind, product.count]);
       continue;
     }
 
@@ -257,6 +261,7 @@ export function harvest(world: GameWorld, actorEid: number, nodeEid: number): bo
     const added = product.count - leftover;
     if (added <= 0) continue; // 满包：该产物一点未入
     applied += 1;
+    gathered.push([product.kind, added]);
     if (leftover > 0) {
       // 部分入：剩余落到地上，避免丢失——落在资源节点附近（F-19），
       // 落点经可走性校验且确定性散布，绝不再落到地图原点 (0,0)。
@@ -301,6 +306,24 @@ export function harvest(world: GameWorld, actorEid: number, nodeEid: number): bo
     if (!nodeState.infinite && nodeState.remaining <= 0) {
       signalStateMachine(world, nodeEid, FSM_SIGNAL_DEPLETED);
     }
+  }
+
+  // CC-04 采集回执：self 受众（产出物只给采集者看，不向旁人泄漏背包变化）。
+  const actorNetworkId = networkIdOf(world, actorEid);
+  if (actorNetworkId !== undefined) {
+    const nodeNetworkId = networkIdOf(world, nodeEid);
+    emitClientEvent(
+      world,
+      "gather",
+      {
+        actor: actorNetworkId,
+        ...(nodeNetworkId !== undefined ? { node: nodeNetworkId } : {}),
+        items: gathered,
+        xp: nodeState.xpValue ?? 0,
+      },
+      "self",
+      { targetEid: actorEid },
+    );
   }
   return true;
 }

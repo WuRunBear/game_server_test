@@ -234,7 +234,7 @@ async function startSlowCraft(): Promise<{
   const { networkId } = sim.addPlayer("s1");
   const player = playerEidOf(world);
   Inventory[player] = { capacity: 4, slots: [{ kind: "m", count: 5 }, null, null, null] };
-  expect(sim.submitCommand("s1", { type: "craft", recipe: "slow" })).toBe(true);
+  expect(sim.submitCommand("s1", { type: "craft", recipe: "slow" }).ok).toBe(true);
   // 材料即扣（2/5 进入任务），任务表有记录
   expect(inventoryCount(world, player, "m")).toBe(3);
   expect(craftingProgressOf(world, player).length).toBe(1);
@@ -293,7 +293,7 @@ describe("B. 延时制作任务入档", () => {
     sim2.addPlayer("s2", { networkId: ownerNetworkId });
     const player2 = playerEidOf(world2);
     expect(craftingProgressOf(world2, player2).length).toBe(1);
-    expect(sim2.submitCommand("s2", { type: "craft-cancel", recipe: "slow" })).toBe(true);
+    expect(sim2.submitCommand("s2", { type: "craft-cancel", recipe: "slow" }).ok).toBe(true);
     expect(craftingProgressOf(world2, player2)).toEqual([]);
     expect(inventoryCount(world2, player2, "m")).toBe(5);
   });

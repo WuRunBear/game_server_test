@@ -31,6 +31,7 @@ import { Progression, type SkillProgress } from "framework/components/progressio
 import { ProgressionRuleSchema } from "framework/config/schema/RuleSchema";
 import type { ArchetypeSpec } from "framework/entities/archetypeRegistry";
 import type { GameWorld } from "framework/world";
+import { emitClientEvent, networkIdOf } from "framework/simulation/clientEvents";
 
 /** 等级曲线：L → L+1 所需经验 = round(baseXp × growth^(L-1))。 */
 export interface ProgressionCurve {
@@ -269,6 +270,18 @@ export function addXp(
     level: state.level,
   };
 
+  // CC-04 升级通知（self）：角色等级提升。
+  const playerNetworkId = networkIdOf(world, eid);
+  if (playerNetworkId !== undefined && state.level > previousLevel) {
+    emitClientEvent(
+      world,
+      "level-up",
+      { player: playerNetworkId, level: state.level },
+      "self",
+      { targetEid: eid },
+    );
+  }
+
   if (skillId !== undefined && skillId.length > 0) {
     const skill: SkillProgress =
       state.skills[skillId] ?? (state.skills[skillId] = { xp: 0, level: 1 });
@@ -281,6 +294,17 @@ export function addXp(
       previousLevel: previousSkillLevel,
       level: skill.level,
     };
+    // CC-04 升级通知（self）：技能等级提升（与角色等级事件分开，客户端按
+    // 是否带 skill 字段区分）。
+    if (playerNetworkId !== undefined && skill.level > previousSkillLevel) {
+      emitClientEvent(
+        world,
+        "level-up",
+        { player: playerNetworkId, level: skill.level, skill: skillId },
+        "self",
+        { targetEid: eid },
+      );
+    }
     if (!Object.prototype.hasOwnProperty.call(rules.skills, skillId)) {
       world.logger.warn("progression skill id has no bonus rule; xp tracked without bonus", {
         eid,

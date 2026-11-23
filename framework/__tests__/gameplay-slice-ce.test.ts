@@ -527,21 +527,21 @@ describe("切片 E：对话买卖", () => {
     inv.slots[1] = { kind: "wood", count: 2 };
 
     // 延时制作：命令即刻受理，5 tick 后产出（m 3 → 2）
-    expect(sim.submitCommand("s1", { type: "craft", recipe: "slow" })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "slow" }).ok).toBe(true);
     expect(countOf(inv, "out")).toBe(0);
     for (let i = 0; i < 6; i++) sim.tick(50);
     expect(countOf(inv, "out")).toBe(1);
 
     // craft-cancel：第二单受理后取消退料（m 2 → 1 → 退 +1 → 2）
-    expect(sim.submitCommand("s1", { type: "craft", recipe: "slow" })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "slow" }).ok).toBe(true);
     expect(countOf(inv, "m")).toBe(1);
-    expect(sim.submitCommand("s1", { type: "craft-cancel", recipe: "slow" })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "craft-cancel", recipe: "slow" }).ok).toBe(true);
     expect(countOf(inv, "m")).toBe(2);
     expect(craftingProgressOf(world, player)).toEqual([]);
 
     // refuel：玩家旁生成燃料型站点 → 命令加油（wood 2 → 1）
     const fireEid = spawnStation(world, { x: 10, stationType: 1, light: true, fuelMs: 0 });
-    expect(sim.submitCommand("s1", { type: "refuel" })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "refuel" }).ok).toBe(true);
     expect(LightSource.fuelRemainingMs[fireEid]).toBe(1000);
     expect(countOf(inv, "wood")).toBe(1);
 
@@ -556,8 +556,8 @@ describe("切片 E：对话买卖", () => {
     const npc = spawnEntity(world, world.archetypes.get("npc1"), getRegistries().componentRegistry, { x: 5, y: 0 });
     inv.slots[3] = { kind: "shell", count: 6 };
     expect(startDialogue(world, player, npc)).toBe(true);
-    expect(sim.submitCommand("s1", { type: "dialogue", option: 0 })).toBe(true); // → shop
-    expect(sim.submitCommand("s1", { type: "dialogue", option: 0 })).toBe(true); // 买斧头（-5 shell）
+    expect(sim.submitCommand("s1", { type: "dialogue", option: 0 }).ok).toBe(true); // → shop
+    expect(sim.submitCommand("s1", { type: "dialogue", option: 0 }).ok).toBe(true); // 买斧头（-5 shell）
     expect(countOf(inv, "axe")).toBe(1);
     expect(countOf(inv, "shell")).toBe(1);
   });
@@ -687,12 +687,12 @@ describe("切片 C/E：真实 game 配置", () => {
     // ① 两级加工链：wood → plank（即时手搓）
     give(0, "wood", 10);
     give(1, "shell", 12);
-    expect(sim.submitCommand("s1", { type: "craft", recipe: "plank" })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "plank" }).ok).toBe(true);
     expect(countOf(inv, "plank")).toBe(1);
     expect(countOf(inv, "wood")).toBe(8);
 
     // ② 季节配方：非风暴期拒（解锁门，零副作用）
-    expect(sim.submitCommand("s1", { type: "craft", recipe: "shell_spear" })).toBe(false);
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "shell_spear" }).ok).toBe(false);
     expect(countOf(inv, "shell")).toBe(12);
 
     // ③ 推进到 storm 相位（mild 24000 + dry 18000 + wet 18000 = 60000）+ 燃料站点
@@ -705,11 +705,11 @@ describe("切片 C/E：真实 game 配置", () => {
     // 加一轮燃料（wood -1；站点燃料数值增加——燃料机制对真实配置生效）。
     // LightSource.fuelRemainingMs 为 f32：1e9 量级附近精度 ~64ms，用大于断言。
     const fuelBefore = LightSource.fuelRemainingMs[campfireEid];
-    expect(sim.submitCommand("s1", { type: "refuel" })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "refuel" }).ok).toBe(true);
     expect(LightSource.fuelRemainingMs[campfireEid]).toBeGreaterThan(fuelBefore);
     expect(countOf(inv, "wood")).toBe(7);
 
-    expect(sim.submitCommand("s1", { type: "craft", recipe: "shell_spear" })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "shell_spear" }).ok).toBe(true);
     expect(craftingProgressOf(world, player).some((job) => job.recipeId === "shell_spear")).toBe(true);
 
     // ④ 燃料驱动的站点制作：40 tick 后产出入包（燃料 120000ms ≫ 40 tick × 100ms）
@@ -723,16 +723,16 @@ describe("切片 C/E：真实 game 配置", () => {
       y: Transform.y[player],
     });
     expect(startDialogue(world, player, villager)).toBe(true);
-    expect(sim.submitCommand("s1", { type: "dialogue", option: 1 })).toBe(true); // → shop
+    expect(sim.submitCommand("s1", { type: "dialogue", option: 1 }).ok).toBe(true); // → shop
     // 买贝壳长矛（15 贝壳）：余额 9 < 15 → 拒（停留）
-    expect(sim.submitCommand("s1", { type: "dialogue", option: 0 })).toBe(false);
+    expect(sim.submitCommand("s1", { type: "dialogue", option: 0 }).ok).toBe(false);
     expect(countOf(inv, "shell_spear")).toBe(1);
     // 买斧头（默认价 5）：9 → 4
-    expect(sim.submitCommand("s1", { type: "dialogue", option: 1 })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "dialogue", option: 1 }).ok).toBe(true);
     expect(countOf(inv, "axe")).toBe(1);
     expect(countOf(inv, "shell")).toBe(4);
     // 卖木头×5（price 1）：wood 7 → 2，shell 4 → 9
-    expect(sim.submitCommand("s1", { type: "dialogue", option: 2 })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "dialogue", option: 2 }).ok).toBe(true);
     expect(countOf(inv, "wood")).toBe(2);
     expect(countOf(inv, "shell")).toBe(9);
   });

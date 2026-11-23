@@ -508,12 +508,8 @@ describe("D1 投掷：确定性发射 / 冷却 / 命中扣血 / 锁层", () => {
     Attack.value[player] = 10;
     Health.current[player] = 100;
 
-    expect(sim.submitCommand("s1", { type: "throw", x: Transform.x[player] + 64, y: Transform.y[player] })).toBe(
-      true,
-    );
+    expect(sim.submitCommand("s1", { type: "throw", x: Transform.x[player] + 64, y: Transform.y[player] }).ok).toBe(true);
     expect(query(world, [Projectile])).toHaveLength(1);
-    expect(sim.submitCommand("s1", { type: "throw", x: Transform.x[player] + 64, y: Transform.y[player] })).toBe(
-      false,
-    );
+    expect(sim.submitCommand("s1", { type: "throw", x: Transform.x[player] + 64, y: Transform.y[player] }).ok).toBe(false);
   });
 });

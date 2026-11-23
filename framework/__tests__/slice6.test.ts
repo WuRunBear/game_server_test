@@ -499,7 +499,7 @@ describe("Slice 6：真实 game 配置集成", () => {
     const py = Transform.y[playerEid];
     let placed = false;
     for (const [dx, dy] of [[-20, 0], [20, 0], [0, -20], [0, 20], [-40, 0], [40, 0], [0, -40], [0, 40]]) {
-      if (sim.submitCommand("s1", { type: "place", slot: 0, x: px + dx, y: py + dy })) {
+      if (sim.submitCommand("s1", { type: "place", slot: 0, x: px + dx, y: py + dy }).ok) {
         placed = true;
         break;
       }
@@ -515,12 +515,12 @@ describe("Slice 6：真实 game 配置集成", () => {
     expect(Placeable.ownerNetworkId[wall]).toBe(NetworkId.value[playerEid]);
 
     // 放置者拆除成功
-    expect(sim.submitCommand("s1", { type: "deconstruct", target: NetworkId.value[wall] })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "deconstruct", target: NetworkId.value[wall] }).ok).toBe(true);
     expect(query(world, [Placeable]).some((e) => e === wall)).toBe(false);
 
     // 死亡窗口拒绝（submitCommand 层守卫）
     const wall2 = spawnEntity(world, world.archetypes.get("wall"), getRegistries().componentRegistry, { x: px + 24, y: py });
     Health.current[playerEid] = 0;
-    expect(sim.submitCommand("s1", { type: "deconstruct", target: NetworkId.value[wall2] })).toBe(false);
+    expect(sim.submitCommand("s1", { type: "deconstruct", target: NetworkId.value[wall2] }).ok).toBe(false);
   });
 });

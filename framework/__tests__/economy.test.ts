@@ -437,14 +437,14 @@ describe("offer 命令（GameSimulation 接线）", () => {
         { party: p2, give: [{ container: "ledger", kind: "c1", count: 6 }], take: [{ container: "inventory", kind: "k1", count: 2 }] },
       ],
     });
-    expect(offered).toBe(true);
+    expect(offered.ok).toBe(true);
     const sessions = [...world.offerSessions.values()];
     expect(sessions.length).toBe(1);
     const id = sessions[0].id;
     expect(sessions[0].status).toBe("pending");
 
     // s2 确认 → 全确认 → 结算
-    expect(sim.submitCommand("s2", { type: "offer-accept", offerId: id })).toBe(true);
+    expect(sim.submitCommand("s2", { type: "offer-accept", offerId: id }).ok).toBe(true);
     expect(sessions[0].status).toBe("settled");
     expect(queryContainer(world, led(p1), "c1")).toBe(6);
     expect(queryContainer(world, inv(p2), "k1")).toBe(2);
@@ -457,9 +457,9 @@ describe("offer 命令（GameSimulation 接线）", () => {
         { party: p1, give: [{ container: "inventory", kind: "k1", count: 2 }] },
         { party: p2, take: [{ container: "inventory", kind: "k1", count: 2 }] },
       ],
-    })).toBe(true);
+    }).ok).toBe(true);
     const id2 = [...world.offerSessions.values()].find((s) => s.id !== id)!.id;
-    expect(sim.submitCommand("s1", { type: "offer-cancel", offerId: id2 })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "offer-cancel", offerId: id2 }).ok).toBe(true);
     expect(getOffer(world, id2)!.status).toBe("cancelled");
     expect(queryContainer(world, inv(p1), "k1")).toBe(2);
   });

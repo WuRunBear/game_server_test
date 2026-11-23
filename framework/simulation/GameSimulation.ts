@@ -16,7 +16,23 @@ function offerIdOf(value: unknown): number {
  * 完整说明架构位置、玩家管理/输入处理/快照构建/持久化等职责，此处不重复）。
  */
 import { query, hasComponent, addComponent, removeComponent } from "bitecs";
-import { NetworkId, Velocity, Inventory, Intent, Health, entityMapOf, SpawnPoint, Player } from "components";
+import {
+  NetworkId,
+  Velocity,
+  Inventory,
+  Intent,
+  Health,
+  entityMapOf,
+  SpawnPoint,
+  Player,
+  Transform,
+  Cooldown,
+  Equipment,
+  Placeable,
+  CraftingStation,
+  LightSource,
+  Dialogue,
+} from "components";
 import { entityLevelOf } from "framework/components/entityLevel";
 import { Offline, isOfflineRetained } from "components/offline";
 import { spawnEntity } from "framework/entities/spawn";
@@ -30,22 +46,31 @@ import { recordTick } from "framework/metrics";
 import type { ComponentRegistry } from "framework/components/componentRegistry";
 import type { ArchetypeRegistry } from "framework/entities/archetypeRegistry";
 import type { EntityId, GameWorld } from "world";
-import { consumeSlot, dropSlot, transferSlot, lootContainerSlot } from "framework/systems/gameplay/inventoryOps";
-import { equipSlot } from "framework/systems/gameplay/equipmentSystem";
-import { craftRecipe, stepCraftingJobs, cancelCrafting, craftingProgressOf, validateCraftingRules } from "framework/systems/gameplay/craftingSystem";
+import { consumeSlot, dropSlot, transferSlot, lootContainerSlot, addToInventory } from "framework/systems/gameplay/inventoryOps";
+import { equipSlot, getEquippedItemKind } from "framework/systems/gameplay/equipmentSystem";
+import {
+  craftRecipe,
+  stepCraftingJobs,
+  cancelCrafting,
+  craftingProgressOf,
+  validateCraftingRules,
+  craftingStationRange,
+  stationsInRange,
+} from "framework/systems/gameplay/craftingSystem";
 import { stepFuelBurn, refuelStation, validateFuelRules, fastForwardFuelBurn } from "framework/systems/gameplay/fuelSystem";
 import { placeEntity } from "framework/systems/gameplay/placeableSystem";
 import { deconstructEntity } from "framework/systems/gameplay/deconstructSystem";
 import { throwWeapon } from "framework/systems/gameplay/projectileSystem";
 import {
   startThrowAction,
+  cancelAction,
 } from "framework/simulation/actions/actionSystem";
 import {
   ActionInput,
   ActionState,
-  clearActionState,
   getIntentActionId,
 } from "framework/simulation/actions/actionState";
+import { isGameplayReachable } from "framework/utils/gameplayDistance";
 import { advanceDialogue } from "framework/systems/gameplay/dialogueSystem";
 import { getAosSyncAdapter } from "framework/simulation/aosSyncAdapters";
 import { serializeWorld, restoreWorld } from "framework/persistence/worldSerializer";
@@ -61,13 +86,23 @@ import { noopBootDeps, type BootDeps } from "map/runtime/boot";
 import { fastForwardStateMachines } from "framework/simulation/stateMachine/stateMachineSystem";
 import { fastForwardPopulations } from "framework/simulation/population/populationSystem";
 import type { Repository, WorldRecord } from "framework/repository";
-import type { ServerRule } from "framework/config/schema/RuleSchema";
+import type { ServerRule, CraftingRecipe } from "framework/config/schema/RuleSchema";
 import { computeInterest } from "./interest";
 import { createInputGuard, type InputGuard } from "./inputValidation";
 import { CRAFTING_SYNC_COMPONENT } from "./netSyncDerived";
 import { ACTION_SYNC_COMPONENT } from "framework/simulation/actions/actionState";
 import { openOffer, acceptOffer, cancelOffer, isValidSettleTerms } from "framework/economy/offer";
-import { queueEvent } from "framework/simulation/events/eventBus";
+import { queueEvent, tapEvents } from "framework/simulation/events/eventBus";
+import { tapGameEvents } from "framework/events/gameEvents";
+import {
+  collectEventsForClient,
+  drainClientEventOutbox,
+  emitClientEvent,
+  networkIdOf,
+  DEFAULT_CLIENT_EVENT_VIEW_RADIUS,
+  type PendingClientEvent,
+  type ClientEvent,
+} from "framework/simulation/clientEvents";
 import { mixSeed } from "framework/simulation/rng";
 import { createLogger } from "framework/utils/logger";
 
@@ -123,7 +158,7 @@ function normalizeAimCoordinate(value: unknown): number | undefined {
 import type { SimulationPort } from "./SimulationPort";
 import type {
   PlayerInput, PlayerJoinResult, PlayerJoinOptions, TickSnapshot, TickResult, DebugSnapshotOptions, PlayerCommand, EntitySnapshot,
-  SimulationOptions, OfferSummary,
+  SimulationOptions, OfferSummary, CommandResult, CommandResultCode,
 } from "./types";
 
 /**
@@ -232,6 +267,24 @@ export class GameSimulation implements SimulationPort {
   private pendingCommandEvents: { eid: number; type: string }[] = [];
 
   /**
+   * CC-04 变化检测状态（首帧只记录基线，不发事件）：
+   * - 天气 id：environmentSystem 每 tick 重算；
+   * - 每玩家地图：snapshot.playerMaps；
+   * - 每图地形 version：terrainWriteback 后重算。
+   */
+  private lastWeatherId?: string;
+  private lastMapIdBySessionId = new Map<string, string>();
+  private lastTerrainVersionByMapId = new Map<string, string>();
+
+  /**
+   * 本 tick 已由 `killed` 发过 death 事件的受害者 networkId。
+   *
+   * deathSystem 的 on-death 事件随后还会到；用它去重，保证一次死亡只发一条
+   * death（攻击致死带 killer，需求耗尽等只带 victim/kind）。
+   */
+  private deathAnnouncedVictims = new Set<number>();
+
+  /**
    * 创建仿真实例。
    *
    * @param gameDef 游戏配置（已通过 loadGameDefinition 加载 + 校验）
@@ -275,6 +328,10 @@ export class GameSimulation implements SimulationPort {
       0,
       Math.floor(serverRules?.offlineRetentionTicks ?? tickRate * DEFAULT_OFFLINE_RETENTION_SEC),
     );
+
+    // CC-04：旁路观察帧内事件（不取走事件，不影响既有消费方）。
+    tapEvents(this.world, (name, payload) => this.observeTypedEvent(name, payload));
+    tapGameEvents(this.world, (event) => this.observeGameEvent(event));
 
     // 切片 C/E：合成规则（解锁条件/时长）与燃料段配置构造期 fail-fast 校验——
     // 未知条件名/非法参数/非法燃料配置在此即抛，不带病进 tick 循环。
@@ -439,6 +496,8 @@ export class GameSimulation implements SimulationPort {
    */
   tick(dtMs: number): TickResult {
     const start = performance.now();
+    // death 去重窗口按 tick 重置（killed 与 on-death 在同一 tick 内配对）。
+    this.deathAnnouncedVictims.clear();
 
     let stepFailed = false;
     try {
@@ -457,6 +516,14 @@ export class GameSimulation implements SimulationPort {
     this.sweepExpiredOfflinePlayers();
 
     const snapshot = this.buildSnapshot();
+
+    // CC-04：世界级变化检测（天气/换图/地形写回）在系统跑完后入 outbox；
+    // 首帧只记基线，不发事件（初始状态由 RoomState 承担）。
+    this.detectWorldChanges(snapshot);
+
+    // 统一排空本 tick 事件并按客户端受众过滤（seq 已产生，过滤不重排）。
+    const clientEvents = this.collectClientEvents(drainClientEventOutbox(this.world));
+
     const tickMs = performance.now() - start;
 
     recordTick(this.world.metrics, tickMs);
@@ -491,7 +558,248 @@ export class GameSimulation implements SimulationPort {
       tick: this.world.time.tick,
       avgTickMs: this.world.metrics.avgTickMs,
       interest,
+      clientEvents,
+      // 兼容别名：CC-04 文档的 TickResult.events 名称（同一 Map 引用）。
+      events: clientEvents,
     };
+  }
+
+  /**
+   * 把本 tick 排空的事件按每个在线客户端过滤成 `ClientEvent[]`。
+   *
+   * 视角数据取 tick 结束时玩家的真实位置/地图（锚点在事件产生时已固化）。
+   * 返回 Map 只包含有事件的会话；无事件不发空包。
+   */
+  private collectClientEvents(events: PendingClientEvent[]): Map<string, ClientEvent[]> {
+    const result = new Map<string, ClientEvent[]>();
+    if (events.length === 0) return result;
+
+    // 与兴趣裁剪同一规则源；未配置 viewRadius 时事件过滤用 320px 缺省。
+    const radius = this.viewRadius ?? DEFAULT_CLIENT_EVENT_VIEW_RADIUS;
+    for (const [sessionId, eid] of this.playerEidBySessionId) {
+      if (!hasComponent(this.world, eid, Transform)) continue;
+      const visible = collectEventsForClient(
+        events,
+        {
+          eid,
+          mapId: entityMapOf(this.world, eid),
+          x: Transform.x[eid],
+          y: Transform.y[eid],
+        },
+        radius,
+      );
+      if (visible.length > 0) result.set(sessionId, visible);
+    }
+    return result;
+  }
+
+  /**
+   * 世界级变化检测（每 tick，系统跑完后）：
+   * - `weather-change`：weatherId 变化 → world；
+   * - `map-change`：玩家所属图变化 → self（from/to/mapVersion）；
+   * - `terrain-writeback`：地图 geometry.version 变化 → map（无逐格 delta）。
+   *
+   * 全部采用「首帧记基线、之后比较」语义，避免开机即为所有图/玩家补发事件。
+   */
+  private detectWorldChanges(snapshot: TickSnapshot): void {
+    const tick = this.world.time.tick;
+    const environment = this.world.time.environment;
+
+    // 天气
+    if (this.lastWeatherId !== undefined && environment.weatherId !== this.lastWeatherId) {
+      emitClientEvent(
+        this.world,
+        "weather-change",
+        {
+          weatherId: environment.weatherId,
+          phaseId: environment.phaseId,
+          tick,
+        },
+        "world",
+      );
+    }
+    this.lastWeatherId = environment.weatherId;
+
+    // 换图（per-player）
+    for (const [sessionId, mapId] of snapshot.playerMaps) {
+      const previous = this.lastMapIdBySessionId.get(sessionId);
+      this.lastMapIdBySessionId.set(sessionId, mapId);
+      if (previous === undefined || previous === mapId) continue;
+      const eid = this.playerEidBySessionId.get(sessionId);
+      if (typeof eid !== "number") continue;
+      const version = this.world.maps[mapId]?.version;
+      emitClientEvent(
+        this.world,
+        "map-change",
+        {
+          from: previous,
+          to: mapId,
+          ...(typeof version === "string" && version.length > 0 ? { mapVersion: version } : {}),
+        },
+        "self",
+        { targetEid: eid },
+      );
+    }
+    // 会话已断开：清掉基线，防 sessionId 复用造成假换图
+    for (const sessionId of [...this.lastMapIdBySessionId.keys()]) {
+      if (!this.playerEidBySessionId.has(sessionId)) this.lastMapIdBySessionId.delete(sessionId);
+    }
+
+    // 地形写回（按图 version 变化；无逐格 delta 时只通知版本）
+    for (const [mapId, geometry] of Object.entries(this.world.maps)) {
+      const previous = this.lastTerrainVersionByMapId.get(mapId);
+      this.lastTerrainVersionByMapId.set(mapId, geometry.version);
+      if (previous === undefined || previous === geometry.version) continue;
+      emitClientEvent(
+        this.world,
+        "terrain-writeback",
+        { mapId, version: geometry.version },
+        "map",
+        { mapId },
+      );
+    }
+  }
+
+  /**
+   * 类型化事件总线 tap：把内部事件翻译成客户端表现事件。
+   *
+   * 只做 eid → networkId 转换，不复制任何玩法判定；载荷里**绝不**出现 eid。
+   */
+  private observeTypedEvent(name: string, payload: unknown): void {
+    if (!payload || typeof payload !== "object") return;
+    const data = payload as Record<string, unknown>;
+
+    switch (name) {
+      case "on-hit": {
+        const attackerEid = data.attacker;
+        const targetEid = data.target;
+        if (typeof attackerEid !== "number" || typeof targetEid !== "number") return;
+        const attacker = networkIdOf(this.world, attackerEid);
+        const target = networkIdOf(this.world, targetEid);
+        if (attacker === undefined || target === undefined) return;
+        emitClientEvent(
+          this.world,
+          "hit",
+          {
+            attacker,
+            target,
+            damage: data.damage,
+            ...(data.crit === true ? { crit: true } : {}),
+            ...(typeof data.damageType === "string" ? { damageType: data.damageType } : {}),
+          },
+          "nearby",
+          { anchorEid: attackerEid },
+        );
+        return;
+      }
+      case "on-death": {
+        const victimEid = data.eid;
+        if (typeof victimEid !== "number") return;
+        this.announceDeath(victimEid, undefined, data.kind, victimEid);
+        return;
+      }
+      case "on-item-break": {
+        const ownerEid = data.eid;
+        if (typeof ownerEid !== "number") return;
+        const player = networkIdOf(this.world, ownerEid);
+        if (player === undefined) return;
+        emitClientEvent(
+          this.world,
+          "item-break",
+          {
+            player,
+            ...(typeof data.kind === "string" ? { kind: data.kind } : {}),
+            ...(typeof data.slot === "string" ? { slot: data.slot } : {}),
+          },
+          "self",
+          { targetEid: ownerEid },
+        );
+        return;
+      }
+      case "on-achievement": {
+        const playerEid = data.eid;
+        if (typeof playerEid !== "number" || playerEid <= 0) return;
+        const player = networkIdOf(this.world, playerEid);
+        if (player === undefined) return;
+        emitClientEvent(
+          this.world,
+          "achievement",
+          {
+            player,
+            achievementId: data.id,
+            ...(typeof data.name === "string" ? { name: data.name } : {}),
+          },
+          "self",
+          { targetEid: playerEid },
+        );
+        return;
+      }
+      case "on-raid-warning": {
+        const centerEid = data.eid;
+        if (typeof centerEid !== "number" || data.remainingTicks === undefined) return;
+        const mapId = entityMapOf(this.world, centerEid);
+        emitClientEvent(
+          this.world,
+          "raid-warning",
+          { remainingTicks: data.remainingTicks },
+          "map",
+          { mapId },
+        );
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  /**
+   * 帧内轻量事件 tap：攻击致命一击的 `killed`（带 killer）优先于 deathSystem
+   * 的 `on-death`（只有 victim/kind），按受害者 networkId 去重。
+   */
+  private observeGameEvent(event: { type: string; data: Record<string, unknown> }): void {
+    if (event.type !== "killed") return;
+    const victimEid = event.data.victim;
+    const killerEid = event.data.killer;
+    if (typeof victimEid !== "number") return;
+    // 锚点取受害者位置：death 是「这里有人倒下」的空间事件，附近玩家都应看到；
+    // killer 可能隔着射程，但不会远于战斗距离。
+    this.announceDeath(
+      victimEid,
+      typeof killerEid === "number" ? killerEid : undefined,
+      event.data.kind,
+      victimEid,
+    );
+  }
+
+  /**
+   * 发 `death` 客户端事件（nearby，锚点优先取受害者位置）。
+   *
+   * 同一受害者同 tick 只发一次；攻击致死带 killer networkId，其它致死源
+   * 只带 victim/kind。
+   */
+  private announceDeath(
+    victimEid: number,
+    killerEid: number | undefined,
+    kind: unknown,
+    anchorEid: number,
+  ): void {
+    const victim = networkIdOf(this.world, victimEid);
+    if (victim === undefined) return;
+    if (this.deathAnnouncedVictims.has(victim)) return;
+    this.deathAnnouncedVictims.add(victim);
+
+    const killer = killerEid !== undefined ? networkIdOf(this.world, killerEid) : undefined;
+    emitClientEvent(
+      this.world,
+      "death",
+      {
+        victim,
+        ...(killer !== undefined ? { killer } : {}),
+        ...(typeof kind === "string" && kind.length > 0 ? { kind } : {}),
+      },
+      "nearby",
+      { anchorEid },
+    );
   }
 
   /**
@@ -547,8 +855,9 @@ export class GameSimulation implements SimulationPort {
     }
 
     // 建立 sessionId → eid 映射，后续输入可以通过 sessionId 找到玩家实体
-    // 动作状态是瞬态：重连复用/新生成都从干净状态开始（eid 复用防串台）
-    clearActionState(eid);
+    // 动作状态是瞬态：重连复用/新生成都从干净状态开始（eid 复用防串台）。
+    // 若有残留动作（重连复用保留实体），先向附近发 action-cancel 再清空。
+    cancelAction(this.world, eid, "session-reset");
     ActionInput[eid] = undefined;
     this.playerEidBySessionId.set(sessionId, eid);
 
@@ -613,7 +922,7 @@ export class GameSimulation implements SimulationPort {
     const eid = this.playerEidBySessionId.get(sessionId);
     if (typeof eid === "number") {
       // 断线即取消进行中的动作（保留实体也不应继续挥砍/采集）
-      clearActionState(eid);
+      cancelAction(this.world, eid, "disconnect");
       ActionInput[eid] = undefined;
       if (this.offlineRetentionTicks > 0) {
         // 保留：挂标记 + 到期 tick（标记是"按标记跳过"排除逻辑的唯一依据）。
@@ -704,19 +1013,22 @@ export class GameSimulation implements SimulationPort {
   }
 
   /**
-   * 提交玩家命令（离散动作）：食用 / 丢弃 / 槽位移动。
-   * 立即执行服务端权威变更；立即返回是否成功。
+   * 提交玩家命令（离散动作）：食用 / 丢弃 / 槽位移动 / 制作 / 放置 ...
+   * 立即执行服务端权威变更；返回统一 `CommandResult`（成功也回执）。
+   *
+   * 失败错误码在 `finishCommand` 里按命令类型做**只读**归因（不复制判定、
+   * 不改变原子行为）；归因不到的保持 `unknown`，绝不编造具体原因。
    *
    * @param sessionId Colyseus 连接标识
-   * @param command 命令数据（consume/drop/transfer）
+   * @param command 命令数据
    */
-  submitCommand(sessionId: string, command: PlayerCommand): boolean {
+  submitCommand(sessionId: string, command: PlayerCommand): CommandResult {
     const eid = this.playerEidBySessionId.get(sessionId);
-    if (typeof eid !== "number") return false;
+    if (typeof eid !== "number") return { ok: false, code: "invalid" };
 
     // 死亡/重生窗口内（原地重置语义，实体未移除）不执行背包命令——
     // 与 applyInputs / interactionSystem 的死亡守卫语义一致，防幽灵操作
-    if ((Health.current[eid] ?? 0) <= 0) return false;
+    if ((Health.current[eid] ?? 0) <= 0) return { ok: false, code: "dead" };
 
     // 输入校验（anti-cheat）：命令频率超限被拒并日志
     if (!this.inputGuard.submitCommandAllowed(sessionId, this.world.time.tick)) {
@@ -725,27 +1037,27 @@ export class GameSimulation implements SimulationPort {
         type: command.type,
         tick: this.world.time.tick,
       });
-      return false;
+      return { ok: false, code: "rate_limited" };
     }
 
     switch (command.type) {
       case "consume":
-        return this.finishCommand(eid, command.type, consumeSlot(this.world, eid, command.slot ?? -1));
+        return this.finishCommand(eid, command, consumeSlot(this.world, eid, command.slot ?? -1));
       case "drop":
-        return this.finishCommand(eid, command.type, dropSlot(this.world, eid, command.slot ?? -1));
+        return this.finishCommand(eid, command, dropSlot(this.world, eid, command.slot ?? -1));
       case "transfer":
         if (command.target !== undefined) {
           // transfer + target：从目标容器实体的槽位取回物品到本人背包
           // （死亡容器等承载物；同图校验与满包不吞语义见 lootContainerSlot）
           return this.finishCommand(
             eid,
-            command.type,
+            command,
             lootContainerSlot(this.world, eid, command.target, command.slot ?? -1),
           );
         }
         return this.finishCommand(
           eid,
-          command.type,
+          command,
           transferSlot(
             Inventory[eid]!,
             command.slot ?? -1,
@@ -754,19 +1066,23 @@ export class GameSimulation implements SimulationPort {
           ),
         );
       case "equip":
-        return this.finishCommand(eid, command.type, equipSlot(this.world, eid, command.slot ?? -1));
+        return this.finishCommand(eid, command, equipSlot(this.world, eid, command.slot ?? -1));
       case "craft":
-        return this.finishCommand(eid, command.type, craftRecipe(this.world, eid, command.recipe ?? ""));
+        return this.finishCommand(eid, command, craftRecipe(this.world, eid, command.recipe ?? ""));
       case "craft-cancel":
         // 取消进行中的延时制作（退料原子：放不下则拒绝取消）
-        return this.finishCommand(eid, command.type, cancelCrafting(this.world, eid, command.recipe ?? ""));
+        return this.finishCommand(eid, command, cancelCrafting(this.world, eid, command.recipe ?? ""));
       case "refuel":
         // 加燃料：附近燃料型站点 + 背包燃料物品（fuel.items 配置声明序）
-        return this.finishCommand(eid, command.type, refuelStation(this.world, eid, command.target));
+        return this.finishCommand(eid, command, refuelStation(this.world, eid, command.target));
       case "place":
-        return this.finishCommand(eid, command.type, placeEntity(this.world, eid, command.slot ?? -1, command.x ?? 0, command.y ?? 0));
+        return this.finishCommand(
+          eid,
+          command,
+          placeEntity(this.world, eid, command.slot ?? -1, command.x ?? 0, command.y ?? 0),
+        );
       case "deconstruct":
-        return this.finishCommand(eid, command.type, deconstructEntity(this.world, eid, command.target ?? -1));
+        return this.finishCommand(eid, command, deconstructEntity(this.world, eid, command.target ?? -1));
       case "throw": {
         // 投掷：配置了动作时间轴时只**启动动作**，投射物在 release 事件阶段由
         // throwWeapon 生成；未配置时保持旧瞬时投掷（向后兼容）。
@@ -775,18 +1091,18 @@ export class GameSimulation implements SimulationPort {
         if (throwActionId) {
           return this.finishCommand(
             eid,
-            command.type,
+            command,
             startThrowAction(this.world, eid, throwActionId, command.x, command.y),
           );
         }
         return this.finishCommand(
           eid,
-          command.type,
+          command,
           throwWeapon(this.world, eid, command.x, command.y),
         );
       }
       case "dialogue":
-        return this.finishCommand(eid, command.type, advanceDialogue(this.world, eid, command.option ?? -1));
+        return this.finishCommand(eid, command, advanceDialogue(this.world, eid, command.option ?? -1));
       case "offer": {
         // 交易条款严格校验（F-01）：恰好两方、结构合法、发起者在条款中、
         // 另一方必须是**当前在线的 Player 实体**（有会话绑定且非断线保留）。
@@ -797,19 +1113,19 @@ export class GameSimulation implements SimulationPort {
         // 内部 eid 客户端不可见）→ 此处反查为 eid，解析失败即拒绝整条命令
         // （伪造/过期的 networkId 不会命中任何实体）。
         const terms = command.offer;
-        if (!isValidSettleTerms(terms)) return false;
-        if (terms.length !== 2) return false;
+        if (!isValidSettleTerms(terms)) return { ok: false, code: "invalid" };
+        if (terms.length !== 2) return { ok: false, code: "invalid" };
         const partyNetworkIds = terms.map((party) => party.party);
-        if (new Set(partyNetworkIds).size !== 2) return false;
+        if (new Set(partyNetworkIds).size !== 2) return { ok: false, code: "invalid" };
         const partyEids: number[] = [];
         for (const networkId of partyNetworkIds) {
           const partyEid = this.eidByNetworkId(networkId);
-          if (partyEid === undefined) return false;
+          if (partyEid === undefined) return { ok: false, code: "invalid" };
           partyEids.push(partyEid);
         }
-        if (!partyEids.includes(eid)) return false;
+        if (!partyEids.includes(eid)) return { ok: false, code: "not_owner" };
         const counterparty = partyEids.find((partyEid) => partyEid !== eid)!;
-        if (!this.isOnlinePlayerEid(counterparty)) return false;
+        if (!this.isOnlinePlayerEid(counterparty)) return { ok: false, code: "out_of_range" };
         const expiresTick =
           command.ttlTicks !== undefined &&
           Number.isInteger(command.ttlTicks) &&
@@ -830,14 +1146,14 @@ export class GameSimulation implements SimulationPort {
             initiator: eid,
           },
         );
-        return this.finishCommand(eid, command.type, offerId !== null);
+        return this.finishCommand(eid, command, offerId !== null);
       }
       case "offer-accept":
-        return this.finishCommand(eid, command.type, acceptOffer(this.world, eid, offerIdOf(command.offerId)));
+        return this.finishCommand(eid, command, acceptOffer(this.world, eid, offerIdOf(command.offerId)));
       case "offer-cancel":
-        return this.finishCommand(eid, command.type, cancelOffer(this.world, eid, offerIdOf(command.offerId)));
+        return this.finishCommand(eid, command, cancelOffer(this.world, eid, offerIdOf(command.offerId)));
       default:
-        return false;
+        return { ok: false, code: "invalid" };
     }
   }
 
@@ -896,13 +1212,245 @@ export class GameSimulation implements SimulationPort {
 
   /**
    * 命令收尾：成功时缓存一条 on-command 事件（下一 tick beforeSystems 冲刷
-   * 进事件总线，供 on-command 触发器消费），并透传命令结果。
+   * 进事件总线，供 on-command 触发器消费），失败时做只读错误码归因。
    */
-  private finishCommand(eid: number, type: string, success: boolean): boolean {
+  private finishCommand(eid: number, command: PlayerCommand, success: boolean): CommandResult {
     if (success) {
-      this.pendingCommandEvents.push({ eid, type });
+      this.pendingCommandEvents.push({ eid, type: command.type });
+      return { ok: true };
     }
-    return success;
+    return { ok: false, code: this.commandFailureCode(eid, command) };
+  }
+
+  /**
+   * 失败原因归因（只读，不重跑/不改变原子判定）。
+   *
+   * 原则：能按与原子相同的**前置条件**确定的才给具体码；拿不到确定原因时
+   * 一律 `unknown`，不编造。归因顺序尽量与原子内部校验顺序一致。
+   */
+  private commandFailureCode(eid: number, command: PlayerCommand): CommandResultCode {
+    const inv = Inventory[eid];
+    const slotIndex = command.slot ?? -1;
+
+    switch (command.type) {
+      case "consume": {
+        const stack = inv?.slots[slotIndex];
+        if (!stack) return "no_item";
+        const item = this.world.gameDef.itemsByKind?.get(stack.kind);
+        if (!item?.consume || item.consume.length === 0) return "invalid";
+        return "unknown";
+      }
+      case "drop": {
+        const stack = inv?.slots[slotIndex];
+        if (!stack) return "no_item";
+        if (!hasComponent(this.world, eid, Transform)) return "invalid";
+        return "unknown";
+      }
+      case "transfer": {
+        if (!inv) return "invalid";
+        if (command.target !== undefined) {
+          const containerEid = this.eidByNetworkId(command.target);
+          if (containerEid === undefined || containerEid === eid) return "invalid";
+          const containerInv = Inventory[containerEid];
+          if (!containerInv) return "invalid";
+
+          // 可达性（与 lootContainerSlot 同序：同图 → 同层距离 → 槽位 → 满包）
+          if (!hasComponent(this.world, eid, Transform) || !hasComponent(this.world, containerEid, Transform)) {
+            return "invalid";
+          }
+          if (isOfflineRetained(this.world, containerEid)) return "out_of_range";
+          if (entityMapOf(this.world, containerEid) !== entityMapOf(this.world, eid)) {
+            return "out_of_range";
+          }
+          const placeRules = this.world.gameDef.resolvedRules["place"] as
+            | { containerRange?: number }
+            | undefined;
+          const range = placeRules?.containerRange ?? 64;
+          if (
+            !isGameplayReachable(
+              { x: Transform.x[eid], y: Transform.y[eid], level: entityLevelOf(eid) },
+              {
+                x: Transform.x[containerEid],
+                y: Transform.y[containerEid],
+                level: entityLevelOf(containerEid),
+              },
+              range,
+            )
+          ) {
+            return "out_of_range";
+          }
+          const stack = containerInv.slots[slotIndex];
+          if (!stack) return "no_item";
+          // 满包判定：干跑 addToInventory（与原子同一入包函数，只读克隆）
+          const dry = {
+            capacity: inv.capacity,
+            slots: inv.slots.map((slot) => (slot ? { ...slot } : null)),
+          };
+          const leftover = addToInventory(dry, this.world.gameDef.itemsByKind, stack.kind, stack.count, {
+            spoilAt: stack.spoilAt,
+            durability: stack.durability,
+          });
+          if (leftover >= stack.count) return "inventory_full";
+          return "unknown";
+        }
+        if (command.slot === command.toSlot) return "invalid";
+        if (!Number.isInteger(slotIndex) || !Number.isInteger(command.toSlot ?? -1)) return "invalid";
+        const stack = inv.slots[slotIndex];
+        if (!stack) return "no_item";
+        return "unknown";
+      }
+      case "equip": {
+        const stack = inv?.slots[slotIndex];
+        if (!stack) return "no_item";
+        const equip = this.world.gameDef.itemsByKind?.get(stack.kind)?.equip;
+        if (!equip || !hasComponent(this.world, eid, Equipment)) return "invalid";
+        return "unknown";
+      }
+      case "craft": {
+        const craftingRule = this.world.gameDef.resolvedRules["crafting"] as
+          | { recipes?: CraftingRecipe[] }
+          | undefined;
+        const recipe = craftingRule?.recipes?.find((entry) => entry.id === (command.recipe ?? ""));
+        if (!recipe) return "invalid";
+        if (!inv) return "invalid";
+
+        // unlock 条件在 craftingSystem 内是已注册函数，外部无法安全求值——
+        // 有解锁门且无法确定是否通过时保持 unknown（不猜测）。
+        if ((recipe as CraftingRecipe & { unlock?: unknown }).unlock !== undefined) return "unknown";
+
+        const stationType = recipe.stationType ?? 0;
+        if (stationType !== 0) {
+          const range = craftingStationRange(this.world);
+          const usable = stationsInRange(this.world, eid, range).some(
+            (stationEid) =>
+              hasComponent(this.world, stationEid, CraftingStation) &&
+              CraftingStation.stationType[stationEid] === stationType &&
+              (!hasComponent(this.world, stationEid, LightSource) ||
+                LightSource.fuelInfinite[stationEid] === 1 ||
+                (LightSource.fuelRemainingMs[stationEid] ?? 0) > 0),
+          );
+          if (!usable) return "out_of_range";
+        }
+
+        // 缺料（与 hasMaterials 同口径：跨槽合计）
+        for (const input of recipe.inputs) {
+          let total = 0;
+          for (const stack of inv.slots) {
+            if (stack && stack.kind === input.kind) total += stack.count;
+          }
+          if (total < input.count) return "no_item";
+        }
+
+        // 满包（与 outputsFit 同口径：干跑 addToInventory）
+        const dry = {
+          capacity: inv.capacity,
+          slots: inv.slots.map((slot) => (slot ? { ...slot } : null)),
+        };
+        for (const output of recipe.outputs) {
+          const leftover = addToInventory(dry, this.world.gameDef.itemsByKind, output.kind, output.count, {
+            nowTick: this.world.time.tick,
+          });
+          if (leftover > 0) return "inventory_full";
+        }
+        return "unknown";
+      }
+      case "craft-cancel": {
+        const jobs = this.world.craftingJobs.get(eid);
+        if (!jobs?.some((job) => job.recipeId === (command.recipe ?? ""))) return "invalid";
+        // 退料放不下也会拒绝（原子快照回退）——无法从外部区分 → unknown
+        return "unknown";
+      }
+      case "refuel": {
+        const craftingRule = this.world.gameDef.resolvedRules["crafting"] as
+          | { fuel?: { items?: Record<string, number> } }
+          | undefined;
+        if (!craftingRule?.fuel) return "invalid";
+        const range = craftingStationRange(this.world);
+        const stations = stationsInRange(this.world, eid, range).filter((stationEid) => {
+          if (!hasComponent(this.world, stationEid, LightSource)) return false;
+          if (command.target === undefined) return true;
+          return NetworkId.value[stationEid] === command.target;
+        });
+        if (stations.length === 0) return "out_of_range";
+        const fuelKinds = Object.keys(craftingRule.fuel.items ?? {});
+        const hasFuel = inv?.slots.some((stack) => stack !== null && fuelKinds.includes(stack.kind)) ?? false;
+        if (!hasFuel) return "no_item";
+        return "unknown";
+      }
+      case "place": {
+        const stack = inv?.slots[slotIndex];
+        if (!stack) return "no_item";
+        const item = this.world.gameDef.itemsByKind?.get(stack.kind);
+        if (!item?.place) return "invalid";
+        if (!this.world.archetypes.has(item.place.archetype)) return "invalid";
+        if (!hasComponent(this.world, eid, Transform)) return "invalid";
+        const rules = this.world.gameDef.resolvedRules["place"] as
+          | { placeRange?: number }
+          | undefined;
+        const range = rules?.placeRange ?? 64;
+        const level = entityLevelOf(eid);
+        if (
+          !isGameplayReachable(
+            { x: Transform.x[eid], y: Transform.y[eid], level },
+            { x: command.x ?? 0, y: command.y ?? 0, level },
+            range,
+          )
+        ) {
+          return "out_of_range";
+        }
+        // 距离已过：原子剩余拒绝原因 = 重叠/占用/地图阻挡 → blocked
+        return "blocked";
+      }
+      case "deconstruct": {
+        const targetEid = this.eidByNetworkId(command.target ?? -1);
+        if (targetEid === undefined) return "invalid";
+        if (!hasComponent(this.world, targetEid, Placeable)) return "invalid";
+        if (!hasComponent(this.world, eid, Transform) || !hasComponent(this.world, targetEid, Transform)) {
+          return "invalid";
+        }
+        if (entityMapOf(this.world, targetEid) !== entityMapOf(this.world, eid)) {
+          return "out_of_range";
+        }
+        const owner = Placeable.ownerNetworkId[targetEid] ?? 0;
+        if (owner === 0 || owner !== NetworkId.value[eid]) return "not_owner";
+        const rules = this.world.gameDef.resolvedRules["place"] as
+          | { placeRange?: number }
+          | undefined;
+        const range = rules?.placeRange ?? 64;
+        if (
+          !isGameplayReachable(
+            { x: Transform.x[eid], y: Transform.y[eid], level: entityLevelOf(eid) },
+            { x: Transform.x[targetEid], y: Transform.y[targetEid], level: entityLevelOf(targetEid) },
+            range,
+          )
+        ) {
+          return "out_of_range";
+        }
+        // 连接器 stranded 等结构约束 → blocked
+        return "blocked";
+      }
+      case "throw": {
+        if ((Cooldown.remainingMs[eid] ?? 0) > 0) return "cooldown";
+        const weapon = getEquippedItemKind(this.world, eid, "weapon");
+        if (!weapon?.throw) return "no_item";
+        return "unknown";
+      }
+      case "dialogue": {
+        if (!Dialogue[eid]) return "invalid";
+        return "unknown";
+      }
+      case "offer":
+        return "invalid";
+      case "offer-accept":
+      case "offer-cancel": {
+        const session = this.world.offerSessions.get(offerIdOf(command.offerId));
+        if (!session) return "invalid";
+        if (!session.terms.some((party) => party.party === eid)) return "not_owner";
+        return "unknown";
+      }
+      default:
+        return "invalid";
+    }
   }
 
   /**
@@ -916,7 +1464,34 @@ export class GameSimulation implements SimulationPort {
    * @returns 可序列化的碰撞调试数据
    */
   getDebugSnapshot(options?: DebugSnapshotOptions): unknown {
-    return getCollisionDebugSnapshot(this.world, options);
+    const snapshot = getCollisionDebugSnapshot(this.world, options) as {
+      entityBodies: Array<Record<string, unknown> & { eid?: number }>;
+      pairs?: Array<{ id: string; a: string; b: string; overlap: number }>;
+    };
+    // CC-04：调试碰撞体补稳定对外 id。`networkId` 是客户端应使用的字段；
+    // `eid` 仅按 CC-04 的兼容许可保留给旧调试客户端（事件/业务载荷不含 eid）。
+    for (const body of snapshot.entityBodies) {
+      const eid = body.eid;
+      if (typeof eid !== "number") continue;
+      const networkId = networkIdOf(this.world, eid);
+      if (networkId !== undefined) body.networkId = networkId;
+    }
+    // 碰撞对的调试 id 形如 `entity:<eid>`：一并换成 networkId，避免旁路泄漏。
+    const remapToken = (token: string): string => {
+      if (!token.startsWith("entity:")) return token;
+      const eid = Number(token.slice("entity:".length));
+      const networkId = Number.isInteger(eid) ? networkIdOf(this.world, eid) : undefined;
+      return `entity:${networkId ?? "unknown"}`;
+    };
+    if (snapshot.pairs) {
+      for (const pair of snapshot.pairs) {
+        pair.a = remapToken(pair.a);
+        pair.b = remapToken(pair.b);
+        const [left, right] = pair.a < pair.b ? [pair.a, pair.b] : [pair.b, pair.a];
+        pair.id = `${left}|${right}`;
+      }
+    }
+    return snapshot;
   }
 
   /**

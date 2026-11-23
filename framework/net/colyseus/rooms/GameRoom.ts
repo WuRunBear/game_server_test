@@ -122,6 +122,7 @@ export function isPlayerCommand(message: unknown): message is PlayerCommand {
   const obj = message as Record<string, unknown>;
   return (
     typeof obj.type === "string" &&
+    (obj.requestId === undefined || typeof obj.requestId === "string") &&
     (obj.type === "consume" ||
       obj.type === "drop" ||
       obj.type === "transfer" ||
@@ -156,6 +157,20 @@ export function isPlayerCommand(message: unknown): message is PlayerCommand {
         Number.isInteger(obj.ttlTicks) &&
         obj.ttlTicks >= 0))
   );
+}
+
+/** 从任意 command 消息中安全读取 requestId（非字符串视为未提供）。 */
+function readRequestId(message: unknown): string | undefined {
+  if (!message || typeof message !== "object") return undefined;
+  const value = (message as Record<string, unknown>).requestId;
+  return typeof value === "string" ? value : undefined;
+}
+
+/** 从任意 command 消息中安全读取 type（仅用于回执展示，不参与裁决）。 */
+function readCommandType(message: unknown): string | undefined {
+  if (!message || typeof message !== "object") return undefined;
+  const value = (message as Record<string, unknown>).type;
+  return typeof value === "string" ? value : undefined;
 }
 
 /**
@@ -300,10 +315,23 @@ export class GameRoom extends Room<{ state: RoomState }> {
       this.sim.submitInput(client.sessionId, message);
     });
 
-    // 背包原子命令：食用 / 丢弃 / 移动槽
+    // 离散命令（背包/制作/放置/交易 ...）：守卫失败也回执，绝不让客户端
+    // 「点了没反应」。requestId 原样回传（缺失也回一条，客户端可忽略）。
     this.onMessage("command", (client: Client, message: unknown) => {
-      if (!isPlayerCommand(message)) return;
-      this.sim.submitCommand(client.sessionId, message);
+      const requestId = readRequestId(message);
+      const type = readCommandType(message);
+      if (!isPlayerCommand(message)) {
+        this.sendCommandResult(client, { requestId, type, ok: false, code: "invalid" });
+        return;
+      }
+      const result = this.sim.submitCommand(client.sessionId, message);
+      this.sendCommandResult(client, {
+        requestId: message.requestId,
+        type: message.type,
+        ok: result.ok,
+        ...(result.ok ? {} : { code: result.code ?? "unknown" }),
+        ...(result.data ? { data: result.data } : {}),
+      });
     });
 
     // 订阅碰撞调试推送
@@ -323,6 +351,27 @@ export class GameRoom extends Room<{ state: RoomState }> {
     this.onMessage("debug_colliders_pull", (client: Client) => {
       this.sendCollisionDebugSnapshot(client);
     });
+  }
+
+  /**
+   * 发送命令回执（`command-result`）。
+   *
+   * 防御：测试/嵌入场景可能注入没有 `send` 的 client 替身；真实 Colyseus
+   * Client 恒有 send。跳过发送不改变仿真结果。
+   */
+  private sendCommandResult(
+    client: Client,
+    payload: {
+      requestId?: string;
+      type?: string;
+      ok: boolean;
+      code?: string;
+      data?: Record<string, unknown>;
+    },
+  ): void {
+    const send = (client as { send?: (type: string, message: unknown) => void }).send;
+    if (typeof send !== "function") return;
+    send.call(client, "command-result", payload);
   }
 
   /**
@@ -509,10 +558,11 @@ export class GameRoom extends Room<{ state: RoomState }> {
   /**
    * 每帧 tick 回调——由 Colyseus setSimulationInterval 触发。
    *
-   * 三步：
-   * 1. sim.tick(dtMs) — 推进仿真，得到快照
+   * 四步：
+   * 1. sim.tick(dtMs) — 推进仿真，得到快照 + per-client 客户端事件
    * 2. applySnapshot — 把快照写入 RoomState（触发 Colyseus 增量同步）
-   * 3. pushCollisionDebugSnapshots — 节流推送调试数据
+   * 3. sendClientEvents — 状态同步之后批量发送表现事件
+   * 4. pushCollisionDebugSnapshots — 节流推送调试数据
    *
    * @param deltaTimeMs Colyseus 提供的实际流逝时间
    * @param fixedDtMs 固定步长（兜底值，deltaTimeMs 可能为 0）
@@ -521,7 +571,26 @@ export class GameRoom extends Room<{ state: RoomState }> {
     const dtMs = deltaTimeMs > 0 ? deltaTimeMs : fixedDtMs;
     const result = this.sim.tick(dtMs);
     this.applySnapshot(result);
+    // 表现事件在状态同步之后发送（同一 tick 内顺序稳定；无事件不发空包）。
+    this.sendClientEvents(result);
     this.pushCollisionDebugSnapshots(dtMs);
+  }
+
+  /**
+   * 批量发送本帧客户端表现事件。
+   *
+   * 载荷固定为 `{ events: ClientEvent[] }`；只发给有事件的**在线**连接
+   * （断线保留玩家不在 `this.clients` 中，天然不接收；重连从新事件开始）。
+   */
+  private sendClientEvents(result: TickResult): void {
+    const perClient = result.clientEvents;
+    if (!perClient || perClient.size === 0) return;
+
+    for (const client of this.clients) {
+      const events = perClient.get(client.sessionId);
+      if (!events || events.length === 0) continue;
+      client.send("events", { events });
+    }
   }
 
   /**

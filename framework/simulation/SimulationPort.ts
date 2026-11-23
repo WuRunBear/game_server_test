@@ -4,6 +4,7 @@
  */
 import type {
   PlayerInput, PlayerJoinResult, PlayerJoinOptions, TickResult, DebugSnapshotOptions, PlayerCommand,
+  CommandResult,
 } from "./types";
 import type { SerializedMapGeometry } from "map/geometry/snapshot";
 import type { MapConfig } from "framework/config/schema/MapRegistrySchema";
@@ -84,12 +85,13 @@ export interface SimulationPort {
    * 提交一条玩家命令（离散动作，非逐帧）。
    *
    * 立即执行服务端权威变更（如背包原子），不入帧缓存、不做 seq 去重。
-   * 返回是否成功执行；未知命令类型返回 false。
+   * 返回统一命令回执（成功也回执）；未知命令类型返回
+   * `{ ok: false, code: "invalid" }`。
    *
    * @param sessionId Colyseus 连接标识
    * @param command 命令数据
    */
-  submitCommand(sessionId: string, command: PlayerCommand): boolean;
+  submitCommand(sessionId: string, command: PlayerCommand): CommandResult;
 
   /**
    * 立即落盘并等待写入完成（无停机存档）。

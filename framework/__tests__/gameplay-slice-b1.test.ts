@@ -280,7 +280,7 @@ describe("B1：容器取回通道（transfer + target）", () => {
     sim.tick(50); // respawn：delayMs 0 → 血量回满，命令通道重新放行
     expect(Health.current[player]).toBe(100);
 
-    expect(sim.submitCommand("s1", { type: "transfer", target: corpseNetworkId, slot: 0 })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "transfer", target: corpseNetworkId, slot: 0 }).ok).toBe(true);
     expect(Inventory[player]!.slots[0]).toEqual({ kind: "k1", count: 5 });
     expect(Inventory[corpse]!.slots[0]).toBeNull();
   });
@@ -303,8 +303,8 @@ describe("B1：容器取回通道（transfer + target）", () => {
     }
 
     // 未知 networkId / 非法值
-    expect(sim.submitCommand("s1", { type: "transfer", target: 99999, slot: 0 })).toBe(false);
-    expect(sim.submitCommand("s1", { type: "transfer", target: 0, slot: 0 })).toBe(false);
+    expect(sim.submitCommand("s1", { type: "transfer", target: 99999, slot: 0 }).ok).toBe(false);
+    expect(sim.submitCommand("s1", { type: "transfer", target: 0, slot: 0 }).ok).toBe(false);
 
     // 非 Inventory 实体（敌实体带 Health 无背包）不可作为容器
     Health.current[player] = 0;
@@ -312,11 +312,11 @@ describe("B1：容器取回通道（transfer + target）", () => {
     const corpse = query(world, [Container])[0];
     const enemy = spawnTestEnemy(world, { hp: 100 });
     Inventory[corpse]!.slots[0] = { kind: "k1", count: 1 };
-    expect(sim.submitCommand("s1", { type: "transfer", target: NetworkId.value[enemy], slot: 0 })).toBe(false);
+    expect(sim.submitCommand("s1", { type: "transfer", target: NetworkId.value[enemy], slot: 0 }).ok).toBe(false);
     // 自己不是容器
-    expect(sim.submitCommand("s1", { type: "transfer", target: NetworkId.value[player], slot: 0 })).toBe(false);
+    expect(sim.submitCommand("s1", { type: "transfer", target: NetworkId.value[player], slot: 0 }).ok).toBe(false);
     // 合法容器未到期前照常可取（同图）
-    expect(sim.submitCommand("s1", { type: "transfer", target: NetworkId.value[corpse], slot: 0 })).toBe(false); // 玩家已死亡：命令守卫拒绝
+    expect(sim.submitCommand("s1", { type: "transfer", target: NetworkId.value[corpse], slot: 0 }).ok).toBe(false); // 玩家已死亡：命令守卫拒绝
     expect(Inventory[corpse]!.slots[0]).toEqual({ kind: "k1", count: 1 });
   });
 });

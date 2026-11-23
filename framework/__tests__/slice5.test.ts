@@ -366,13 +366,13 @@ describe("Slice 5：输入校验（anti-cheat）", () => {
     Inventory[p] = { capacity: 4, slots: [{ kind: "k1", count: 1 }, { kind: "k2", count: 1 }, null, null] };
 
     // 同一 tick 内第 3 条被限流
-    expect(sim.submitCommand("s1", { type: "transfer", slot: 0, toSlot: 1 })).toBe(true);
-    expect(sim.submitCommand("s1", { type: "transfer", slot: 1, toSlot: 0 })).toBe(true);
-    expect(sim.submitCommand("s1", { type: "transfer", slot: 0, toSlot: 1 })).toBe(false);
+    expect(sim.submitCommand("s1", { type: "transfer", slot: 0, toSlot: 1 }).ok).toBe(true);
+    expect(sim.submitCommand("s1", { type: "transfer", slot: 1, toSlot: 0 }).ok).toBe(true);
+    expect(sim.submitCommand("s1", { type: "transfer", slot: 0, toSlot: 1 }).ok).toBe(false);
 
     // 推进 tick 窗口（1 秒 = tickRate 个 tick）后放行
     for (let i = 0; i < 25; i++) sim.tick(50);
-    expect(sim.submitCommand("s1", { type: "transfer", slot: 1, toSlot: 0 })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "transfer", slot: 1, toSlot: 0 }).ok).toBe(true);
   });
 
   it("无 server 规则：输入与命令全部放行", async () => {
@@ -386,7 +386,7 @@ describe("Slice 5：输入校验（anti-cheat）", () => {
     sim.submitInput("s1", { seq: 1, moveX: 9999, moveY: 9999 });
     sim.tick(50);
     expect(Velocity.vx[p]).toBe(9999);
-    expect(sim.submitCommand("s1", { type: "transfer", slot: 0, toSlot: 1 })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "transfer", slot: 0, toSlot: 1 }).ok).toBe(true);
   });
 });
 

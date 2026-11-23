@@ -252,7 +252,7 @@ describe("断线保留：与死亡守卫互不干扰", () => {
 
     // 死亡守卫：命令拒绝（背包含物品，只有死亡守卫会拒绝 consume）
     Inventory[p] = { capacity: 2, slots: [{ kind: "k1", count: 7 }, null] };
-    expect(sim.submitCommand("s2", { type: "consume", slot: 0 })).toBe(false);
+    expect(sim.submitCommand("s2", { type: "consume", slot: 0 }).ok).toBe(false);
     expect(Inventory[p]!.slots[0]).toEqual({ kind: "k1", count: 7 }); // 未被消费
 
     // 死亡守卫：移动/意图输入被忽略（速度不写入）

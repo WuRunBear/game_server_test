@@ -584,13 +584,13 @@ describe("Slice 4：GameSimulation place 命令 + timeOfDay 快照", () => {
     const playerEid = query(world, [Player])[0];
     Inventory[playerEid]!.slots[0] = { kind: "k1", count: 1 };
 
-    expect(sim.submitCommand("s1", { type: "place", slot: 0, x: 30, y: 0 })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "place", slot: 0, x: 30, y: 0 }).ok).toBe(true);
     expect(query(world, [Placeable]).length).toBe(1);
 
     // 死亡守卫
     Inventory[playerEid]!.slots[0] = { kind: "k1", count: 1 };
     Health.current[playerEid] = 0;
-    expect(sim.submitCommand("s1", { type: "place", slot: 0, x: 40, y: 0 })).toBe(false);
+    expect(sim.submitCommand("s1", { type: "place", slot: 0, x: 40, y: 0 }).ok).toBe(false);
   });
 
   it("tick 快照携带 world 级 timeOfDay", async () => {
@@ -661,14 +661,14 @@ describe("Slice 4：真实 game 配置（昼夜 + 条件刷怪 + 光源 + 放置
     ]);
 
     // 合成火堆套件
-    expect(sim.submitCommand("s1", { type: "craft", recipe: "kit" })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "kit" }).ok).toBe(true);
     const kitSlot = inv.slots.findIndex((s) => s?.kind === "k1");
     expect(kitSlot).toBeGreaterThanOrEqual(0);
 
     // 放置：真实地图阻挡格随机 → 以玩家为原点偏移，命中阻挡则换方向再试
     let placed = false;
     for (const dx of [30, 50, 70, -30, -50]) {
-      if (sim.submitCommand("s1", { type: "place", slot: kitSlot, x: Transform.x[playerEid] + dx, y: Transform.y[playerEid] })) {
+      if (sim.submitCommand("s1", { type: "place", slot: kitSlot, x: Transform.x[playerEid] + dx, y: Transform.y[playerEid] }).ok) {
         placed = true;
         break;
       }
@@ -684,7 +684,7 @@ describe("Slice 4：真实 game 配置（昼夜 + 条件刷怪 + 光源 + 放置
     expect(nearFire).toBe(true);
 
     // 放在火堆旁 → 站点合成可用（stationType=1 匹配真实 campfire）
-    expect(sim.submitCommand("s1", { type: "craft", recipe: "cook" })).toBe(true);
+    expect(sim.submitCommand("s1", { type: "craft", recipe: "cook" }).ok).toBe(true);
     expect(inv.slots.some((s) => s?.kind === "m4")).toBe(true);
   });
 
