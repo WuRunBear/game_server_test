@@ -49,6 +49,7 @@ export class PlayerState extends Schema {
     @type("uint32") public entityId!: number;
     @type("string") public mapId!: string;
     @type({ map: EntityState }) public visibleEntities: MapSchema<EntityState> = new MapSchema<EntityState>();
+    @type("string") public mapVersion!: string;
 }
 
 export class RoomState extends Schema {

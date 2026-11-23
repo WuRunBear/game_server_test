@@ -81,7 +81,21 @@ import { createMapEvolveDeps } from "map/runtime/evolveDeps";
 import { mapSeedOf } from "map/runtime/mapSeeds";
 import { serializeGeometry, type SerializedMapGeometry } from "map/geometry/snapshot";
 import { advanceTickTo, computeOfflineTicks } from "map/runtime/clock";
-import { setGround } from "map/runtime/terrainWriteback";
+import {
+  setGround,
+  terrainModificationsSince,
+  terrainVersionOf,
+  type TerrainModificationSet,
+} from "map/runtime/terrainWriteback";
+import {
+  buildMapCollisionView,
+  buildMapRenderView,
+  spaceExposureOfEntity,
+  SPACE_EXPOSURE_SYNC_KEY,
+  type MapCollisionView,
+  type MapRenderView,
+  type SpaceExposureCellCache,
+} from "map/clientView";
 import { noopBootDeps, type BootDeps } from "map/runtime/boot";
 import { fastForwardStateMachines } from "framework/simulation/stateMachine/stateMachineSystem";
 import { fastForwardPopulations } from "framework/simulation/population/populationSystem";
@@ -1506,6 +1520,30 @@ export class GameSimulation implements SimulationPort {
     return serializeGeometry(geometry);
   }
 
+  /**
+   * 取某图当前内容指纹（CC-05；只读）。
+   *
+   * 图不在世界/未构建时返回空串——GameRoom 写入 `PlayerState.mapVersion`。
+   */
+  getMapVersion(mapId: string): string {
+    return terrainVersionOf(this.world, mapId) ?? "";
+  }
+
+  /** 取某图当前 tick 的有效地面视图（CC-05；只读派生，不写回底板）。 */
+  getMapRenderView(mapId: string): MapRenderView | undefined {
+    return buildMapRenderView(this.world, mapId);
+  }
+
+  /** 取某图某层的正式碰撞视图（CC-05；只读派生，不写回）。 */
+  getMapCollisionView(mapId: string, level: number): MapCollisionView | undefined {
+    return buildMapCollisionView(this.world, mapId, level);
+  }
+
+  /** 计算某图从已知版本到当前的稀疏增量（CC-05；不可识别返回 undefined）。 */
+  getMapRuntimeDelta(mapId: string, sinceVersion: string): TerrainModificationSet | undefined {
+    return terrainModificationsSince(this.world, mapId, sinceVersion);
+  }
+
   /** 地图生成配置清单（配置声明序）——传输层据此描述地图元信息。 */
   getMapConfigs(): MapConfig[] {
     return [...this.mapConfigsByKey.values()];
@@ -1692,6 +1730,8 @@ export class GameSimulation implements SimulationPort {
     // 环境派生（相位/天气/进度）：tick 的纯函数（environmentAt），与
     // environmentSystem 的缓存同源——离线补差后同样正确。
     const environment = environmentAt(this.world);
+    // CC-05：室内/露天派生键的同 tick 格缓存（同格只做一次围合洪泛）。
+    const spaceExposureCache: SpaceExposureCellCache = new Map();
     const snapshotShell = {
       tick,
       entities,
@@ -1756,6 +1796,16 @@ export class GameSimulation implements SimulationPort {
           const result = adapter(this.world, eid, field.fields);
           Object.assign(snap.values, result.numbers);
           Object.assign(snap.strings, result.strings);
+          // CC-05 派生键：game.json 末尾的 Kind+exposure 条目（tags=Player）
+          // 扩展 Kind 适配器路径，输出 Space.exposure（stringValues 动态键，
+          // 不改 EntityState schema）。同 tick 同格结果复用缓存。
+          if (field.component === "Kind" && field.fields.includes("exposure")) {
+            snap.strings[SPACE_EXPOSURE_SYNC_KEY] = spaceExposureOfEntity(
+              this.world,
+              eid,
+              spaceExposureCache,
+            );
+          }
         }
         continue;
       }

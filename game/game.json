@@ -110,7 +110,8 @@
         "component": "Action",
         "tags": ["Player"],
         "fields": ["actionId", "startedTick", "durationTicks", "phase", "phaseIndex", "target", "dirX", "dirY"]
-      }
+      },
+      { "component": "Kind", "tags": ["Player"], "fields": ["exposure"] }
     ]
   }
 }

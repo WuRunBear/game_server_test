@@ -79,4 +79,15 @@ export class PlayerState extends Schema {
   @view()
   @type({ map: EntityState })
   visibleEntities: VisibleEntities = new VisibleEntities();
+
+  /**
+   * 该玩家当前所属地图的 `MapGeometry.version` 内容指纹（CC-05）。
+   *
+   * 每 tick 由 GameRoom.applySnapshot 从仿真层只读访问器写入；地图运行期
+   * 写回（terrainWriteback）后指纹即变化，客户端据此拉取 `/maps/runtime`
+   * 增量。换图后本字段立即反映新图版本。字段追加在末尾，已有字段索引不变；
+   * 无地图/旧仿真端口时为空串。
+   */
+  @type("string")
+  mapVersion: string = "";
 }

@@ -7,6 +7,8 @@ import type {
   CommandResult,
 } from "./types";
 import type { SerializedMapGeometry } from "map/geometry/snapshot";
+import type { MapCollisionView, MapRenderView } from "map/clientView";
+import type { TerrainModificationSet } from "map/runtime/terrainWriteback";
 import type { MapConfig } from "framework/config/schema/MapRegistrySchema";
 
 /**
@@ -126,6 +128,45 @@ export interface SimulationPort {
    * @returns 几何快照；该图不在世界中时为 undefined
    */
   getMapGeometry?(mapId: string): SerializedMapGeometry | undefined;
+
+  /**
+   * 取某图当前的内容指纹（`MapGeometry.version`；CC-05）。
+   *
+   * 只读访问器：GameRoom 每 tick 写入 `PlayerState.mapVersion`，客户端据此
+   * 判断是否需要拉取 `/maps/runtime?sinceVersion=`。图不存在/未构建时返回
+   * 空串（不抛错）。
+   *
+   * @param mapId 地图 registry key
+   */
+  getMapVersion?(mapId: string): string;
+
+  /**
+   * 取某图当前 tick 的有效地面视图（`/maps/render` 数据源；只读、无副作用）。
+   *
+   * @param mapId 地图 registry key
+   * @returns 视图；图不存在时为 undefined
+   */
+  getMapRenderView?(mapId: string): MapRenderView | undefined;
+
+  /**
+   * 取某图某层的正式碰撞视图（`/maps/collision` 数据源；只读、无副作用）。
+   *
+   * @param mapId 地图 registry key
+   * @param level 查询层号
+   * @returns 视图；图不存在时为 undefined
+   */
+  getMapCollisionView?(mapId: string, level: number): MapCollisionView | undefined;
+
+  /**
+   * 计算「从某已知版本到当前」的地图增量（`/maps/runtime` 增量数据源）。
+   *
+   * 只识别出厂基线版本或本进程写回历史版本；不可识别时返回 undefined，
+   * 调用方回退全量响应（不做 404）。
+   *
+   * @param mapId 地图 registry key
+   * @param sinceVersion 客户端持有的已知版本
+   */
+  getMapRuntimeDelta?(mapId: string, sinceVersion: string): TerrainModificationSet | undefined;
 
   /**
    * 地图生成配置清单（key + 生成管道）——供传输层描述地图元信息（如来源标识）。

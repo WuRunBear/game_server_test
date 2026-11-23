@@ -35,7 +35,13 @@
  * （出厂底板未知，该图存档恒走全量格式，见 worldSerializer）。
  */
 import { computeGeometryVersion } from "map/geometry/version";
-import { captureTerrainBaseline, type TerrainBaseline, type WritableTileField } from "map/geometry/delta";
+import {
+  captureTerrainBaseline,
+  computeTileModifications,
+  type TerrainBaseline,
+  type TileModification,
+  type WritableTileField,
+} from "map/geometry/delta";
 import type { MapGeometry } from "map/geometry/types";
 import type { GameWorld } from "framework/world";
 
@@ -50,6 +56,9 @@ const baselinesByWorld = new WeakMap<GameWorld, Map<string, TerrainBaseline>>();
 /**
  * 登记某图的出厂底板（tiles/walkable 副本 + 当前指纹）。bootMaps 生成路径
  * 专用；重复登记以最后一次为准（增量回填路径在叠加修改前登记重算底板）。
+ *
+ * 同时清空该图的写回版本历史：新底板代表新的内容基线，旧版本号不再可识别
+ * （客户端携带旧版本请求增量时由调用方回退全量）。
  */
 export function registerTerrainBaseline(world: GameWorld, mapKey: string, geometry: MapGeometry): void {
   let byMap = baselinesByWorld.get(world);
@@ -58,11 +67,159 @@ export function registerTerrainBaseline(world: GameWorld, mapKey: string, geomet
     baselinesByWorld.set(world, byMap);
   }
   byMap.set(mapKey, captureTerrainBaseline(geometry));
+  versionHistoryByWorld.get(world)?.delete(mapKey);
 }
 
 /** 读某图的出厂底板；未登记（全量回填路径/未开机）返回 undefined。 */
 export function terrainBaselineOf(world: GameWorld, mapKey: string): TerrainBaseline | undefined {
   return baselinesByWorld.get(world)?.get(mapKey);
+}
+
+/**
+ * 读某图的当前内容指纹（实时 `MapGeometry.version`；图不存在返回 undefined）。
+ *
+ * 只读访问器：供传输层/仿真端口写 `PlayerState.mapVersion`，不触碰写回语义。
+ */
+export function terrainVersionOf(world: GameWorld, mapKey: string): string | undefined {
+  return world.maps[mapKey]?.version;
+}
+
+// ---------------------------------------------------------------------------
+// 写回版本历史（HTTP 增量识别「基线/历史版本」；不参与存档）
+// ---------------------------------------------------------------------------
+
+/**
+ * 单条版本历史记录：一次**实际生效**的写回产生了哪个新版本、改了哪格/通道。
+ *
+ * 只记当前图的 modified 序列；请求 `sinceVersion` 命中某条记录时，把该记录
+ * 之后的全部 (tileIndex, field) 去重后映射为**当前数组终值**——天然
+ * last-write-wins（与存档 diff 同语义），不需要保存每一版完整数组。
+ */
+interface TerrainVersionChange {
+  /** 写入后重算的内容指纹（新版本）。 */
+  version: string;
+  /** tile 线性索引。 */
+  tileIndex: number;
+  /** 被改写的底板字段。 */
+  field: WritableTileField;
+}
+
+/** 每图版本历史条数上限（超出丢最旧；旧版本号随之变为「无法识别」→ 回退全量）。 */
+const VERSION_HISTORY_LIMIT = 4096;
+
+/** world → 每图版本变更历史（key = 地图 registry key）。 */
+const versionHistoryByWorld = new WeakMap<GameWorld, Map<string, TerrainVersionChange[]>>();
+
+/** 登记一次实际写回产生的新版本（写回入口内部专用）。 */
+function recordVersionChange(
+  world: GameWorld,
+  mapKey: string,
+  version: string,
+  tileIndex: number,
+  field: WritableTileField,
+): void {
+  let byMap = versionHistoryByWorld.get(world);
+  if (!byMap) {
+    byMap = new Map<string, TerrainVersionChange[]>();
+    versionHistoryByWorld.set(world, byMap);
+  }
+  let changes = byMap.get(mapKey);
+  if (!changes) {
+    changes = [];
+    byMap.set(mapKey, changes);
+  }
+  changes.push({ version, tileIndex, field });
+  if (changes.length > VERSION_HISTORY_LIMIT) {
+    changes.splice(0, changes.length - VERSION_HISTORY_LIMIT);
+  }
+}
+
+/**
+ * HTTP 增量响应所需的终态修改集（baseVersion = 调用方 `sinceVersion`）。
+ */
+export interface TerrainModificationSet {
+  /** 增量基准版本（调用方提供的、已被识别的版本号）。 */
+  baseVersion: string;
+  /** 计算修改项时该图的当前版本（用于响应/响应头与终态一致）。 */
+  version: string;
+  /** 相对该基准的稀疏终态修改项（`tiles`/`walkable`/`level`）。 */
+  modifications: TileModification[];
+}
+
+/** 字段排序权重（同格多通道时输出顺序固定，便于客户端/测试比对）。 */
+const FIELD_ORDER: Record<WritableTileField, number> = {
+  tiles: 0,
+  walkable: 1,
+  level: 2,
+};
+
+/**
+ * 计算「从某已知版本到当前」的稀疏终态修改项（HTTP `/maps/runtime` 增量）。
+ *
+ * 识别的版本来源（其余一律返回 undefined，调用方回退全量）：
+ * - **出厂基线版本**（`terrainBaselineOf`）：与当前几何逐格 diff；
+ * - **本进程内写回产生过的历史版本**：取该版本记录之后被改写的
+ *   (tileIndex, field) 去重集合，读取当前数组终值输出。
+ *
+ * 终态语义：同一格多次写回只输出最后一次的值（不按事件流重放）；版本历史
+ * 超出上限后最旧版本不可识别。
+ *
+ * @param world ECS 世界
+ * @param mapKey 地图 registry key
+ * @param sinceVersion 客户端持有的已知版本
+ * @returns 增量结果；版本不可识别/图不存在/无出厂底板时 undefined
+ */
+export function terrainModificationsSince(
+  world: GameWorld,
+  mapKey: string,
+  sinceVersion: string,
+): TerrainModificationSet | undefined {
+  const geometry = world.maps[mapKey];
+  if (!geometry) return undefined;
+  const baseline = terrainBaselineOf(world, mapKey);
+  if (!baseline) return undefined;
+
+  // 出厂基线：与当前数组逐格 diff（最常用的「首次全量后的增量」路径）
+  if (sinceVersion === baseline.version) {
+    return {
+      baseVersion: sinceVersion,
+      version: geometry.version,
+      modifications: computeTileModifications(geometry, baseline),
+    };
+  }
+
+  const changes = versionHistoryByWorld.get(world)?.get(mapKey);
+  if (!changes || changes.length === 0) return undefined;
+
+  let baseIndex = -1;
+  for (let i = changes.length - 1; i >= 0; i -= 1) {
+    if (changes[i]!.version === sinceVersion) {
+      baseIndex = i;
+      break;
+    }
+  }
+  if (baseIndex < 0) return undefined;
+
+  // 该版本之后被改写的 (field, tileIndex) 去重；值取当前数组终态。
+  const touched = new Set<string>();
+  const modifications: TileModification[] = [];
+  for (let i = baseIndex + 1; i < changes.length; i += 1) {
+    const change = changes[i]!;
+    const key = `${change.field}|${change.tileIndex}`;
+    if (touched.has(key)) continue;
+    touched.add(key);
+    const value =
+      change.field === "tiles"
+        ? geometry.tiles[change.tileIndex]!
+        : change.field === "walkable"
+          ? geometry.walkable[change.tileIndex]!
+          : geometry.level[change.tileIndex]!;
+    modifications.push({ tileIndex: change.tileIndex, field: change.field, value });
+  }
+  modifications.sort(
+    (a, b) => a.tileIndex - b.tileIndex || FIELD_ORDER[a.field] - FIELD_ORDER[b.field],
+  );
+  return { baseVersion: sinceVersion, version: geometry.version, modifications };
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +350,8 @@ function writeTile(
 
   geometry.version = computeGeometryVersion(geometry);
   bumpTerrainEpoch(world, mapKey);
+  // 版本历史只服务 HTTP 增量识别（内存态、不入档）；存档仍以出厂底板 diff 为准。
+  recordVersionChange(world, mapKey, geometry.version, tileIndex, field);
   pushDirtyTile(world, mapKey, {
     tileIndex,
     field,

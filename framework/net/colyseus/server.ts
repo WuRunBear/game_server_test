@@ -18,6 +18,15 @@ import { buildMapGeometry } from "map/generate/pipeline";
 import { serializeGeometry, type SerializedMapGeometry } from "map/geometry/snapshot";
 import { describeGeometry, type GeometryMetaInfo } from "map/geometry/version";
 import type { MapGeometry } from "map/geometry/types";
+import {
+  buildMapCollisionViewFromGeometry,
+  buildMapRenderViewForGeometry,
+  buildWorldMapGraph,
+  type MapCollisionView,
+  type MapRenderView,
+} from "map/clientView";
+import type { TerrainModificationSet } from "map/runtime/terrainWriteback";
+import type { EnvironmentRule } from "framework/config/schema/RuleSchema";
 import { buildContentCatalog } from "framework/content/catalog";
 import { buildClientManifest } from "framework/content/manifest";
 import { GameRoom } from "network/colyseus/rooms/GameRoom";
@@ -171,6 +180,61 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
     }
   };
 
+  /** 环境规则（无 environment 规则 → undefined；回退视图用同一规则派生）。 */
+  const environmentRuleOf = (): EnvironmentRule | undefined =>
+    gameDef.resolvedRules["environment"] as EnvironmentRule | undefined;
+
+  /** 取常驻房间内某图的当前有效地面视图（房间未就绪/图不存在 → undefined）。 */
+  const liveRenderViewOf = async (mapId: string): Promise<MapRenderView | undefined> => {
+    if (!persistentRoomId) return undefined;
+    try {
+      const result = await matchMaker.remoteRoomCall<GameRoom>(
+        persistentRoomId,
+        "getMapRenderView",
+        [mapId],
+      );
+      return (result as MapRenderView | null | undefined) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  /** 取常驻房间内某图某层的碰撞视图（房间未就绪/图不存在 → undefined）。 */
+  const liveCollisionViewOf = async (
+    mapId: string,
+    level: number,
+  ): Promise<MapCollisionView | undefined> => {
+    if (!persistentRoomId) return undefined;
+    try {
+      const result = await matchMaker.remoteRoomCall<GameRoom>(
+        persistentRoomId,
+        "getMapCollisionView",
+        [mapId, level],
+      );
+      return (result as MapCollisionView | null | undefined) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  /** 取常驻房间内某图从已知版本到当前的增量（不可识别/房间未就绪 → undefined）。 */
+  const liveMapDeltaOf = async (
+    mapId: string,
+    sinceVersion: string,
+  ): Promise<TerrainModificationSet | undefined> => {
+    if (!persistentRoomId) return undefined;
+    try {
+      const result = await matchMaker.remoteRoomCall<GameRoom>(
+        persistentRoomId,
+        "getMapRuntimeDelta",
+        [mapId, sinceVersion],
+      );
+      return (result as TerrainModificationSet | null | undefined) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
   const gameServer = new Server({
     transport,
     // 停机存档接线（F-08）：Colyseus 的 gracefullyShutdown 钩子默认会监听
@@ -246,13 +310,108 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
           return;
         }
 
+        // 增量基准：缺省/空串 = 旧全量行为；非字符串（数组等）按缺省处理。
+        const rawSinceVersion = req.query?.sinceVersion;
+        const sinceVersion =
+          typeof rawSinceVersion === "string" && rawSinceVersion.length > 0
+            ? rawSinceVersion
+            : undefined;
+
         // 优先读**活动房间的 live 几何**（含运行期写回，如野火焦土）；
         // 无房间（房间未就绪/创建失败）时回退到按配置重建的视图。
         await waitForRoom();
         const live = await liveGeometryOf(config.key);
         const snapshot = live ?? serializeGeometry(geometryOf(config));
         res.setHeader("x-map-version", snapshot.version);
+
+        // 无 sinceVersion：保持旧全量响应形状（HTML 客户端/既有测试不破）。
+        if (sinceVersion === undefined) {
+          res.status(200).json(snapshot);
+          return;
+        }
+
+        // 已是最新：只回版本确认，不带 14 万个数。
+        if (sinceVersion === snapshot.version) {
+          res.status(200).json({
+            key: snapshot.key,
+            version: snapshot.version,
+            unchanged: true,
+          });
+          return;
+        }
+
+        // 已知基线/历史版本 → 稀疏终态增量（tiles|walkable|level）。
+        // 只有 live 世界持有出厂底板/写回历史；无房间或版本不可识别时回退全量
+        // （不回 404，客户端按全量结果重建缓存即可）。
+        const delta = live ? await liveMapDeltaOf(config.key, sinceVersion) : undefined;
+        if (delta) {
+          // 以增量计算时的当前版本为准（两次远程读取之间若有写回，终态与版本
+          // 仍自洽；响应头同步覆盖为同一版本）。
+          res.setHeader("x-map-version", delta.version);
+          res.status(200).json({
+            key: snapshot.key,
+            version: delta.version,
+            baseVersion: delta.baseVersion,
+            modifications: delta.modifications,
+          });
+          return;
+        }
+
         res.status(200).json(snapshot);
+      });
+
+      // 当前 tick 的有效地面（相位/天气派生，查询期计算，不写回底板）。
+      // renderVersion = hash(baseVersion + phaseId + 量化进度 + 有效 tiles)，
+      // 客户端按此缓存；无 room 时用配置重建几何 + environment 规则（tick 0）。
+      app.get("/maps/render", async (req: any, res: any) => {
+        const rawMapId = req.query?.mapId;
+        const mapId = typeof rawMapId === "string" ? rawMapId : undefined;
+        const config = gameDef.resolvedMapConfigs.find(
+          (c) => c.key === (mapId !== undefined ? mapId : defaultMapId),
+        );
+        if (!config) {
+          res.status(404).json({ error: "unknown map", available: mapIds });
+          return;
+        }
+
+        await waitForRoom();
+        const view =
+          (await liveRenderViewOf(config.key)) ??
+          buildMapRenderViewForGeometry(geometryOf(config), environmentRuleOf(), 0);
+        res.setHeader("x-map-version", view.baseVersion);
+        res.status(200).json(view);
+      });
+
+      // 正式碰撞视图：该层静态通行位 + 建造物占用（实体引用 = networkId）。
+      // 通行判定与碰撞运行时同源（walkableAtLevel + collectBuiltStructures），
+      // 不是 /debug/colliders 的调试形状。
+      app.get("/maps/collision", async (req: any, res: any) => {
+        const rawMapId = req.query?.mapId;
+        const mapId = typeof rawMapId === "string" ? rawMapId : undefined;
+        const config = gameDef.resolvedMapConfigs.find(
+          (c) => c.key === (mapId !== undefined ? mapId : defaultMapId),
+        );
+        if (!config) {
+          res.status(404).json({ error: "unknown map", available: mapIds });
+          return;
+        }
+
+        // level 缺省 0；非法/小数按 0（与 /debug/colliders 的宽松口径一致）。
+        const rawLevel = req.query?.level;
+        const parsed = typeof rawLevel === "string" && rawLevel.trim() !== "" ? Number(rawLevel) : 0;
+        const level = Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
+
+        await waitForRoom();
+        const view =
+          (await liveCollisionViewOf(config.key, level)) ??
+          buildMapCollisionViewFromGeometry(geometryOf(config), level);
+        res.setHeader("x-map-version", view.version);
+        res.status(200).json(view);
+      });
+
+      // 世界地图图：registry 图集合 + presentation 的展示名/连接。
+      app.get("/world/map-graph", (_req: any, res: any) => {
+        res.status(200).json(buildWorldMapGraph(gameDef));
       });
 
       app.get("/maps/meta", async (_req: any, res: any) => {

@@ -546,6 +546,34 @@ export class GameRoom extends Room<{ state: RoomState }> {
   }
 
   /**
+   * 取某图当前 tick 的有效地面视图（供 HTTP `/maps/render`）。
+   *
+   * 方法名必须保留不变：server.ts 用 Colyseus 的
+   * `matchMaker.remoteRoomCall<GameRoom>("getMapRenderView")` 按字符串名调用。
+   */
+  getMapRenderView(mapId: string): unknown {
+    return this.sim.getMapRenderView?.(mapId) ?? null;
+  }
+
+  /**
+   * 取某图某层的正式碰撞视图（供 HTTP `/maps/collision`）。
+   *
+   * 方法名必须保留不变：server.ts 按字符串名远程调用。
+   */
+  getMapCollisionView(mapId: string, level: number): unknown {
+    return this.sim.getMapCollisionView?.(mapId, level) ?? null;
+  }
+
+  /**
+   * 计算某图从已知版本到当前的稀疏增量（供 HTTP `/maps/runtime?sinceVersion`）。
+   *
+   * 不可识别版本返回 null，端点据此回退全量响应。
+   */
+  getMapRuntimeDelta(mapId: string, sinceVersion: string): unknown {
+    return this.sim.getMapRuntimeDelta?.(mapId, sinceVersion) ?? null;
+  }
+
+  /**
    * 调试用：写回某图单格地面语义（验证 /maps 端点读的是 live 几何）。
    *
    * 方法名必须保留不变：测试/工具经 Colyseus 的
@@ -621,6 +649,9 @@ export class GameRoom extends Room<{ state: RoomState }> {
       const playerState = this.state.players.get(client.sessionId);
       if (!playerState) continue;
       playerState.mapId = snapshot.playerMaps.get(client.sessionId) ?? "";
+      // CC-05：每 tick 写入玩家当前地图的几何内容指纹；换图后立即反映新图
+      // 版本（客户端据 mapVersion 变化拉 /maps/runtime?sinceVersion=）。
+      playerState.mapVersion = this.sim.getMapVersion?.(playerState.mapId) ?? "";
     }
     // 报价摘要表：逐条按参与方过滤（非相关玩家看不到该条）。
     this.applyOffers(snapshot);
