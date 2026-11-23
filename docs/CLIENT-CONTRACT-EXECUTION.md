@@ -885,7 +885,7 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | CC-05 | Map Client View | P0 | 待执行 | - | - | 2026-11-23 | - |
 | CC-06 | Query / Affordance | P0 | 待执行 | - | - | 2026-11-23 | 与 CC-05 共享 `server.ts`，需分轮 |
 | CC-07 | State Sync Completion | P0 | 进行中 | R1 | fixer | 2026-11-23 | - |
-| CC-08 | Protocol / Schema 工具链 | P0 | 进行中 | R1 | fixer | 2026-11-23 | - |
+| CC-08 | Protocol / Schema 工具链 | P0 | 已完成 | R1 | fixer | 2026-11-23 | server `5bdfa9d` / godot `903f659`；protocol-version + schema-gdscript + schema:check 全绿 |
 | CC-09 | UI Data Projection | P1 | 待执行 | - | - | 2026-11-23 | - |
 | CC-10 | Player Profile | P1 | 待执行 | - | - | 2026-11-23 | - |
 | CC-11 | Audio / VFX | P1 | 待执行 | - | - | 2026-11-23 | 依赖 CC-04 |
@@ -916,3 +916,4 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | 日期 | 轮次 | CC | 结果 | 备注 |
 |---|---|---|---|---|
 | 2026-11-23 | R1 | CC-02 / CC-07 / CC-08 | 已派发 | 三个并行 lane，文件所有权见派发说明 |
+| 2026-11-23 | R1 | CC-08 | 已完成 | server `5bdfa9d`（protocol 握手/GDScript codegen/文档基线），godot `903f659`（generated schema/端口/插件版本）；13 tests + `schema:check` 绿 |
