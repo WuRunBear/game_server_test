@@ -225,7 +225,8 @@ const room = await client.joinOrCreate("game", {
 | `respawn` | self | `player,mapId` |
 | `item-break` | self | `player,kind?,slot?` |
 | `raid-warning` | map | `remainingTicks` |
-| `weather-change` | world | `weatherId,phaseId,tick` |
+| `weather-change` | world | `weatherId,phaseId,intensity,tick` |
+| `season-change` | world | `seasonId,dayIndex,tick`（仅季节 id 变化时发一次） |
 | `map-change` | self | `from,to,mapVersion?` |
 | `terrain-writeback` | map | `mapId,version` |
 
@@ -250,10 +251,13 @@ Colyseus Schema 增量同步（补丁 + 全量握手）。**客户端必须声�
 | `phaseProgress` | number | 当前相位内进度 **0..1**（float64；无环境规则时为 0） |
 | `offers` | map\<string, string\> | 进行中的**报价摘要表**：key = 报价会话 id（字符串），value = 摘要 JSON 字符串（见下「报价摘要」） |
 | `serverTimeMs` | float64 | **逻辑服务器时间**（毫秒）= `tick × fixedDtMs`（当前 20tps → 50ms/帧）。用于客户端插值/对账，不是墙钟；不要与 `Date.now()` 混用 |
+| `dayIndex` | uint32 | **24 小时日计数**（daynight 规则；tick 0 为第 0 天/hour 8，跨午夜 +1）。无 daynight 规则恒 0。注意与相位周期索引区分 |
+| `seasonId` | string | 当前季节 id（可选 `environment.seasons` 循环；配置字符串，未配置为空串） |
+| `weatherIntensity` | float64 | 当前天气强度 0..1（来自 weather 条目的 `intensity`，未配置为 0） |
 
 > **字段顺序即线协议**：上表顺序 = 服务端 Schema 声明顺序 = 客户端必须声明的顺序。新增字段一律**追加在末尾**（`players` 之后依次是 `weatherId`/`phaseId`/`phaseProgress`/`offers`/`serverTimeMs`），既有四项（`tick`/`hour`/`phase`/`players`）的字段索引不变。
 
-> **昼夜语义**：`hour` 按 daynight 规则（`game/rules/daynight.json`）推进——每 `cycleLengthSec` 真实秒走完 24 世界小时（当前配置 600s ⇒ 1 世界小时 = 25 真实秒 ≈ 500 tick@20tps）；`phase` 在 `nightStartHour`/`nightEndHour` 边界切换（当前 19/5，支持跨午夜）。**天数不在协议中**：客户端如需显示「第 X 天」，自行累计 `hour` 回绕（23.x→0.x）次数，属本地近似。
+> **昼夜语义**：`hour` 按 daynight 规则（`game/rules/daynight.json`）推进——每 `cycleLengthSec` 真实秒走完 24 世界小时（当前配置 600s ⇒ 1 世界小时 = 25 真实秒 ≈ 500 tick@20tps）；`phase` 在 `nightStartHour`/`nightEndHour` 边界切换（当前 19/5，支持跨午夜）。**天数**由 `dayIndex` 提供（CC-12：24h 日计数，tick 0 为第 0 天/hour 8，跨午夜 +1）；不要再用本地 `hour` 回绕累计。
 
 > **环境（相位/天气）语义**：`phaseId`/`weatherId`/`phaseProgress` 三者同源于**当前 tick 的纯函数派生**（相位程序按绝对槽对齐；天气按「本槽所属相位」的候选+权重确定性抽样），配置源是 `game/rules/environment.json`。id 是**配置字符串**，服务端只透传、不解释其含义（含义随配置漂移，客户端不要硬编码具体取值集）。三者每帧随快照刷新。
 
@@ -359,6 +363,9 @@ export class RoomState extends Schema {
   @type("number") phaseProgress: number = 0;     // 当前相位进度 0..1
   @type({ map: "string" }) offers = new MapSchema<string>(); // 报价摘要：offerId → JSON 字符串
   @type("float64") serverTimeMs: number = 0;     // 末尾追加（CC-14）：逻辑时间 = tick × fixedDtMs
+  @type("uint32") dayIndex: number = 0;           // 末尾追加（CC-12）：24h 日计数
+  @type("string") seasonId: string = "";          // 末尾追加（CC-12）
+  @type("float64") weatherIntensity: number = 0;  // 末尾追加（CC-12）：0..1
 }
 ```
 
