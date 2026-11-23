@@ -44,6 +44,13 @@ import { WILDERNESS } from "map/generate/blocks/climateRegions";
 import { WALLS_REGION } from "map/generate/blocks/slotRooms";
 import { tiledRegionNames } from "map/generate/blocks/tiledSource";
 import { stampTemplateRegionNames } from "map/generate/blocks/stampTemplate";
+import {
+  PresentationConfigSchema,
+  type MapPresentation,
+  type PresentationConfig,
+  type TileSemanticSpec,
+} from "framework/config/schema/PresentationSchema";
+import { clearPresentation, loadPresentation, validatePresentation } from "framework/content/presentation";
 import type { MapGenerationStep } from "map/generate/types";
 import { getRegistries } from "framework/bootstrap";
 import type { ArchetypeSpec } from "framework/entities/archetypeRegistry";
@@ -79,6 +86,74 @@ function loadFilesByGlob(baseDir: string, pattern: string): string[] {
   }
   const fullPath = resolve(baseDir, pattern);
   return existsSync(fullPath) ? [fullPath] : [];
+}
+
+/** 表现语义配置的约定路径（相对 game.json 所在目录，game.json 未声明 presentation 时尝试）。 */
+const DEFAULT_PRESENTATION_PATH = "presentation/maps.json";
+
+/**
+ * 读取表现配置文件（单文件或 `*` glob）：逐文件 zod 校验后按**文件路径排序**
+ * 合并——`tileSemantics` 与 `maps` 都按 key 合并，跨文件重复 key 即配置错误
+ * （不做静默覆盖，避免加载顺序决定语义）。每份文件都是完整的配置形状
+ * （只承担全局语义表时 `maps` 写 `{}`）。空匹配为显式配置错误。
+ */
+function loadPresentationFiles(baseDir: string, pattern: string): PresentationConfig {
+  const files = loadFilesByGlob(baseDir, pattern).sort();
+  if (files.length === 0) {
+    throw new Error(`presentation path "${pattern}" matched no JSON files (resolved against ${baseDir})`);
+  }
+
+  const tileSemantics: Record<string, TileSemanticSpec> = {};
+  const maps: Record<string, MapPresentation> = {};
+  for (const file of files) {
+    let raw: unknown;
+    try {
+      raw = readJsonFile(file);
+    } catch (err) {
+      throw new Error(
+        `presentation file "${file}" failed to load: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    let document: PresentationConfig;
+    try {
+      document = PresentationConfigSchema.parse(raw);
+    } catch (err) {
+      throw new Error(
+        `presentation file "${file}" is invalid: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    for (const [id, spec] of Object.entries(document.tileSemantics)) {
+      if (Object.hasOwn(tileSemantics, id)) {
+        throw new Error(`presentation: duplicate global tile semantic "${id}" in ${file}`);
+      }
+      tileSemantics[id] = spec;
+    }
+    for (const [key, entry] of Object.entries(document.maps)) {
+      if (Object.hasOwn(maps, key)) {
+        throw new Error(`presentation: duplicate map entry "${key}" in ${file}`);
+      }
+      maps[key] = entry;
+    }
+  }
+
+  return loadPresentation({ tileSemantics, maps });
+}
+
+/**
+ * 加载游戏的表现语义配置：
+ * 1. game.json 显式 `presentation` 路径（单文件或 glob）→ 必须能匹配到文件；
+ * 2. 未声明时，若 `<gameDir>/presentation/maps.json` 存在 → 按约定加载；
+ * 3. 都不存在 → 清空活动配置并返回 undefined（旧游戏/测试不受影响）。
+ */
+function loadPresentationForGame(baseDir: string, configuredPath?: string): PresentationConfig | undefined {
+  if (configuredPath) {
+    return loadPresentationFiles(baseDir, configuredPath);
+  }
+  if (existsSync(resolve(baseDir, DEFAULT_PRESENTATION_PATH))) {
+    return loadPresentationFiles(baseDir, DEFAULT_PRESENTATION_PATH);
+  }
+  clearPresentation();
+  return undefined;
 }
 
 function loadArchetypesFiles(baseDir: string, entityPattern?: string): ArchetypeSpec[] {
@@ -819,6 +894,7 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
   );
 
   if (!existsSync(jsonPath)) {
+    clearPresentation();
     return createDefaultGameDefinition();
   }
 
@@ -843,6 +919,7 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
   const resolvedMapConfigs = resolveMapConfigs(baseDir, gameDef.map?.registry, gameDef.world?.tile);
   const resolvedEntityRules = loadEntityRules(baseDir, gameDef.map?.entityRules);
   const resolvedEcosystems = loadEcosystemsFile(baseDir, gameDef.map?.ecosystems);
+  const resolvedPresentation = loadPresentationForGame(baseDir, gameDef.presentation);
   const resolvedPlayerRule = resolvedRules["player"] as PlayerRule | undefined;
 
   // 合并为最终定义：主配置字段 + 各 resolved* 资源数据 + 地图生成配置。
@@ -861,6 +938,7 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
     resolvedStaticEntityRules: resolvedEntityRules,
     resolvedEcosystems,
     resolvedPlayerRule,
+    resolvedPresentation,
   };
 
   // tile-units 归一化：全部配置解析且 schema 校验通过后、注册表构建之前，
@@ -868,6 +946,14 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
   normalizeLoadedTileUnits(loaded, gameDef.world.tile.width);
 
   validateIntegrity(loaded);
+
+  // 表现语义完整性：每张 registry 图都有条目、所有被引用的 tile id 都有定义。
+  // 显式提供 presentation 的游戏视为「已承诺表现契约」——不完整即配置错误；
+  // 无 presentation 的旧游戏直接通过（validatePresentation 返回 ok）。
+  const presentationReport = validatePresentation(loaded);
+  if (!presentationReport.ok) {
+    throw new Error(`Invalid presentation config: ${presentationReport.errors.join("; ")}`);
+  }
 
   return loaded;
 }

@@ -1,0 +1,304 @@
+{
+  "tileSemantics": {
+    "0": {
+      "name": "void",
+      "category": "void",
+      "walkable": true,
+      "minimapColor": "#000000"
+    },
+    "1": {
+      "name": "deep_ocean",
+      "category": "water",
+      "walkable": false,
+      "autotileGroup": "water",
+      "footstepId": "water",
+      "minimapColor": "#182c60"
+    },
+    "2": {
+      "name": "sand",
+      "category": "terrain",
+      "walkable": true,
+      "autotileGroup": "sand",
+      "footstepId": "sand",
+      "minimapColor": "#dec482"
+    },
+    "3": {
+      "name": "grass",
+      "category": "terrain",
+      "walkable": true,
+      "autotileGroup": "grass",
+      "footstepId": "grass",
+      "minimapColor": "#6a994e"
+    },
+    "4": {
+      "name": "forest_floor",
+      "category": "terrain",
+      "walkable": true,
+      "autotileGroup": "forest",
+      "footstepId": "grass",
+      "minimapColor": "#3a6637"
+    },
+    "5": {
+      "name": "swamp_mud",
+      "category": "terrain",
+      "walkable": true,
+      "autotileGroup": "mud",
+      "footstepId": "mud",
+      "minimapColor": "#6e6044"
+    },
+    "6": {
+      "name": "rock",
+      "category": "terrain",
+      "walkable": true,
+      "autotileGroup": "rock",
+      "footstepId": "stone",
+      "minimapColor": "#7d7d7d"
+    },
+    "7": {
+      "name": "slope",
+      "category": "slope",
+      "walkable": true,
+      "autotileGroup": "slope",
+      "footstepId": "stone",
+      "description": "相邻层差 1 的过渡带，双向可通行。",
+      "minimapColor": "#8a8a8a"
+    },
+    "8": {
+      "name": "cliff",
+      "category": "cliff",
+      "walkable": false,
+      "autotileGroup": "cliff",
+      "footstepId": "stone",
+      "description": "相邻层差大于等于 2 的边界带，不可通行，仅允许自上而下单向跳下。",
+      "minimapColor": "#555555"
+    },
+    "9": {
+      "name": "scorched_ground",
+      "category": "terrain",
+      "walkable": true,
+      "autotileGroup": "scorched",
+      "footstepId": "ash",
+      "minimapColor": "#2a2420"
+    },
+    "10": {
+      "name": "snow",
+      "category": "terrain",
+      "walkable": true,
+      "autotileGroup": "snow",
+      "footstepId": "snow",
+      "minimapColor": "#edf2f7"
+    },
+    "11": {
+      "name": "wet_ground",
+      "category": "terrain",
+      "walkable": true,
+      "autotileGroup": "wet",
+      "footstepId": "mud",
+      "minimapColor": "#4f6b5a"
+    },
+    "12": {
+      "name": "dry_grass",
+      "category": "terrain",
+      "walkable": true,
+      "autotileGroup": "dry",
+      "footstepId": "grass",
+      "minimapColor": "#a89a5c"
+    }
+  },
+  "maps": {
+    "island": {
+      "displayName": "荒岛",
+      "sceneId": "island",
+      "tilesetId": "spring",
+      "ambientId": "island_day",
+      "musicId": "island_bgm",
+      "minimap": { "color": "#3a6b4a", "icon": "island" },
+      "connections": [
+        { "to": "cave", "kind": "portal", "x": 96, "y": 96 },
+        { "to": "swamp", "kind": "portal", "x": 140, "y": 166 }
+      ]
+    },
+    "cave": {
+      "displayName": "洞穴",
+      "sceneId": "cave",
+      "tilesetId": "cave",
+      "ambientId": "cave_dark",
+      "musicId": "cave_bgm",
+      "minimap": { "color": "#14121a", "icon": "cave" },
+      "connections": [
+        { "to": "island", "kind": "portal", "x": 32, "y": 32 }
+      ],
+      "tileSemantics": {
+        "1": {
+          "name": "cave_wall",
+          "category": "wall",
+          "walkable": false,
+          "autotileGroup": "wall",
+          "footstepId": "stone",
+          "minimapColor": "#14121a"
+        },
+        "2": {
+          "name": "cave_floor",
+          "category": "floor",
+          "walkable": true,
+          "autotileGroup": "floor",
+          "footstepId": "stone",
+          "minimapColor": "#686460"
+        }
+      }
+    },
+    "swamp": {
+      "displayName": "沼泽",
+      "sceneId": "swamp",
+      "tilesetId": "swamp",
+      "ambientId": "swamp_damp",
+      "musicId": "swamp_bgm",
+      "minimap": { "color": "#1a3c40", "icon": "swamp" },
+      "connections": [
+        { "to": "island", "kind": "portal", "x": 54, "y": 33 },
+        { "to": "ruins", "kind": "portal", "x": 80, "y": 44 }
+      ],
+      "tileSemantics": {
+        "1": {
+          "name": "swamp_water",
+          "category": "water",
+          "walkable": false,
+          "autotileGroup": "water",
+          "footstepId": "water",
+          "minimapColor": "#1a3c40"
+        },
+        "2": {
+          "name": "mud_bank",
+          "category": "terrain",
+          "walkable": true,
+          "autotileGroup": "mud",
+          "footstepId": "mud",
+          "minimapColor": "#7c7454"
+        },
+        "4": {
+          "name": "marsh_brush",
+          "category": "terrain",
+          "walkable": true,
+          "autotileGroup": "brush",
+          "footstepId": "grass",
+          "minimapColor": "#385432"
+        }
+      }
+    },
+    "ruins": {
+      "displayName": "遗迹",
+      "sceneId": "ruins",
+      "tilesetId": "ruins",
+      "ambientId": "ruins_hall",
+      "musicId": "ruins_bgm",
+      "minimap": { "color": "#686460", "icon": "ruins" },
+      "connections": [
+        { "to": "swamp", "kind": "portal", "x": 7, "y": 7 }
+      ],
+      "tileSemantics": {
+        "1": {
+          "name": "ruins_wall",
+          "category": "wall",
+          "walkable": false,
+          "autotileGroup": "wall",
+          "footstepId": "stone",
+          "minimapColor": "#14121a"
+        },
+        "6": {
+          "name": "ruins_floor",
+          "category": "floor",
+          "walkable": true,
+          "autotileGroup": "floor",
+          "footstepId": "stone",
+          "minimapColor": "#686460"
+        }
+      }
+    },
+    "highlands": {
+      "displayName": "高地",
+      "sceneId": "highlands",
+      "tilesetId": "highland",
+      "ambientId": "highlands_wind",
+      "musicId": "highlands_bgm",
+      "minimap": { "color": "#6a994e", "icon": "highlands" },
+      "connections": [],
+      "levelSemantics": { "slope": 7, "cliff": 8 },
+      "tileSemantics": {
+        "2": {
+          "name": "highland_ground",
+          "category": "terrain",
+          "walkable": true,
+          "autotileGroup": "grass",
+          "footstepId": "grass",
+          "minimapColor": "#7a8a6a"
+        },
+        "7": {
+          "name": "highland_slope",
+          "category": "slope",
+          "walkable": true,
+          "autotileGroup": "slope",
+          "footstepId": "stone",
+          "description": "相邻层差 1 的过渡带，双向可通行。",
+          "minimapColor": "#8a8a8a"
+        },
+        "8": {
+          "name": "highland_cliff",
+          "category": "cliff",
+          "walkable": false,
+          "autotileGroup": "cliff",
+          "footstepId": "stone",
+          "description": "相邻层差大于等于 2 的边界带，不可通行，仅允许自上而下单向跳下。",
+          "minimapColor": "#555555"
+        }
+      }
+    },
+    "island-v2": {
+      "displayName": "荒岛 v2",
+      "sceneId": "island-v2",
+      "tilesetId": "spring",
+      "ambientId": "island_day",
+      "musicId": "island_bgm",
+      "minimap": { "color": "#3a6b4a", "icon": "island-v2" },
+      "connections": [],
+      "levelSemantics": { "slope": 7, "cliff": 8 },
+      "tileSemantics": {
+        "1": {
+          "name": "freshwater",
+          "category": "water",
+          "walkable": false,
+          "autotileGroup": "water",
+          "footstepId": "water",
+          "minimapColor": "#2a5a70"
+        }
+      }
+    },
+    "tiled-demo": {
+      "displayName": "Tiled 示例",
+      "sceneId": "tiled-demo",
+      "tilesetId": "debug",
+      "ambientId": "tiled_demo_day",
+      "musicId": "tiled_demo_bgm",
+      "minimap": { "color": "#7d7d7d", "icon": "tiled-demo" },
+      "connections": []
+    },
+    "building-demo": {
+      "displayName": "建造示例",
+      "sceneId": "building-demo",
+      "tilesetId": "build",
+      "ambientId": "building_demo_day",
+      "musicId": "building_demo_bgm",
+      "minimap": { "color": "#6a994e", "icon": "building-demo" },
+      "connections": [],
+      "tileSemantics": {
+        "2": {
+          "name": "yard_ground",
+          "category": "terrain",
+          "walkable": true,
+          "autotileGroup": "grass",
+          "footstepId": "grass",
+          "minimapColor": "#6a994e"
+        }
+      }
+    }
+  }
+}

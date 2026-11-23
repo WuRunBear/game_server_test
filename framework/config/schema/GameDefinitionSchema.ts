@@ -7,6 +7,7 @@ import type { MapConfig } from "framework/config/schema/MapRegistrySchema";
 import type { EntityRule } from "map/evolution/schema";
 import type { EcosystemsJson } from "framework/config/schema/EcosystemsSchema";
 import type { PlayerRule } from "framework/config/schema/PlayerRuleSchema";
+import type { PresentationConfig } from "framework/config/schema/PresentationSchema";
 
 /**
  * 游戏定义（game/game.json）配置 schema——「配置驱动」框架的入口配置。
@@ -125,6 +126,12 @@ export const GameDefinitionSchema = z.object({
   dialogues: z.string().optional(),
   /** 任务定义配置段（game/quests/*.json）。 */
   quests: z.string().optional(),
+  /**
+   * 表现语义配置路径（相对 game.json；支持单文件或 * glob）。缺省时按约定
+   * 尝试 `<gameDir>/presentation/maps.json`；两者都不存在则不加载表现层
+   * （旧游戏/测试不受影响）。见 framework/content/presentation.ts。
+   */
+  presentation: z.string().optional(),
   /** 网络同步配置段（见 NetSyncFieldSchema）。 */
   netSync: z.object({
     /** 网络同步字段条目列表（见 NetSyncFieldSchema）。 */
@@ -165,6 +172,12 @@ export interface LoadedGameDefinition extends GameDefinition {
   resolvedEcosystems?: EcosystemsJson;
   /** 玩家规则（rules/player.json；缺省未配置）。 */
   resolvedPlayerRule?: PlayerRule;
+  /**
+   * 表现语义配置（地图展示名/图块语义，见 framework/content/presentation.ts）。
+   * 加载来源：game.json 的 `presentation` 路径，或约定文件
+   * `<gameDir>/presentation/maps.json`；两者都不存在时为 undefined。
+   */
+  resolvedPresentation?: PresentationConfig;
   /** 实体原型定义表（来自 game/entities/*.json）。 */
   resolvedEntities: ArchetypeSpec[];
   /** 行为树定义表（来自 game/behaviors/*.json）。 */
