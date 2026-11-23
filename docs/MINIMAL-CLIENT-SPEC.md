@@ -303,3 +303,4 @@
 | v3.2 | 2026-11-23 | CC-14 网络手感：服务端固定步长 accumulator（20tps→50ms/帧，积压丢弃不补帧加速）；`RoomState.serverTimeMs`（逻辑时间=tick×fixedDtMs）；`PlayerState.lastProcessedSeq`（仅被接受输入推进，用于对账/丢弃过期预测）。重连仍走 networkId，鉴权/预测未做 |
 | v3.3 | 2026-11-23 | CC-12 天气/季节：`RoomState` 末尾追加 `dayIndex`（24h 日计数）、`seasonId`（可配 seasons，未配置空串）、`weatherIntensity`（0..1）；`weather-change` 事件带 intensity，新增 `season-change`（仅变化时发）。温度未建模（无基准温度配置） |
 | v3.4 | 2026-11-23 | CC-12 收尾：`/content` 的 `phases[].weather[]` 增加 `intensity`（0..1），根级新增 `seasons: [{id,durationTicks}]`；与 `RoomState.weatherIntensity/seasonId` 同源 |
+| v3.5 | 2026-11-24 | CC-13 地图装饰：`/maps/decor?mapId=` 返回确定性装饰点 `{decorId,x,y,level,region,variant}`（非实体/无碰撞，`x-map-version` 同 runtime）；`manifest.decor.ids` 给 id 清单。Tiled 装饰层与 autotile mask 未做，贴图/邻接仍由客户端负责 |

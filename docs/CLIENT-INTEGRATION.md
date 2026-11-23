@@ -614,6 +614,7 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 | `GET /maps/meta` | 地图清单：默认图 key 与全部地图的元信息（含 version）。客户端可先拉取清单列出地图、预检版本，再按需拉取 runtime |
 | `GET /maps/render?mapId=<key>` | **有效地面**：`{key,baseVersion,renderVersion,phaseId,phaseProgress,tiles}`；`tiles` 是当前相位/天气派生后的逐格语义（不写回底板），`renderVersion` 是缓存键 |
 | `GET /maps/collision?mapId=<key>&level=<n>` | **正式静态碰撞/占用**：`{key,version,level,grid,walkable,occupants}`；`walkable` = 该层地形+楼板通行位，`occupants` 用 networkId（不是 eid）。用于放置预览/客户端碰撞镜像/遮挡 |
+| `GET /maps/decor?mapId=<key>` | 确定性装饰点集：`{key,version,points:[{decorId,x,y,level,region,variant}]}`（不是实体、无碰撞；`x-map-version` 同 runtime） |
 | `GET /world/map-graph` | 世界图：`{maps:[{id,displayName,connections:[{to,kind,x?,y?}]}]}`（数据来自 presentation，缺省回退 registry） |
 | `GET /query/affordances?player=<networkId>&x&y&level&radius` | 交互候选：附近实体的可执行动作与不可用原因（gather/attack/talk/open/loot/place/deconstruct） |
 | `POST /query/place` `{player,slot,x,y}` | 放置预览：`valid/reason/footprint/cells/occupiedBy/ownerNetworkId`（与 place 命令同一校验） |
@@ -626,7 +627,9 @@ room.send("debug_colliders_pull");        // 单次拉取（不订阅）
 
 > **地图几何来源（live 优先）**：`/maps/runtime` 与 `/maps/meta` 优先返回**活动房间的实时几何**（含运行期写回的结果，如野火焦土——`tiles`/`walkable`/`level` 已变，`version` 指纹随之变化）；房间未就绪（服务刚启动、或房间创建失败）时回退为「按配置重建」的视图。两种视图在**没有任何写回**时内容一致，因此客户端按 `{key, version}` 缓存仍然安全；若运行期发生地形改写，`version` 会变，客户端据此重新拉取。
 
-> **manifest 的音频/VFX 段（CC-11）**：`audio = { music: string[], ambient: string[], sfx: string[], events: { [eventType]: string[] } }`，`vfx = { effects: string[], events: { [eventType]: string[] } }`。客户端按 id 绑定本地资源；`maps[].musicId/ambientId` 用于换图后的音乐/环境音切换。`animations` 当前仍为空对象。
+> **装饰点（CC-13）**：`/maps/decor` 返回按区域/密度规则确定性生成的装饰点（`decorId/x/y/level/region/variant`），**不是实体**、不参与碰撞/交互、不进视野表；客户端按 `decorId` 绑定贴图/变体，自己处理邻接与遮挡排序。`manifest.decor.ids` 给可用 id 清单；地图写回后 `version` 变化，按 `x-map-version` 重拉。
+
+> **manifest 的音频/VFX 段（CC-11）**：`audio = { music: string[], ambient: string[], sfx: string[], events: { [eventType]: string[] } }`，`vfx = { effects: string[], events: { [eventType]: string[] } }`。客户端按 id 绑定本地资源；`maps[].musicId/ambientId` 用于换图后的音乐/环境音切换；`decor.ids` 为装饰 id 清单。`animations` 当前仍为空对象。
 
 > **地图版本订阅（CC-05）**：`PlayerState.mapVersion` 每 tick 同步玩家当前地图的 `version`。客户端检测到它变化时，用上次的 `version` 作为 `sinceVersion` 请求 `/maps/runtime` 增量（`modifications` 为稀疏终态，直接覆盖对应格即可，不要按事件流重放）。增量只覆盖 `tiles/walkable/level`；`regions/regionOfTile` 与 grid 变化只能靠全量（当前运行期写回不改区域/grid）。未知/过旧 `sinceVersion` 会自动回退全量，客户端按响应里有没有 `modifications` 分支处理即可。
 
