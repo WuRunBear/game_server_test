@@ -886,7 +886,7 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | CC-06 | Query / Affordance | P0 | 待执行 | - | - | 2026-11-23 | 与 CC-05 共享 `server.ts`，需分轮 |
 | CC-07 | State Sync Completion | P0 | 已完成 | R1 | fixer | 2026-11-23 | `7f10d8d`；netsync-completeness 13/13 + 全量 1266 passed（仅基线 2 fails）；另修 `spawn` 的 `Transform.scale` 初始化 |
 | CC-08 | Protocol / Schema 工具链 | P0 | 已完成 | R1 | fixer | 2026-11-23 | server `5bdfa9d` / godot `903f659`；protocol-version + schema-gdscript + schema:check 全绿 |
-| CC-09 | UI Data Projection | P1 | 进行中 | R2 | fixer | 2026-11-23 | - |
+| CC-09 | UI Data Projection | P1 | 已完成 | R2 | fixer | 2026-11-23 | `4536320`；content-projection 15/15 + 旧 `/content` 3/3；新增 factions/stationTypes/damageTypes 与任务/成就/技能字段 |
 | CC-10 | Player Profile | P1 | 待执行 | - | - | 2026-11-23 | - |
 | CC-11 | Audio / VFX | P1 | 待执行 | - | - | 2026-11-23 | 依赖 CC-04 |
 | CC-12 | Weather / Season View | P1 | 待执行 | - | - | 2026-11-23 | - |
@@ -920,3 +920,4 @@ curl -s -X POST localhost:3000/query/craft -H 'content-type: application/json' -
 | 2026-11-23 | R1 | CC-07 | 已完成 | `7f10d8d`（netSync + 适配器 + 文档 §3.5/K13）；补 `spawn` 的 `Transform.scale=1`；netsync 13/13、全量仅基线 2 fails |
 | 2026-11-23 | R1 | CC-02 | 已完成 | `2a9eeee`（PresentationSchema + 查询/校验 + 8 图配置）；presentation 18/18、`tools validate` 通过；接口见报告，供 CC-01 消费 |
 | 2026-11-23 | R2 | CC-01 / CC-03 / CC-09 | 已派发 | 三个并行 lane：Manifest（server.ts + presentation 扩展）、Action Timeline（sim/systems/game.json）、UI Data（catalog.ts） |
+| 2026-11-23 | R2 | CC-09 | 已完成 | `4536320`；`/content` 只增字段：items 效果/投掷/暴击/抗性、recipes duration/unlock/station、quests goal/rewards、achievements 结构化、skills 曲线、factions/stationTypes/damageTypes；49 tests 绿 |
