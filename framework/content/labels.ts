@@ -17,7 +17,16 @@
  */
 
 /** 展示名作用域（通用机制词）。 */
-export type ContentLabelScope = "item" | "entity" | "quest" | "achievement" | "recipe" | "skill";
+export type ContentLabelScope =
+  | "item"
+  | "entity"
+  | "quest"
+  | "achievement"
+  | "recipe"
+  | "skill"
+  | "faction"
+  | "stationType"
+  | "damageType";
 
 /** scope → (id → 展示名) */
 const labelsByScope = new Map<ContentLabelScope, Map<string, string>>();

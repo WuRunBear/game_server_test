@@ -100,6 +100,11 @@ const ACHIEVEMENT_LABELS: Record<string, string> = {
   boss_slayer: "巨兽克星",
 };
 
+/** 合成站点类型编号 → 中文名（仅展示名；编号语义仍由配置的 stationType 决定）。 */
+const STATION_TYPE_LABELS: Record<string, string> = {
+  "1": "篝火",
+};
+
 for (const [kind, label] of Object.entries(ITEM_LABELS)) {
   registerContentLabel("item", kind, label);
 }
@@ -117,4 +122,7 @@ for (const [id, label] of Object.entries(SKILL_LABELS)) {
 }
 for (const [id, label] of Object.entries(ACHIEVEMENT_LABELS)) {
   registerContentLabel("achievement", id, label);
+}
+for (const [id, label] of Object.entries(STATION_TYPE_LABELS)) {
+  registerContentLabel("stationType", id, label);
 }
