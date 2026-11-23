@@ -187,6 +187,55 @@ export const PresentationEventMapSchema = z.record(
 );
 
 /**
+ * 单个装饰条目：严格空对象占位（CC-13）。
+ *
+ * 与音频/VFX 条目同一立场：服务端只登记**不透明 id**，资源绑定（贴图/图集/
+ * 变体帧）由客户端按 id 解析；`.strict()` 让误写的 `texture` / `path` /
+ * `atlas` 等资源字段在加载期显式报错，避免把资源路径带进服务端配置。
+ * 装饰是纯表现点集，不参与碰撞、不写 MapGeometry、不是实体。
+ */
+export const DecorEntrySchema = z.object({}).strict();
+
+/** id → 装饰条目 表（id 为非空不透明字符串）。 */
+export const DecorEntryTableSchema = z.record(z.string().min(1), DecorEntrySchema);
+
+/**
+ * 单条装饰落点规则（`game/presentation/decor.json` 的 decorMaps 段）。
+ *
+ * 框架只按 `density`/`variantCount`/`onWalkable`/`jitter` 做**确定性**派生：
+ * 每个 tile 对每条匹配规则独立掷点（hash(mapKey, x, y, ruleIndex)），同配置
+ * 同版本跨请求/跨进程稳定；不做 Tiled 装饰层导入、不生成实体、不写回几何。
+ */
+export const DecorRuleSchema = z
+  .object({
+    /** 装饰 id（必须在本配置 `decor` 表中登记）。 */
+    decorId: z.string().min(1),
+    /** 落点概率（每个 tile 每条规则独立掷点；0 = 不落，1 = 恒落）。 */
+    density: z.number().min(0).max(1),
+    /** 变体数（正整数；`variant = hash % variantCount`，客户端按变体选贴图）。 */
+    variantCount: z.number().int().min(1).default(1),
+    /** 是否只落在 `walkableAtLevel` 为真的格（缺省 true）。 */
+    onWalkable: z.boolean().default(true),
+    /** tile 内抖动幅度（0..1；缺省 0.35，按 tile 尺寸的 [-j/2,+j/2] 偏移）。 */
+    jitter: z.number().min(0).max(1).default(0.35),
+  })
+  .strict();
+
+/** 区域规则表：区域名（或 `"*"` 全图兜底）→ 规则数组（数组序 = 掷点序）。 */
+export const DecorRegionRulesSchema = z.record(z.string().min(1), z.array(DecorRuleSchema));
+
+/** 单图装饰规则：`regions` 缺省为空表（该图无装饰）。 */
+export const DecorMapRulesSchema = z
+  .object({
+    /** 区域名（必须由该图生成管道产出）或 `"*"`（全图兜底）。 */
+    regions: DecorRegionRulesSchema.default({}),
+  })
+  .strict();
+
+/** 地图 key → 装饰规则 表。 */
+export const DecorMapRulesTableSchema = z.record(z.string().min(1), DecorMapRulesSchema);
+
+/**
  * 音频表现配置（`game/presentation/audio.json`）。
  *
  * `events[type]` 的值必须引用本配置 `sfx` 中已登记的 id（加载期校验，见
@@ -222,7 +271,7 @@ export const VfxPresentationSchema = z
   })
   .strict();
 
-/** 表现配置根结构：全局语义表 + 每图条目 + 实体表现表 + 音频/VFX。 */
+/** 表现配置根结构：全局语义表 + 每图条目 + 实体表现表 + 音频/VFX + 装饰。 */
 export const PresentationConfigSchema = z.object({
   /** 全局默认地面语义表（键为规范整数字符串 id）。 */
   tileSemantics: TileSemanticsSchema.default({}),
@@ -234,6 +283,16 @@ export const PresentationConfigSchema = z.object({
   audio: AudioPresentationSchema.optional(),
   /** VFX 表现（可选；无特效配置的游戏缺省）。 */
   vfx: VfxPresentationSchema.optional(),
+  /**
+   * 装饰 id 表（`game/presentation/decor.json`；缺省为空表）。
+   * 条目形状 = 严格空对象；资源绑定归客户端。
+   */
+  decor: DecorEntryTableSchema.optional(),
+  /**
+   * 每图装饰落点规则（mapId → regions；缺省为空表）。
+   * 未知 mapId/region 与未知 decorId 由加载期/完整性校验拦截。
+   */
+  decorMaps: DecorMapRulesTableSchema.optional(),
 });
 
 /** 地面语义条目类型。 */
@@ -262,6 +321,18 @@ export type PresentationAssetEntry = z.infer<typeof PresentationAssetEntrySchema
 export type PresentationAssetTable = z.infer<typeof PresentationAssetTableSchema>;
 /** 事件 type → id 数组映射类型。 */
 export type PresentationEventMap = z.infer<typeof PresentationEventMapSchema>;
+/** 单个装饰条目类型（严格空对象）。 */
+export type DecorEntry = z.infer<typeof DecorEntrySchema>;
+/** 装饰 id → 条目 表类型。 */
+export type DecorEntryTable = z.infer<typeof DecorEntryTableSchema>;
+/** 单条装饰落点规则类型。 */
+export type DecorRule = z.infer<typeof DecorRuleSchema>;
+/** 区域名（或 "*"）→ 规则数组 表类型。 */
+export type DecorRegionRules = z.infer<typeof DecorRegionRulesSchema>;
+/** 单图装饰规则类型。 */
+export type DecorMapRules = z.infer<typeof DecorMapRulesSchema>;
+/** 地图 key → 装饰规则 表类型。 */
+export type DecorMapRulesTable = z.infer<typeof DecorMapRulesTableSchema>;
 /** 音频表现配置类型。 */
 export type AudioPresentation = z.infer<typeof AudioPresentationSchema>;
 /** VFX 表现配置类型。 */

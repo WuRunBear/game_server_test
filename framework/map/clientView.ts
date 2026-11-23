@@ -4,6 +4,7 @@
  * 本模块只做**服务端只读派生视图**，不推翻 MapGeometry 模型、不写回任何底板：
  * - `/maps/render`：当前 tick 的**有效地面**（相位/天气派生，查询期计算）；
  * - `/maps/collision`：某层视角下的静态通行位 + 建造物占用（实体用 networkId）；
+ * - `/maps/decor`：按配置规则派生的确定性装饰点集（非实体/不参与碰撞/不改几何）；
  * - `/world/map-graph`：地图 registry + presentation 的地图连接图；
  * - netSync 派生键 `Space.exposure`：玩家所在格室内/露天（spaceExposureAt）。
  *
@@ -37,7 +38,8 @@ import {
   STRUCTURE_ROLE_CONNECTOR,
   STRUCTURE_ROLE_NONE,
 } from "framework/components/structure";
-import { getMapPresentation } from "framework/content/presentation";
+import { getMapPresentation, getPresentation, getPresentationRevision } from "framework/content/presentation";
+import type { DecorMapRules, DecorRule, PresentationConfig } from "framework/config/schema/PresentationSchema";
 import type { LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
 import type { EnvironmentRule } from "framework/config/schema/RuleSchema";
 import type { BuiltStructuresIndex } from "framework/map/runtime/builtStructures";
@@ -400,6 +402,210 @@ export function buildMapCollisionView(
   const built = collectBuiltStructures(world, mapId);
   const view = buildMapCollisionViewFromGeometry(geometry, level, built);
   return { ...view, occupants: collectOccupants(world, mapId, level, geometry) };
+}
+
+// ---------------------------------------------------------------------------
+// /maps/decor：确定性装饰点集（CC-13）
+// ---------------------------------------------------------------------------
+
+/**
+ * 单个装饰落点（服务端契约）。
+ *
+ * 装饰**不是实体**：不进 `visibleEntities`、不参与碰撞/交互、不写存档、
+ * 不修改 `MapGeometry`。客户端按 `decorId` 绑定贴图、按 `variant` 选变体。
+ */
+export interface MapDecorPoint {
+  /** 装饰 id（不透明；客户端按此绑定贴图/变体集）。 */
+  decorId: string;
+  /** 世界像素 x（tile 中心 + hash 派生的抖动偏移）。 */
+  x: number;
+  /** 世界像素 y。 */
+  y: number;
+  /** 该格离散层号（levelAt）。 */
+  level: number;
+  /** 该格区域名（regionOf；未注册区域时为空串）。 */
+  region: string;
+  /** 变体序号（0..variantCount-1；由 hash 派生）。 */
+  variant: number;
+}
+
+/** `/maps/decor` 响应形状（服务端契约）。 */
+export interface MapDecorView {
+  /** 地图 key。 */
+  key: string;
+  /** 底板内容指纹（MapGeometry.version；与 x-map-version 同值）。 */
+  version: string;
+  /** 点集（row-major tile 序 + 每条规则的配置序；只读）。 */
+  points: readonly MapDecorPoint[];
+}
+
+/** 扁平化后的一条装饰规则（region = 具体区域名或 "*"）。 */
+interface DecorFlatRule {
+  /** 规则适用的区域；"*" 表示全图兜底。 */
+  region: string;
+  /** 规则本体。 */
+  rule: DecorRule;
+}
+
+/**
+ * 把单图装饰规则扁平化为「先具体 region（配置序），再 "*" 兜底」的规则序。
+ *
+ * 同一 tile 会按本顺序逐条尝试（每条规则独立掷点，因此一个 tile 可命中
+ * 多条规则、产生多个点）；`ruleIndex` 取扁平序下标，参与 hash，配置顺序
+ * 变化即点集变化。
+ */
+function flattenDecorRules(mapRules: DecorMapRules | undefined): DecorFlatRule[] {
+  if (!mapRules) return [];
+  const flat: DecorFlatRule[] = [];
+  for (const [region, rules] of Object.entries(mapRules.regions)) {
+    if (region === "*") continue;
+    for (const rule of rules) flat.push({ region, rule });
+  }
+  for (const rule of mapRules.regions["*"] ?? []) flat.push({ region: "*", rule });
+  return flat;
+}
+
+/** FNV-1a 32 位：字符串（逐 UTF-16 低字节；map key 为 ASCII 标识）。 */
+function hashDecorText(hash: number, text: string): number {
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i) & 0xff;
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash;
+}
+
+/** 32 位雪崩混合（splitmix32 风格；纯整数运算，跨进程一致）。 */
+function mix32(value: number): number {
+  let hash = value >>> 0;
+  hash = Math.imul(hash ^ (hash >>> 16), 0x7feb352d);
+  hash = Math.imul(hash ^ (hash >>> 15), 0x846ca68b);
+  return (hash ^ (hash >>> 16)) >>> 0;
+}
+
+/**
+ * 装饰掷点哈希：`hash(mapKey, x, y, ruleIndex, salt)`。
+ *
+ * 纯函数、无 Math.random；同一输入跨请求/跨进程得到同一 32 位无符号整数。
+ * `salt` 分离同一条规则的用途（0=落点、1=变体、2/3=tile 内 x/y 抖动），
+ * 避免不同用途共享低位相关性。
+ */
+function hashDecor(
+  mapKey: string,
+  x: number,
+  y: number,
+  ruleIndex: number,
+  salt: number,
+): number {
+  let hash = 0x811c9dc5;
+  hash = hashDecorText(hash, mapKey);
+  hash = Math.imul(hash ^ (x + 0x9e3779b9), 0x85ebca6b);
+  hash = Math.imul(hash ^ (y + 0x85ebca6b), 0xc2b2ae35);
+  hash = Math.imul(hash ^ (ruleIndex + 0x27d4eb2f), 0x165667b1);
+  hash = Math.imul(hash ^ (salt + 0x9e3779b9), 0x27d4eb2f);
+  return mix32(hash);
+}
+
+/** [0, 2^32) 整数 → [0, 1) 实数（用于密度判定）。 */
+const HASH_UNIT = 1 / 0x100000000;
+
+/** [0, 2^32) 整数 → (-0.5, 0.5) 实数（用于 tile 内抖动）。 */
+function hashSignedUnit(hash: number): number {
+  return (hash + 0.5) * HASH_UNIT - 0.5;
+}
+
+/**
+ * 计算某图的确定性装饰点集（纯函数；不读活动配置、不写 geometry）。
+ *
+ * 规则：
+ * - 对每个 tile（row-major）与每条规则（具体 region 配置序 → "*" 兜底）：
+ *   1. 规则 region 必须等于该格 `regionOf`（"*" 匹配任意区域）；
+ *   2. `onWalkable` 为真时该格 `walkableAtLevel(geometry, x, y, level)` 必须
+ *      为真（level = `levelAt`，只按地形判定，不考虑建造楼板/占用）；
+ *   3. `hash(mapKey, x, y, ruleIndex, 0) / 2^32 < density` 才落点。
+ * - 点位置 = tile 中心 + `[-jitter/2, +jitter/2] × tileSize` 的 hash 偏移；
+ *   `variant = hash(...salt=1) % variantCount`。
+ *
+ * 同配置/同几何（同 version）跨请求、跨进程逐点相等；density=1 时每条规则
+ * 在每个匹配格必落一点，density=0 恒不落。
+ *
+ * @param geometry 地图几何
+ * @param config 表现配置（可 undefined = 无装饰）
+ * @returns 冻结的点数组（只读；调用方不得修改）
+ */
+export function computeDecorPoints(
+  geometry: MapGeometry,
+  config: PresentationConfig | undefined,
+): readonly MapDecorPoint[] {
+  const mapRules = config?.decorMaps?.[geometry.key];
+  const rules = flattenDecorRules(mapRules);
+  if (rules.length === 0) return Object.freeze([]);
+
+  const { width, height, tileWidth, tileHeight } = geometry.grid;
+  const points: MapDecorPoint[] = [];
+  const mapKey = geometry.key;
+
+  for (let ty = 0; ty < height; ty += 1) {
+    for (let tx = 0; tx < width; tx += 1) {
+      const region = regionOf(geometry, tx, ty) ?? "";
+      const level = levelAt(geometry, tx, ty);
+      for (let ruleIndex = 0; ruleIndex < rules.length; ruleIndex += 1) {
+        const { region: ruleRegion, rule } = rules[ruleIndex]!;
+        if (ruleRegion !== "*" && ruleRegion !== region) continue;
+        if (rule.onWalkable && !walkableAtLevel(geometry, tx, ty, level)) continue;
+
+        const roll = hashDecor(mapKey, tx, ty, ruleIndex, 0);
+        if (roll * HASH_UNIT >= rule.density) continue;
+
+        const offsetX = hashSignedUnit(hashDecor(mapKey, tx, ty, ruleIndex, 2)) * rule.jitter;
+        const offsetY = hashSignedUnit(hashDecor(mapKey, tx, ty, ruleIndex, 3)) * rule.jitter;
+        points.push(
+          Object.freeze({
+            decorId: rule.decorId,
+            x: (tx + 0.5) * tileWidth + offsetX * tileWidth,
+            y: (ty + 0.5) * tileHeight + offsetY * tileHeight,
+            level,
+            region,
+            variant: hashDecor(mapKey, tx, ty, ruleIndex, 1) % rule.variantCount,
+          }),
+        );
+      }
+    }
+  }
+
+  return Object.freeze(points);
+}
+
+/** 单 geometry 的装饰视图缓存条目（版本或配置修订变化即失效）。 */
+interface DecorCacheEntry {
+  cacheKey: string;
+  view: MapDecorView;
+}
+
+/** geometry → 最近一次装饰视图（写回原地改 version 后 cacheKey 不匹配即重建）。 */
+const decorViewCache = new WeakMap<MapGeometry, DecorCacheEntry>();
+
+/**
+ * 构建某图的装饰视图（`GET /maps/decor` 数据源，使用当前活动表现配置）。
+ *
+ * 缓存键 = `{geometry.version, presentationRevision}`：同几何对象在
+ * 地形写回（version 重算）或配置重新加载（revision 递增）后自动重建；
+ * 点集只读、不写 world、不推进 tick。
+ *
+ * @param geometry 地图几何
+ * @returns 冻结视图；无装饰配置时 points 为空数组
+ */
+export function buildMapDecorView(geometry: MapGeometry): MapDecorView {
+  const cacheKey = `${geometry.version}|${getPresentationRevision()}`;
+  const cached = decorViewCache.get(geometry);
+  if (cached && cached.cacheKey === cacheKey) return cached.view;
+
+  const view: MapDecorView = Object.freeze({
+    key: geometry.key,
+    version: geometry.version,
+    points: computeDecorPoints(geometry, getPresentation()),
+  });
+  decorViewCache.set(geometry, { cacheKey, view });
+  return view;
 }
 
 // ---------------------------------------------------------------------------

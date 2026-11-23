@@ -65,6 +65,7 @@ describe("client manifest: 形状与版本", () => {
         "audio",
         "contentVersion",
         "damageTypes",
+        "decor",
         "entities",
         "factions",
         "items",
@@ -103,6 +104,14 @@ describe("client manifest: 形状与版本", () => {
     expect(manifest.audio.sfx).toContain("sfx_hit");
     expect(manifest.vfx.effects).toContain("vfx_hit");
     expect(manifest.statusEffects).toEqual([]);
+  });
+
+  it("decor：ids 为字典序稳定数组（无配置时为空数组）", () => {
+    expect(manifest.decor.ids).toEqual([...manifest.decor.ids].sort());
+    expect(manifest.decor.ids).toContain("bush");
+    expect(manifest.decor.ids).toContain("pebble");
+    // 点集不走 manifest：只出 id 清单
+    expect(manifest.decor).toEqual({ ids: manifest.decor.ids });
   });
 
   it("factions / stationTypes / damageTypes 复用 /content catalog 且非空", () => {
@@ -370,6 +379,20 @@ describe("client manifest: contentVersion", () => {
     expect(buildClientManifest(gameDef, { presentation: renamedEntity }).contentVersion).not.toBe(
       manifest.contentVersion,
     );
+  });
+
+  it("装饰输入（decor ids / decorMaps 规则）变化即变", () => {
+    const base = structuredClone(gameDef.resolvedPresentation!) as PresentationConfig;
+    expect(base.decor?.bush).toEqual({});
+    const version = buildClientManifest(gameDef, { presentation: base }).contentVersion;
+
+    const addedDecor = structuredClone(base);
+    addedDecor.decor = { ...(addedDecor.decor ?? {}), crystal: {} };
+    expect(buildClientManifest(gameDef, { presentation: addedDecor }).contentVersion).not.toBe(version);
+
+    const denser = structuredClone(base);
+    denser.decorMaps!["island"].regions["forest"]![0]!.density = 0.5;
+    expect(buildClientManifest(gameDef, { presentation: denser }).contentVersion).not.toBe(version);
   });
 
   it("netSync / tickRate / world / serverRules 变化即变", () => {

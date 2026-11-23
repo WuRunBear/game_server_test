@@ -1,0 +1,181 @@
+{
+  "decor": {
+    "bone": {},
+    "bush": {},
+    "flower": {},
+    "moss": {},
+    "mushroom": {},
+    "pebble": {},
+    "reed": {},
+    "shell": {}
+  },
+  "decorMaps": {
+    "island": {
+      "regions": {
+        "forest": [
+          {
+            "decorId": "bush",
+            "density": 0.02,
+            "variantCount": 3,
+            "onWalkable": true,
+            "jitter": 0.4
+          },
+          {
+            "decorId": "mushroom",
+            "density": 0.004,
+            "variantCount": 2,
+            "onWalkable": true
+          }
+        ],
+        "beach": [
+          {
+            "decorId": "shell",
+            "density": 0.012,
+            "variantCount": 2,
+            "onWalkable": true
+          }
+        ]
+      }
+    },
+    "cave": {
+      "regions": {
+        "plain": [
+          {
+            "decorId": "pebble",
+            "density": 0.03,
+            "variantCount": 2,
+            "onWalkable": true
+          },
+          {
+            "decorId": "mushroom",
+            "density": 0.008,
+            "variantCount": 2,
+            "onWalkable": true
+          }
+        ]
+      }
+    },
+    "tiled-demo": {
+      "regions": {
+        "*": [
+          {
+            "decorId": "pebble",
+            "density": 0.06,
+            "variantCount": 1,
+            "onWalkable": true
+          }
+        ]
+      }
+    },
+    "swamp": {
+      "regions": {
+        "marsh": [
+          {
+            "decorId": "reed",
+            "density": 0.025,
+            "variantCount": 3,
+            "onWalkable": true,
+            "jitter": 0.3
+          }
+        ],
+        "*": [
+          {
+            "decorId": "moss",
+            "density": 0.008,
+            "variantCount": 2,
+            "onWalkable": true
+          }
+        ]
+      }
+    },
+    "ruins": {
+      "regions": {
+        "vault#3": [
+          {
+            "decorId": "bone",
+            "density": 0.02,
+            "variantCount": 2,
+            "onWalkable": true
+          }
+        ],
+        "*": [
+          {
+            "decorId": "pebble",
+            "density": 0.012,
+            "variantCount": 2,
+            "onWalkable": true
+          }
+        ]
+      }
+    },
+    "highlands": {
+      "regions": {
+        "plateau": [
+          {
+            "decorId": "pebble",
+            "density": 0.015,
+            "variantCount": 2,
+            "onWalkable": true
+          }
+        ],
+        "*": [
+          {
+            "decorId": "flower",
+            "density": 0.006,
+            "variantCount": 2,
+            "onWalkable": true
+          }
+        ]
+      }
+    },
+    "island-v2": {
+      "regions": {
+        "forest": [
+          {
+            "decorId": "bush",
+            "density": 0.025,
+            "variantCount": 3,
+            "onWalkable": true,
+            "jitter": 0.4
+          }
+        ],
+        "grassland": [
+          {
+            "decorId": "flower",
+            "density": 0.01,
+            "variantCount": 2,
+            "onWalkable": true
+          }
+        ],
+        "*": [
+          {
+            "decorId": "pebble",
+            "density": 0.004,
+            "variantCount": 1,
+            "onWalkable": true
+          }
+        ]
+      }
+    },
+    "building-demo": {
+      "regions": {
+        "yard": [
+          {
+            "decorId": "flower",
+            "density": 0.02,
+            "variantCount": 2,
+            "onWalkable": true
+          }
+        ],
+        "*": [
+          {
+            "decorId": "pebble",
+            "density": 0.008,
+            "variantCount": 1,
+            "onWalkable": true
+          }
+        ]
+      }
+    }
+  }
+}

@@ -47,6 +47,8 @@ import { stampTemplateRegionNames } from "map/generate/blocks/stampTemplate";
 import {
   PresentationConfigSchema,
   type AudioPresentation,
+  type DecorEntry,
+  type DecorMapRules,
   type EntityPresentation,
   type MapPresentation,
   type PresentationAssetTable,
@@ -101,6 +103,12 @@ const DEFAULT_ENTITIES_PRESENTATION_PATH = "presentation/entities.json";
 const DEFAULT_AUDIO_PRESENTATION_PATH = "presentation/audio.json";
 /** VFX 表现配置的约定路径（只登记不透明 id 与事件映射，不含资源路径）。 */
 const DEFAULT_VFX_PRESENTATION_PATH = "presentation/vfx.json";
+/**
+ * 装饰配置的约定路径（CC-13）：根形状与表现配置一致（`decor` id 表 +
+ * `decorMaps` 规则表），由 loadPresentationFiles 按同一套合并/重复检查逻辑
+ * 并入 activePresentation。不存在时该段为空。
+ */
+const DEFAULT_DECOR_PRESENTATION_PATH = "presentation/decor.json";
 
 /** 合并音频/VFX id 表：跨文件重复 id 即配置错误（不做静默覆盖）。 */
 function mergeAssetTable(
@@ -146,8 +154,8 @@ function normalizePresentationDocument(file: string, raw: unknown): unknown {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
   const record = raw as Record<string, unknown>;
 
-  const hasConfigKey = ["audio", "vfx", "tileSemantics", "maps", "entities"].some((key) =>
-    Object.hasOwn(record, key),
+  const hasConfigKey = ["audio", "vfx", "tileSemantics", "maps", "entities", "decor", "decorMaps"].some(
+    (key) => Object.hasOwn(record, key),
   );
   if (hasConfigKey) return raw;
 
@@ -186,6 +194,8 @@ function loadPresentationFiles(baseDir: string, patterns: readonly string[]): Pr
   const tileSemantics: Record<string, TileSemanticSpec> = {};
   const maps: Record<string, MapPresentation> = {};
   const entities: Record<string, EntityPresentation> = {};
+  const decor: Record<string, DecorEntry> = {};
+  const decorMaps: Record<string, DecorMapRules> = {};
   let audio: AudioPresentation | undefined;
   let vfx: VfxPresentation | undefined;
   for (const file of sortedFiles) {
@@ -223,6 +233,18 @@ function loadPresentationFiles(baseDir: string, patterns: readonly string[]): Pr
       }
       entities[kind] = entry;
     }
+    for (const [id, entry] of Object.entries(document.decor ?? {})) {
+      if (Object.hasOwn(decor, id)) {
+        throw new Error(`presentation: duplicate decor id "${id}" in ${file}`);
+      }
+      decor[id] = entry;
+    }
+    for (const [key, entry] of Object.entries(document.decorMaps ?? {})) {
+      if (Object.hasOwn(decorMaps, key)) {
+        throw new Error(`presentation: duplicate decor map entry "${key}" in ${file}`);
+      }
+      decorMaps[key] = entry;
+    }
     if (document.audio) {
       audio ??= { music: {}, ambient: {}, sfx: {}, events: {} };
       mergeAssetTable(audio.music, document.audio.music, "audio music", file);
@@ -241,6 +263,8 @@ function loadPresentationFiles(baseDir: string, patterns: readonly string[]): Pr
     tileSemantics,
     maps,
     entities,
+    decor,
+    decorMaps,
     ...(audio ? { audio } : {}),
     ...(vfx ? { vfx } : {}),
   });
@@ -250,9 +274,9 @@ function loadPresentationFiles(baseDir: string, patterns: readonly string[]): Pr
  * 加载游戏的表现语义配置：
  * 1. game.json 显式 `presentation` 路径（单文件或 glob）→ 必须能匹配到文件；
  * 2. 未声明时，若 `<gameDir>/presentation/maps.json` 存在 → 按约定加载；
- * 3. `<gameDir>/presentation/entities.json` / `audio.json` / `vfx.json` 存在 →
- *    始终合并对应段（重复 key 报错；显式 glob 已包含时按绝对路径去重，不会
- *    重复解析）；
+ * 3. `<gameDir>/presentation/entities.json` / `audio.json` / `vfx.json` /
+ *    `decor.json` 存在 → 始终合并对应段（重复 key 报错；显式 glob 已包含时
+ *    按绝对路径去重，不会重复解析）；
  * 4. 都不存在 → 清空活动配置并返回 undefined（旧游戏/测试不受影响）。
  */
 function loadPresentationForGame(baseDir: string, configuredPath?: string): PresentationConfig | undefined {
@@ -266,6 +290,7 @@ function loadPresentationForGame(baseDir: string, configuredPath?: string): Pres
     DEFAULT_ENTITIES_PRESENTATION_PATH,
     DEFAULT_AUDIO_PRESENTATION_PATH,
     DEFAULT_VFX_PRESENTATION_PATH,
+    DEFAULT_DECOR_PRESENTATION_PATH,
   ]) {
     if (existsSync(resolve(baseDir, conventionPath))) patterns.push(conventionPath);
   }
@@ -633,6 +658,8 @@ function loadEcosystemsFile(baseDir: string, ecosystemsPath?: string): Ecosystem
 /**
  * 收集一张地图生成后将存在的全部区域名（实体演化规则 region 引用的合法集合）：
  * - climate-regions 步骤的 params.names（命名区域）；
+ * - whittaker-regions 步骤 table 中声明的全部区域名（温度/湿度查表产物；
+ *   加载期按超集收集，实际被 minArea 合并掉的区域不在此区分）；
  * - tiled-source 步骤 zones 层产出的区域名（与积木同源解析）；
  * - stamp-template 步骤模板 zones 层产出的区域名（与积木同源解析）；
  * - slot-rooms 步骤的房间区域（"<类型>#<房序>"）与 walls 结构区；
@@ -648,6 +675,16 @@ function collectMapRegionNames(config: MapConfig): Set<string> {
       if (Array.isArray(declared)) {
         for (const name of declared) {
           if (typeof name === "string") names.add(name);
+        }
+      }
+    } else if (step.generator === "whittaker-regions") {
+      const table = step.params?.table;
+      if (Array.isArray(table)) {
+        for (const row of table) {
+          if (!Array.isArray(row)) continue;
+          for (const name of row) {
+            if (typeof name === "string") names.add(name);
+          }
         }
       }
     } else if (step.generator === "tiled-source" && step.params?.tiled !== undefined) {
@@ -1070,7 +1107,18 @@ export function loadGameDefinition(options?: LoadGameDefinitionOptions): LoadedG
   // 表现语义完整性：每张 registry 图都有条目、所有被引用的 tile id 都有定义。
   // 显式提供 presentation 的游戏视为「已承诺表现契约」——不完整即配置错误；
   // 无 presentation 的旧游戏直接通过（validatePresentation 返回 ok）。
-  const presentationReport = validatePresentation(loaded);
+  // 装饰规则的 region 存在性用生成管道声明的区域名集合校验（超集近似，实际
+  // 几何在开机生成后由区域索引自洽）。
+  const mapRegionNames = new Map<string, ReadonlySet<string>>();
+  for (const config of resolvedMapConfigs) {
+    mapRegionNames.set(config.key, collectMapRegionNames(config));
+  }
+  const presentationReport = validatePresentation({
+    resolvedPresentation: loaded.resolvedPresentation,
+    resolvedMapConfigs: loaded.resolvedMapConfigs,
+    resolvedRules: loaded.resolvedRules,
+    resolvedMapRegionNames: mapRegionNames,
+  });
   if (!presentationReport.ok) {
     throw new Error(`Invalid presentation config: ${presentationReport.errors.join("; ")}`);
   }

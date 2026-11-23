@@ -15,19 +15,26 @@ import { loadGameDefinition } from "framework/bootstrap/loadGameDefinition";
 import type { MapConfig } from "framework/config/schema/MapRegistrySchema";
 import { serverConfig } from "config";
 import { buildMapGeometry } from "map/generate/pipeline";
-import { serializeGeometry, type SerializedMapGeometry } from "map/geometry/snapshot";
+import {
+  deserializeGeometry,
+  serializeGeometry,
+  type SerializedMapGeometry,
+} from "map/geometry/snapshot";
 import { describeGeometry, type GeometryMetaInfo } from "map/geometry/version";
 import type { MapGeometry } from "map/geometry/types";
 import {
   buildMapCollisionViewFromGeometry,
+  buildMapDecorView,
   buildMapRenderViewForGeometry,
   buildWorldMapGraph,
   type MapCollisionView,
+  type MapDecorView,
   type MapRenderView,
 } from "map/clientView";
 import type { TerrainModificationSet } from "map/runtime/terrainWriteback";
 import type { EnvironmentRule } from "framework/config/schema/RuleSchema";
 import { buildContentCatalog } from "framework/content/catalog";
+import { getPresentationRevision } from "framework/content/presentation";
 import { buildClientManifest } from "framework/content/manifest";
 import { GameRoom } from "network/colyseus/rooms/GameRoom";
 import type { Logger } from "utils/logger";
@@ -174,6 +181,8 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
   // 不影响仿真权威状态）。
   const gameDef = loadGameDefinition({ gameJsonPath: options.gameJsonPath });
   const geometryCache = new Map<string, MapGeometry>();
+  /** /maps/decor：live 几何版本不变时复用点集，避免每次请求反序列化全图。 */
+  const decorViewCache = new Map<string, { view: MapDecorView; revision: number }>();
   const mapIds = gameDef.resolvedMapConfigs.map((config) => config.key);
   const defaultMapId = gameDef.map?.default ?? mapIds[0] ?? "";
   const geometryOf = (config: MapConfig): MapGeometry => {
@@ -293,6 +302,29 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
     } catch {
       return undefined;
     }
+  };
+
+  /**
+   * 取某图装饰视图（/maps/decor 数据源）。
+   *
+   * 优先 live 几何（含运行期写回 → version 变化）；同一版本复用点集缓存，
+   * 避免每次请求反序列化整图。无房间时回退按配置重建的几何（与
+   * /maps/render、/maps/collision 同一回退口径）。
+   */
+  const decorViewOf = async (config: MapConfig): Promise<MapDecorView> => {
+    await waitForRoom();
+    const live = await liveGeometryOf(config.key);
+    if (live) {
+      const revision = getPresentationRevision();
+      const cached = decorViewCache.get(config.key);
+      if (cached && cached.view.version === live.version && cached.revision === revision) {
+        return cached.view;
+      }
+      const view = buildMapDecorView(deserializeGeometry(live));
+      decorViewCache.set(config.key, { view, revision });
+      return view;
+    }
+    return buildMapDecorView(geometryOf(config));
   };
 
   /** 取常驻房间内某图从已知版本到当前的增量（不可识别/房间未就绪 → undefined）。 */
@@ -646,6 +678,25 @@ export function startColyseusServer(options: StartColyseusServerOptions): Colyse
       // 世界地图图：registry 图集合 + presentation 的展示名/连接。
       app.get("/world/map-graph", (_req: any, res: any) => {
         res.status(200).json(buildWorldMapGraph(gameDef));
+      });
+
+      // 装饰点集（CC-13）：确定性、只读、非实体、不参与碰撞、不写几何。
+      // 默认全量（row-major 稳定序）；x-map-version 与 /maps/runtime 同源。
+      app.get("/maps/decor", async (req: any, res: any) => {
+        const rawMapId = req.query?.mapId;
+        const mapId = typeof rawMapId === "string" ? rawMapId : undefined;
+        const config = gameDef.resolvedMapConfigs.find(
+          (c) => c.key === (mapId !== undefined ? mapId : defaultMapId),
+        );
+        if (!config) {
+          res.status(404).json({ error: "unknown map", available: mapIds });
+          return;
+        }
+
+        const view = await decorViewOf(config);
+        res.setHeader("x-map-version", view.version);
+        res.setHeader("Cache-Control", "no-store");
+        res.status(200).json(view);
       });
 
       app.get("/maps/meta", async (_req: any, res: any) => {

@@ -16,13 +16,15 @@
  *   （字段可增不可减）。
  *
  * `contentVersion`：对**键序稳定**的规范 JSON 做 FNV-1a 32 位哈希，输出 8 位
- * 小写十六进制。覆盖表现配置（含 audio/vfx）+ 物品/配方/任务/成就/相位/技能 +
+ * 小写十六进制。覆盖表现配置（含 audio/vfx/decor）+ 物品/配方/任务/成就/相位/技能 +
  * 势力/站点/伤害类型 + netSync + tickRate/world tile + 地图/实体清单；同一配置
  * 跨进程稳定，任一段变化即变。
  */
 import type { NetSyncField, LoadedGameDefinition } from "framework/config/schema/GameDefinitionSchema";
 import type {
   AudioPresentation,
+  DecorEntryTable,
+  DecorMapRulesTable,
   EntityPresentation,
   MapConnectionSpec,
   MapMinimapSpec,
@@ -202,6 +204,17 @@ export interface ClientManifestVfx {
   events: Record<string, string[]>;
 }
 
+/**
+ * 装饰清单（CC-13；不透明 id，客户端自行绑定贴图/变体）。
+ *
+ * `ids` 按字典序稳定排序（内容哈希输入顺序无关）；每个 id 的落点由
+ * `GET /maps/decor` 的确定性点集给出，manifest 不携带逐图点集。
+ */
+export interface ClientManifestDecor {
+  /** 装饰 id 列表（无配置时为空数组）。 */
+  ids: string[];
+}
+
 /** `GET /client/manifest` 响应体。 */
 export interface ClientManifest {
   /** 线上协议版本（破坏性 schema 变更时递增）。 */
@@ -232,6 +245,8 @@ export interface ClientManifest {
   audio: ClientManifestAudio;
   /** VFX 清单（事件 type → 特效 id；无配置时为空结构）。 */
   vfx: ClientManifestVfx;
+  /** 装饰 id 清单（CC-13；无配置时 ids 为空数组）。 */
+  decor: ClientManifestDecor;
   /** 状态效果（未实现，空数组）。 */
   statusEffects: unknown[];
   /** 伤害类型（来自 `/content` 的 catalog.damageTypes）。 */
@@ -292,7 +307,7 @@ function fnv1a32Hex(text: string): string {
  * 时省略（规范 JSON 丢弃 undefined），旧游戏的版本指纹保持不变。
  */
 export interface ContentVersionInput {
-  /** 表现配置（maps / entities / tileSemantics / audio / vfx）。 */
+  /** 表现配置（maps / entities / tileSemantics / audio / vfx / decor）。 */
   presentation?: {
     tileSemantics?: TileSemanticsTable;
     maps?: Record<string, MapPresentation>;
@@ -301,6 +316,10 @@ export interface ContentVersionInput {
     audio?: AudioPresentation;
     /** VFX 表现（特效 id/事件映射变化即推进版本）。 */
     vfx?: VfxPresentation;
+    /** 装饰 id 表（新增/删除 id 即推进版本；未配置时省略）。 */
+    decor?: DecorEntryTable;
+    /** 每图装饰规则（density/variant/jitter/region 变化即推进版本）。 */
+    decorMaps?: DecorMapRulesTable;
   };
   /** 地图 key 清单（新增/删除地图即变）。 */
   mapIds?: readonly string[];
@@ -634,6 +653,8 @@ export function buildClientManifest(
   const serverRules = buildServerRules(gameDef.resolvedRules);
   const audio = buildAudioManifest(presentation?.audio);
   const vfx = buildVfxManifest(presentation?.vfx);
+  // 装饰 id 排序稳定（内容哈希输入顺序无关；点集不走 manifest）
+  const decor = { ids: sortedAssetIds(presentation?.decor) };
 
   const maps = gameDef.resolvedMapConfigs.map((config) =>
     toMapManifest(config.key, presentation?.maps[config.key], presentation),
@@ -658,9 +679,14 @@ export function buildClientManifest(
           tileSemantics: presentation.tileSemantics,
           maps: presentation.maps,
           entities: presentation.entities ?? {},
-          // 未配置的音频/VFX 段省略（规范 JSON 丢弃 undefined）——旧游戏指纹不变
+          // 未配置的音频/VFX/装饰段省略（规范 JSON 丢弃 undefined）——
+          // 旧游戏指纹不变；装饰规则（decorMaps）参与版本，density 等变化即变
           audio: presentation.audio,
           vfx: presentation.vfx,
+          ...(Object.keys(presentation.decor ?? {}).length > 0 ? { decor: presentation.decor } : {}),
+          ...(Object.keys(presentation.decorMaps ?? {}).length > 0
+            ? { decorMaps: presentation.decorMaps }
+            : {}),
         }
       : {},
     mapIds: gameDef.resolvedMapConfigs.map((config) => config.key),
@@ -710,6 +736,7 @@ export function buildClientManifest(
     animations: {},
     audio,
     vfx,
+    decor,
     statusEffects: [],
     damageTypes: contentCatalog.damageTypes,
     factions: contentCatalog.factions,
